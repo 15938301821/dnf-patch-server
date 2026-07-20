@@ -4,15 +4,7 @@ import type {
   GuardrailEvaluation,
   GuardrailInput,
 } from "./guardrail.contracts.js";
-
-const forbiddenPayloadKeys = new Set([
-  "command",
-  "executable",
-  "gameDirectory",
-  "gameProcess",
-  "scriptPath",
-  "shell",
-]);
+import { containsUnsafeDeclarativeField } from "./guardrail.contracts.js";
 
 @Injectable()
 export class GuardrailService {
@@ -22,7 +14,7 @@ export class GuardrailService {
    */
   evaluate(input: GuardrailInput): GuardrailEvaluation {
     const inputSha256 = sha256Json(input);
-    const reasonCode = findForbiddenKey(input.payload)
+    const reasonCode = containsUnsafeDeclarativeField(input.payload)
       ? "ARBITRARY_EXECUTION_FIELD"
       : "REGISTERED_JOB_KIND";
     const decision = reasonCode === "REGISTERED_JOB_KIND" ? "allow" : "deny";
@@ -34,16 +26,4 @@ export class GuardrailService {
       reasonCode,
     };
   }
-}
-
-function findForbiddenKey(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some(findForbiddenKey);
-  }
-  if (value === null || typeof value !== "object") {
-    return false;
-  }
-  return Object.entries(value as Record<string, unknown>).some(
-    ([key, child]) => forbiddenPayloadKeys.has(key) || findForbiddenKey(child),
-  );
 }

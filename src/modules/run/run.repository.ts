@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { and, asc, eq, gt } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { immutableSafetyStateSchema } from "../../common/contracts/index.js";
 import { DatabaseService } from "../../common/db/database.service.js";
 import {
   guardrailDecisions,
@@ -25,6 +26,11 @@ export interface CreateRunTransactionResult {
   event: RunEventView;
 }
 
+export interface RunIdempotencyRecord {
+  run: RunView;
+  requestFingerprintSha256?: string;
+}
+
 @Injectable()
 export class RunRepository {
   constructor(private readonly connection: DatabaseService) {}
@@ -41,7 +47,7 @@ export class RunRepository {
   async findByIdempotency(
     projectId: string,
     idempotencyKey: string,
-  ): Promise<RunView | undefined> {
+  ): Promise<RunIdempotencyRecord | undefined> {
     const [row] = await this.connection.database
       .select()
       .from(runs)
@@ -52,12 +58,34 @@ export class RunRepository {
         ),
       )
       .limit(1);
+    return row
+      ? {
+          run: toRunView(row),
+          ...(row.requestFingerprintSha256
+            ? { requestFingerprintSha256: row.requestFingerprintSha256 }
+            : {}),
+        }
+      : undefined;
+  }
+
+  async findByClientRunId(
+    projectId: string,
+    clientRunId: string,
+  ): Promise<RunView | undefined> {
+    const [row] = await this.connection.database
+      .select()
+      .from(runs)
+      .where(
+        and(eq(runs.projectId, projectId), eq(runs.clientRunId, clientRunId)),
+      )
+      .limit(1);
     return row ? toRunView(row) : undefined;
   }
 
   async create(
     input: CreateRunInput,
     idempotencyKey: string,
+    requestFingerprintSha256: string,
     id: string,
     decisions: GuardrailEvaluation[],
   ): Promise<CreateRunTransactionResult> {
@@ -74,6 +102,7 @@ export class RunRepository {
         status: blocked ? "blocked" : "queued",
         currentStage: blocked ? "guardrail" : "queued",
         requestSha256: input.requestSha256.toUpperCase(),
+        requestFingerprintSha256,
         serverConnectionEnabled: true,
         modelEgressAuthorized: input.modelEgressAuthorized,
         deploymentAuthorized: false,
@@ -82,6 +111,7 @@ export class RunRepository {
         clientCompatibilityProven: false,
         createdAt: now,
         updatedAt: now,
+        ...(blocked ? { finishedAt: now } : {}),
       });
       await transaction.insert(guardrailDecisions).values(
         decisions.map((decision) => ({
@@ -167,6 +197,7 @@ export class RunRepository {
           clientCompatibilityProven: false,
           createdAtUtc: now.toISOString(),
           updatedAtUtc: now.toISOString(),
+          ...(blocked ? { finishedAtUtc: now.toISOString() } : {}),
         },
         jobs: jobViews,
         event,
@@ -201,6 +232,12 @@ export class RunRepository {
 }
 
 function toRunView(row: typeof runs.$inferSelect): RunView {
+  const safetyState = immutableSafetyStateSchema.parse({
+    deploymentAuthorized: row.deploymentAuthorized,
+    deploymentPerformed: row.deploymentPerformed,
+    fullSkillCoverageProven: row.fullSkillCoverageProven,
+    clientCompatibilityProven: row.clientCompatibilityProven,
+  });
   return {
     id: row.id,
     projectId: row.projectId,
@@ -212,10 +249,10 @@ function toRunView(row: typeof runs.$inferSelect): RunView {
     requestSha256: row.requestSha256,
     serverConnectionEnabled: true,
     modelEgressAuthorized: row.modelEgressAuthorized,
-    deploymentAuthorized: false,
-    deploymentPerformed: false,
-    fullSkillCoverageProven: false,
-    clientCompatibilityProven: false,
+    deploymentAuthorized: safetyState.deploymentAuthorized,
+    deploymentPerformed: safetyState.deploymentPerformed,
+    fullSkillCoverageProven: safetyState.fullSkillCoverageProven,
+    clientCompatibilityProven: safetyState.clientCompatibilityProven,
     createdAtUtc: row.createdAt.toISOString(),
     updatedAtUtc: row.updatedAt.toISOString(),
     ...(row.finishedAt ? { finishedAtUtc: row.finishedAt.toISOString() } : {}),

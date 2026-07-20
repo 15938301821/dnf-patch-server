@@ -1,13 +1,12 @@
 import { Module } from "@nestjs/common";
-import { RunModule } from "../run/run.module.js";
 import { JobController } from "./job.controller.js";
+import { JobReaperService } from "./job-reaper.service.js";
 import { JobRepository } from "./job.repository.js";
 import { JobService } from "./job.service.js";
 
 @Module({
-  imports: [RunModule],
   controllers: [JobController],
-  providers: [JobRepository, JobService],
+  providers: [JobRepository, JobService, JobReaperService],
   exports: [JobService],
 })
 export class JobModule {}

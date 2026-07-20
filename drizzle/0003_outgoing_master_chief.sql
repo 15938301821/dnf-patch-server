@@ -1,0 +1,1 @@
+ALTER TABLE `project_snapshots` ADD CONSTRAINT `project_snapshots_safety_state_ck` CHECK (`project_snapshots`.`full_skill_coverage_proven` = false);

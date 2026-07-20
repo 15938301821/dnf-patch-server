@@ -1,40 +1,35 @@
 import { describe, expect, it } from "vitest";
+import type { GuardrailInput } from "./guardrail.contracts.js";
+import { GuardrailService } from "./guardrail.service.js";
 
-const forbiddenPayloadKeys = new Set([
-  "command",
-  "executable",
-  "gameDirectory",
-  "gameProcess",
-  "scriptPath",
-  "shell",
-]);
+const service = new GuardrailService();
 
-function containsForbiddenKey(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some(containsForbiddenKey);
-  }
-  if (value === null || typeof value !== "object") {
-    return false;
-  }
-  return Object.entries(value as Record<string, unknown>).some(
-    ([key, child]) =>
-      forbiddenPayloadKeys.has(key) || containsForbiddenKey(child),
-  );
+function evaluate(payload: GuardrailInput["payload"]): string {
+  return service.evaluate({
+    policyId: "policy-v2",
+    policySha256: "a".repeat(64),
+    jobKind: "shared-fx",
+    payload,
+    deploymentAuthorized: false,
+  }).decision;
 }
 
 describe("guardrail payload policy", () => {
   it("allows declarative relative metadata", () => {
     expect(
-      containsForbiddenKey({
+      evaluate({
         profileId: "fixed-profile",
         inputs: ["manifest"],
       }),
-    ).toBe(false);
+    ).toBe("allow");
   });
 
-  it("rejects nested arbitrary execution fields", () => {
-    expect(
-      containsForbiddenKey({ adapter: { executable: "unexpected.exe" } }),
-    ).toBe(true);
+  it.each([
+    { adapter: { executable: "unexpected.exe" } },
+    { adapter: { script_path: "C:\\temp\\run.ps1" } },
+    { adapter: { "game-directory": "\\\\server\\share" } },
+    { metadata: "file:///etc/passwd" },
+  ])("rejects unsafe declarative payload %j", (payload) => {
+    expect(evaluate(payload)).toBe("deny");
   });
 });

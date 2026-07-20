@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { clientIdSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import {
   createFactorySchema,
@@ -17,7 +18,9 @@ export class FactoryController {
   }
 
   @Get(":id")
-  get(@Param("id") id: string): Promise<FactoryView> {
+  get(
+    @Param("id", new ZodValidationPipe(clientIdSchema)) id: string,
+  ): Promise<FactoryView> {
     return this.factories.get(id);
   }
 

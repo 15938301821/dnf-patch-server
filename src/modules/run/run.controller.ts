@@ -8,9 +8,11 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import {
   createRunSchema,
+  idempotencyKeySchema,
   runEventQuerySchema,
   type CreateRunInput,
   type RunEventQuery,
@@ -25,26 +27,29 @@ export class RunController {
 
   @Post()
   create(
-    @Headers("idempotency-key") idempotencyKey: string | undefined,
+    @Headers("idempotency-key") idempotencyKey: unknown,
     @Body(new ZodValidationPipe(createRunSchema)) input: CreateRunInput,
   ): Promise<RunView> {
-    if (!idempotencyKey || idempotencyKey.length > 128) {
+    const parsed = idempotencyKeySchema.safeParse(idempotencyKey);
+    if (!parsed.success) {
       throw new BadRequestException({
-        code: "IDEMPOTENCY_KEY_REQUIRED",
-        message: "Idempotency-Key 请求头必填且不能超过 128 个字符。",
+        code: "IDEMPOTENCY_KEY_INVALID",
+        message: "Idempotency-Key 请求头缺失或格式无效。",
       });
     }
-    return this.runs.create(input, idempotencyKey);
+    return this.runs.create(input, parsed.data);
   }
 
   @Get(":id")
-  get(@Param("id") id: string): Promise<RunView> {
+  get(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+  ): Promise<RunView> {
     return this.runs.get(id);
   }
 
   @Get(":id/events")
   events(
-    @Param("id") id: string,
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
     @Query(new ZodValidationPipe(runEventQuerySchema)) query: RunEventQuery,
   ): Promise<RunEventView[]> {
     return this.runs.events(id, query);

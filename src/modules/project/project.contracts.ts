@@ -6,21 +6,25 @@ import {
   sha256Schema,
 } from "../../common/contracts/index.js";
 
-export const createProjectSchema = z.object({
-  factoryId: clientIdSchema,
-  clientProjectId: clientIdSchema.optional(),
-  displayName: safeDisplayNameSchema,
-});
+export const createProjectSchema = z
+  .object({
+    factoryId: clientIdSchema,
+    clientProjectId: clientIdSchema.optional(),
+    displayName: safeDisplayNameSchema,
+  })
+  .strict();
 
-export const projectSnapshotSchema = z.object({
-  clientSnapshotId: clientIdSchema,
-  rootRulesSha256: sha256Schema,
-  manifestSha256: sha256Schema.optional(),
-  promptTreeSha256: sha256Schema,
-  toolCatalogSha256: sha256Schema,
-  repositoryRevision: z.string().max(80).optional(),
-  fullSkillCoverageProven: z.literal(false).default(false),
-});
+export const projectSnapshotSchema = z
+  .object({
+    clientSnapshotId: clientIdSchema,
+    rootRulesSha256: sha256Schema,
+    manifestSha256: sha256Schema.optional(),
+    promptTreeSha256: sha256Schema,
+    toolCatalogSha256: sha256Schema,
+    repositoryRevision: z.string().max(80).optional(),
+    fullSkillCoverageProven: z.literal(false).default(false),
+  })
+  .strict();
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type CreateProjectSnapshotInput = z.infer<typeof projectSnapshotSchema>;

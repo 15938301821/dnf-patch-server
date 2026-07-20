@@ -15,6 +15,10 @@ describe("environment configuration", () => {
       HOST: "127.0.0.1",
       PORT: 56_789,
       OPENAI_BASE_URL: "https://api.openai.com/v1",
+      OUTBOX_DISPATCH_INTERVAL_MS: 1_000,
+      OUTBOX_DISPATCH_BATCH_SIZE: 25,
+      WORKER_REAPER_INTERVAL_MS: 5_000,
+      WORKER_REAPER_BATCH_SIZE: 25,
     });
   });
 
@@ -29,6 +33,17 @@ describe("environment configuration", () => {
       validateEnvironment({
         ...validEnvironment(),
         WORKER_SHARED_TOKEN: "short",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects shared client and worker credentials", () => {
+    const token = "shared-token".repeat(3);
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment(),
+        CLIENT_SHARED_TOKEN: token,
+        WORKER_SHARED_TOKEN: token,
       }),
     ).toThrow();
   });

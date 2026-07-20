@@ -1,6 +1,12 @@
 import type { z } from "zod";
 
 export type ModelRole = "orchestrator" | "engineer" | "artist";
+export type ModelCallStatus =
+  | "running"
+  | "passed"
+  | "failed"
+  | "blocked"
+  | "abandoned";
 
 export interface StructuredModelRequest<T> {
   runId: string;
@@ -26,8 +32,9 @@ export interface ModelCallView {
   requestSha256: string;
   responseSha256?: string;
   responseId?: string;
-  status: "passed" | "failed" | "blocked";
+  status: ModelCallStatus;
   modelEgressAuthorized: boolean;
+  modelEgressPerformed: boolean;
   errorCode?: string;
   createdAtUtc: string;
   finishedAtUtc?: string;

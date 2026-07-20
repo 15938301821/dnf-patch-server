@@ -1,31 +1,44 @@
 import { Injectable } from "@nestjs/common";
-import { and, asc, eq, gt, inArray, isNull, lt, max, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, max, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../../common/db/database.service.js";
 import {
   jobAttempts,
   jobs,
   outboxEvents,
+  projects,
   runEvents,
   runs,
   workers,
+  factories,
 } from "../../common/db/schema.js";
 import { allowedJobKindSchema } from "../guardrail/guardrail.contracts.js";
 import type { RunEventView } from "../run/run.contracts.js";
 import type {
   ClaimJobInput,
   CompleteJobInput,
+  HeartbeatJobInput,
   JobView,
 } from "./job.contracts.js";
+import {
+  type LeaseMutationStatus,
+  validateLeaseMutation,
+} from "./job-lease.js";
+import { toJobView } from "./job.mapper.js";
 import { aggregateRunStatus } from "./run-status.js";
+import { validatePersistedJobIntegrity } from "./job-integrity.js";
 
 interface ClaimJobResult {
   job: JobView;
-  runEvent?: RunEventView;
+  runEvents: RunEventView[];
+}
+interface ClaimIntegrityFailure {
+  integrityFailure: true;
+  runEvents: RunEventView[];
 }
 
 interface CompleteJobResult {
-  accepted: boolean;
+  status: LeaseMutationStatus;
   runEvent?: RunEventView;
 }
 
@@ -36,9 +49,7 @@ export class JobRepository {
   async claim(
     input: ClaimJobInput,
     leaseSeconds: number,
-  ): Promise<ClaimJobResult | undefined> {
-    const now = new Date();
-    const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1_000);
+  ): Promise<ClaimJobResult | ClaimIntegrityFailure | undefined> {
     return this.connection.database.transaction(async (transaction) => {
       const [worker] = await transaction
         .select()
@@ -63,7 +74,10 @@ export class JobRepository {
               eq(jobs.status, "queued"),
               and(
                 eq(jobs.status, "leased"),
-                or(isNull(jobs.leaseExpiresAt), lt(jobs.leaseExpiresAt, now)),
+                or(
+                  isNull(jobs.leaseExpiresAt),
+                  lt(jobs.leaseExpiresAt, sql`CURRENT_TIMESTAMP(3)`),
+                ),
               ),
             ),
           ),
@@ -74,12 +88,86 @@ export class JobRepository {
       if (!candidate) {
         return undefined;
       }
+      const [run] = await transaction
+        .select()
+        .from(runs)
+        .where(eq(runs.id, candidate.runId))
+        .limit(1)
+        .for("update");
+      const [project] = run
+        ? await transaction
+            .select()
+            .from(projects)
+            .where(eq(projects.id, run.projectId))
+            .limit(1)
+        : [];
+      const [factory] = project
+        ? await transaction
+            .select()
+            .from(factories)
+            .where(eq(factories.id, project.factoryId))
+            .limit(1)
+        : [];
+      if (
+        !run ||
+        !project ||
+        !factory ||
+        !validatePersistedJobIntegrity({
+          kind: candidate.kind,
+          payload: candidate.payload,
+          payloadSha256: candidate.payloadSha256,
+          factoryConfig: factory.config,
+          factoryConfigSha256: factory.configSha256,
+        })
+      ) {
+        const now = await databaseNow(transaction);
+        if (candidate.status === "leased") {
+          await closeIntegrityFailedAttempt(transaction, candidate, now);
+        }
+        await transaction
+          .update(jobs)
+          .set({
+            status: "blocked",
+            leaseOwnerId: null,
+            leaseId: null,
+            leaseExpiresAt: null,
+            updatedAt: now,
+          })
+          .where(eq(jobs.id, candidate.id));
+        const runEvents: RunEventView[] = [];
+        if (run) {
+          runEvents.push(
+            await appendRunEvent(
+              transaction,
+              candidate.runId,
+              "warning",
+              "integrity",
+              "Job 持久化数据完整性校验失败，已隔离并阻断下发。",
+              now,
+            ),
+          );
+          const terminalEvent = await finalizeRunIfComplete(
+            transaction,
+            candidate.runId,
+            now,
+          );
+          if (terminalEvent) runEvents.push(terminalEvent);
+        }
+        return { integrityFailure: true, runEvents };
+      }
+      const now = await databaseNow(transaction);
+      const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1_000);
+      if (candidate.status === "leased") {
+        await closeExpiredAttempt(transaction, candidate, now);
+      }
       const attempt = candidate.attemptCount + 1;
+      const leaseId = randomUUID();
       await transaction
         .update(jobs)
         .set({
           status: "leased",
           leaseOwnerId: input.workerId,
+          leaseId,
           leaseExpiresAt,
           attemptCount: attempt,
           updatedAt: now,
@@ -89,6 +177,7 @@ export class JobRepository {
         id: randomUUID(),
         jobId: candidate.id,
         workerId: input.workerId,
+        leaseId,
         attempt,
         status: "running",
         startedAt: now,
@@ -103,58 +192,60 @@ export class JobRepository {
           ...candidate,
           status: "leased",
           leaseOwnerId: input.workerId,
+          leaseId,
           leaseExpiresAt,
           attemptCount: attempt,
           updatedAt: now,
         }),
-        ...(runEvent ? { runEvent } : {}),
+        runEvents: runEvent ? [runEvent] : [],
       };
     });
   }
 
   async heartbeat(
     jobId: string,
-    workerId: string,
+    input: HeartbeatJobInput,
     leaseSeconds: number,
-  ): Promise<boolean> {
-    const now = new Date();
-    const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1_000);
-    const result = await this.connection.database
-      .update(jobs)
-      .set({ leaseExpiresAt, updatedAt: now })
-      .where(
-        and(
-          eq(jobs.id, jobId),
-          eq(jobs.status, "leased"),
-          eq(jobs.leaseOwnerId, workerId),
-          gt(jobs.leaseExpiresAt, now),
-        ),
-      );
-    return result[0].affectedRows === 1;
+  ): Promise<LeaseMutationStatus> {
+    return this.connection.database.transaction(async (transaction) => {
+      const [job] = await transaction
+        .select()
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1)
+        .for("update");
+      if (!job) return "lease-mismatch";
+      const now = await databaseNow(transaction);
+      const status = validateLeaseMutation(job, input, now);
+      if (status !== "accepted") return status;
+      const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1_000);
+      await transaction
+        .update(jobs)
+        .set({ leaseExpiresAt, updatedAt: now })
+        .where(eq(jobs.id, jobId));
+      await transaction
+        .update(workers)
+        .set({ lastHeartbeatAt: now })
+        .where(eq(workers.id, input.workerId));
+      return "accepted";
+    });
   }
 
   async complete(
     jobId: string,
     input: CompleteJobInput,
   ): Promise<CompleteJobResult> {
-    const now = new Date();
     return this.connection.database.transaction(async (transaction) => {
       const [job] = await transaction
         .select()
         .from(jobs)
-        .where(
-          and(
-            eq(jobs.id, jobId),
-            eq(jobs.status, "leased"),
-            eq(jobs.leaseOwnerId, input.workerId),
-            gt(jobs.leaseExpiresAt, now),
-          ),
-        )
+        .where(eq(jobs.id, jobId))
         .limit(1)
         .for("update");
-      if (!job) {
-        return { accepted: false };
-      }
+      if (!job) return { status: "lease-mismatch" };
+      const now = await databaseNow(transaction);
+      const leaseStatus = validateLeaseMutation(job, input, now);
+      if (leaseStatus !== "accepted") return { status: leaseStatus };
       await transaction
         .select({ id: runs.id })
         .from(runs)
@@ -166,6 +257,7 @@ export class JobRepository {
         .set({
           status: input.status,
           leaseOwnerId: null,
+          leaseId: null,
           leaseExpiresAt: null,
           updatedAt: now,
         })
@@ -187,17 +279,59 @@ export class JobRepository {
             eq(jobAttempts.attempt, job.attemptCount),
           ),
         );
-      const runEvent = await finalizeRunIfComplete(
-        transaction,
-        job.runId,
-        jobId,
-        input.status,
-        now,
-      );
+      const runEvent = await finalizeRunIfComplete(transaction, job.runId, now);
       return {
-        accepted: true,
+        status: "accepted",
         ...(runEvent ? { runEvent } : {}),
       };
+    });
+  }
+
+  /** 回收过期租约；未耗尽任务重新排队，耗尽任务失败并尝试终结 Run。 */
+  async reapExpired(batchSize: number): Promise<RunEventView[]> {
+    return this.connection.database.transaction(async (transaction) => {
+      const expired = await transaction
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.status, "leased"),
+            or(
+              isNull(jobs.leaseExpiresAt),
+              lt(jobs.leaseExpiresAt, sql`CURRENT_TIMESTAMP(3)`),
+            ),
+          ),
+        )
+        .orderBy(asc(jobs.leaseExpiresAt), asc(jobs.createdAt))
+        .limit(batchSize)
+        .for("update", { skipLocked: true });
+      if (expired.length === 0) return [];
+      const now = await databaseNow(transaction);
+      const events: RunEventView[] = [];
+      for (const job of expired) {
+        await closeExpiredAttempt(transaction, job, now);
+        const exhausted = job.attemptCount >= job.maxAttempts;
+        await transaction
+          .update(jobs)
+          .set({
+            status: exhausted ? "failed" : "queued",
+            leaseOwnerId: null,
+            leaseId: null,
+            leaseExpiresAt: null,
+            updatedAt: now,
+          })
+          .where(eq(jobs.id, job.id));
+        if (!exhausted) continue;
+        await transaction
+          .select({ id: runs.id })
+          .from(runs)
+          .where(eq(runs.id, job.runId))
+          .limit(1)
+          .for("update");
+        const event = await finalizeRunIfComplete(transaction, job.runId, now);
+        if (event) events.push(event);
+      }
+      return events;
     });
   }
 }
@@ -225,21 +359,15 @@ async function markRunRunning(
 async function finalizeRunIfComplete(
   transaction: Transaction,
   runId: string,
-  completedJobId: string,
-  completedStatus: string,
   now: Date,
 ): Promise<RunEventView | undefined> {
   const rows = await transaction
     .select({ id: jobs.id, status: jobs.status })
     .from(jobs)
     .where(eq(jobs.runId, runId));
-  const status = aggregateRunStatus(
-    rows.map((row) =>
-      row.id === completedJobId ? completedStatus : row.status,
-    ),
-  );
+  const status = aggregateRunStatus(rows.map((row) => row.status));
   if (!status) return undefined;
-  await transaction
+  const updateResult = await transaction
     .update(runs)
     .set({
       status,
@@ -247,7 +375,10 @@ async function finalizeRunIfComplete(
       updatedAt: now,
       finishedAt: now,
     })
-    .where(eq(runs.id, runId));
+    .where(
+      and(eq(runs.id, runId), inArray(runs.status, ["queued", "running"])),
+    );
+  if (updateResult[0].affectedRows !== 1) return undefined;
   const level =
     status === "failed" ? "error" : status === "blocked" ? "warning" : "info";
   return appendRunEvent(
@@ -307,21 +438,55 @@ type Transaction = Parameters<
   Parameters<DatabaseService["database"]["transaction"]>[0]
 >[0];
 
-function toJobView(row: typeof jobs.$inferSelect): JobView {
-  return {
-    id: row.id,
-    runId: row.runId,
-    kind: row.kind as JobView["kind"],
-    status: row.status,
-    payload: row.payload,
-    payloadSha256: row.payloadSha256,
-    ...(row.leaseOwnerId ? { leaseOwnerId: row.leaseOwnerId } : {}),
-    ...(row.leaseExpiresAt
-      ? { leaseExpiresAtUtc: row.leaseExpiresAt.toISOString() }
-      : {}),
-    attemptCount: row.attemptCount,
-    maxAttempts: row.maxAttempts,
-    createdAtUtc: row.createdAt.toISOString(),
-    updatedAtUtc: row.updatedAt.toISOString(),
-  };
+async function databaseNow(transaction: Transaction): Promise<Date> {
+  const [row] = await transaction
+    .select({ value: sql<Date>`CURRENT_TIMESTAMP(3)` })
+    .from(jobs)
+    .limit(1);
+  if (!row) throw new Error("DATABASE_TIME_UNAVAILABLE");
+  return row.value instanceof Date ? row.value : new Date(row.value);
+}
+
+async function closeExpiredAttempt(
+  transaction: Transaction,
+  job: typeof jobs.$inferSelect,
+  now: Date,
+): Promise<void> {
+  if (job.attemptCount === 0) return;
+  await transaction
+    .update(jobAttempts)
+    .set({
+      status: "timed_out",
+      errorCode: "LEASE_EXPIRED",
+      finishedAt: now,
+    })
+    .where(
+      and(
+        eq(jobAttempts.jobId, job.id),
+        eq(jobAttempts.attempt, job.attemptCount),
+        eq(jobAttempts.status, "running"),
+      ),
+    );
+}
+
+async function closeIntegrityFailedAttempt(
+  transaction: Transaction,
+  job: typeof jobs.$inferSelect,
+  now: Date,
+): Promise<void> {
+  if (job.attemptCount === 0) return;
+  await transaction
+    .update(jobAttempts)
+    .set({
+      status: "blocked",
+      errorCode: "JOB_INTEGRITY_FAILED",
+      finishedAt: now,
+    })
+    .where(
+      and(
+        eq(jobAttempts.jobId, job.id),
+        eq(jobAttempts.attempt, job.attemptCount),
+        eq(jobAttempts.status, "running"),
+      ),
+    );
 }

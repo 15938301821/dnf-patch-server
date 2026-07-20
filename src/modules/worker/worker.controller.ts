@@ -6,6 +6,7 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
+import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import { WorkerTokenGuard } from "../../common/security/worker-token.guard.js";
 import {
@@ -29,7 +30,9 @@ export class WorkerController {
   }
 
   @Post(":id/heartbeat")
-  async heartbeat(@Param("id") id: string): Promise<{ status: "available" }> {
+  async heartbeat(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+  ): Promise<{ status: "available" }> {
     if (!(await this.workers.heartbeat(id))) {
       throw new ConflictException({
         code: "WORKER_NOT_AVAILABLE",
@@ -40,7 +43,9 @@ export class WorkerController {
   }
 
   @Post(":id/disable")
-  async disable(@Param("id") id: string): Promise<{ status: "disabled" }> {
+  async disable(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+  ): Promise<{ status: "disabled" }> {
     await this.workers.disable(id);
     return { status: "disabled" };
   }

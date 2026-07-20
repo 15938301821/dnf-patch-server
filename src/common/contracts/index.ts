@@ -1,4 +1,5 @@
 export {
+  boundedJsonRecordSchema,
   clientIdSchema,
   idSchema,
   repositoryRelativePathSchema,

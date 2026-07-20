@@ -13,6 +13,7 @@ import { secureEqual } from "../../common/security/client-token.guard.js";
 import type { Environment } from "../../config/environment.js";
 import {
   runSubscriptionSchema,
+  type RunEventView,
   type RunSubscription,
 } from "./run.contracts.js";
 import { RunService } from "./run.service.js";
@@ -57,7 +58,7 @@ export class RunGateway implements OnGatewayInit {
     return { status: "subscribed", runId: run.id };
   }
 
-  publishRunEvent(runId: string, event: unknown): void {
+  publishRunEvent(runId: string, event: RunEventView): void {
     this.server.to(`run:${runId}`).emit("run:event", event);
   }
 }

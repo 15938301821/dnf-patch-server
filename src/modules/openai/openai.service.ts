@@ -1,13 +1,14 @@
-import { Injectable } from "@nestjs/common";
+/**
+ * @fileoverview 编排固定角色模型调用、授权判断、哈希与审计状态，不暴露任意模型或工具入口。
+ * @module openai
+ * @author AI生成
+ * @created 2026-07-20
+ * @relatedPlan /memories/session/plan.md Phase 2 model evidence
+ */
+import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { randomUUID } from "node:crypto";
-import OpenAI from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
-import { DatabaseService } from "../../common/db/database.service.js";
-import { modelCalls } from "../../common/db/schema.js";
+import { createHash, randomUUID } from "node:crypto";
 import { sha256Json } from "../../common/utils/canonical.js";
-import type { Environment } from "../../config/environment.js";
-import { resolveOpenAiEndpoint } from "../../config/openai-endpoint.js";
 import { RunService } from "../run/run.service.js";
 import type {
   ImageModelRequest,
@@ -17,36 +18,37 @@ import type {
   StructuredModelRequest,
   StructuredModelResult,
 } from "./openai.contracts.js";
+import { OpenAiProvider, type OpenAiProviderPort } from "./openai.provider.js";
+import {
+  OpenAiRepository,
+  type ModelCallCompletion,
+  type OpenAiRepositoryPort,
+} from "./openai.repository.js";
+
+interface ModelConfigPort {
+  getOrThrow(
+    key:
+      | "OPENAI_ORCHESTRATOR_MODEL"
+      | "OPENAI_ENGINEER_MODEL"
+      | "OPENAI_IMAGE_MODEL",
+    options: { infer: true },
+  ): string;
+}
+
+interface RunLookupPort {
+  get(id: string): ReturnType<RunService["get"]>;
+}
 
 @Injectable()
 export class OpenAiService {
-  private readonly endpoint: ReturnType<typeof resolveOpenAiEndpoint>;
-  private readonly client: OpenAI | undefined;
-
   constructor(
-    private readonly config: ConfigService<Environment, true>,
-    private readonly connection: DatabaseService,
-    private readonly runs: RunService,
-  ) {
-    this.endpoint = resolveOpenAiEndpoint(
-      config.getOrThrow("OPENAI_BASE_URL", { infer: true }),
-    );
-    const apiKey = config.get("OPENAI_API_KEY", { infer: true });
-    this.client = apiKey
-      ? new OpenAI({
-          apiKey,
-          baseURL: this.endpoint.baseUrl,
-          timeout: config.getOrThrow("OPENAI_REQUEST_TIMEOUT_MS", {
-            infer: true,
-          }),
-          maxRetries: config.getOrThrow("OPENAI_REQUEST_MAX_RETRIES", {
-            infer: true,
-          }),
-        })
-      : undefined;
-  }
+    @Inject(ConfigService) private readonly config: ModelConfigPort,
+    @Inject(OpenAiRepository) private readonly calls: OpenAiRepositoryPort,
+    @Inject(RunService) private readonly runs: RunLookupPort,
+    @Inject(OpenAiProvider) private readonly provider: OpenAiProviderPort,
+  ) {}
 
-  /** 结构化调用是服务内能力，调用方不能选择模型、工具或存储策略。 */
+  /** 结构化调用只使用服务端固定模型、空工具列表和禁用存储的 provider adapter。 */
   async structured<T>(
     request: StructuredModelRequest<T>,
   ): Promise<StructuredModelResult<T>> {
@@ -59,7 +61,7 @@ export class OpenAiService {
       tools: [],
       store: false,
     });
-    const blocked = await this.blockReason(request.runId);
+    const blocked = await this.blockState(request.runId);
     if (blocked) {
       return {
         record: await this.recordBlocked(
@@ -70,41 +72,35 @@ export class OpenAiService {
         ),
       };
     }
-    const client = this.client;
-    if (!client) {
-      return {
-        record: await this.recordBlocked(
-          request,
-          model,
-          requestSha256,
-          "OPENAI_API_KEY_NOT_CONFIGURED",
-        ),
-      };
-    }
-    const record = await this.createPendingRecord(
+    const record = await this.createRunningRecord(
       request,
       model,
       requestSha256,
     );
+    const egressRecord = await this.beginEgress(record);
+    if (egressRecord.status === "failed") return { record: egressRecord };
     try {
-      const response = await client.responses.parse({
+      const response = await this.provider.structured({
         model,
         instructions: request.instructions,
         input: request.input,
-        text: { format: zodTextFormat(request.schema, request.schemaName) },
-        tools: [],
-        store: false,
+        schema: request.schema,
+        schemaName: request.schemaName,
       });
-      const value = request.schema.parse(response.output_parsed);
-      const finished = await this.finishRecord(record, {
-        status: "passed",
-        responseId: response.id,
-        responseSha256: sha256Json({ id: response.id, output: value }),
-      });
-      return { value, record: finished };
+      return {
+        value: response.value,
+        record: await this.finishRecord(egressRecord, {
+          status: "passed",
+          responseId: response.responseId,
+          responseSha256: sha256Json({
+            id: response.responseId,
+            output: response.value,
+          }),
+        }),
+      };
     } catch (error) {
       return {
-        record: await this.finishRecord(record, {
+        record: await this.finishRecord(egressRecord, {
           status: "failed",
           errorCode: classifyModelError(error),
         }),
@@ -112,7 +108,7 @@ export class OpenAiService {
     }
   }
 
-  /** 图像字节只返回给服务内 Worker；数据库只保存调用哈希与状态。 */
+  /** 图像调用只返回短暂字节与哈希证据，不把图片 BLOB 写入数据库。 */
   async image(request: ImageModelRequest): Promise<ImageModelResult> {
     const model = this.modelFor("artist");
     const requestSha256 = sha256Json({
@@ -124,7 +120,7 @@ export class OpenAiService {
       background: "opaque",
       outputFormat: "png",
     });
-    const blocked = await this.blockReason(request.runId);
+    const blocked = await this.blockState(request.runId);
     if (blocked) {
       return {
         record: await this.recordBlocked(
@@ -135,50 +131,28 @@ export class OpenAiService {
         ),
       };
     }
-    const client = this.client;
-    if (!client) {
-      return {
-        record: await this.recordBlocked(
-          request,
-          model,
-          requestSha256,
-          "OPENAI_API_KEY_NOT_CONFIGURED",
-        ),
-      };
-    }
-    const record = await this.createPendingRecord(
+    const record = await this.createRunningRecord(
       request,
       model,
       requestSha256,
     );
+    const egressRecord = await this.beginEgress(record);
+    if (egressRecord.status === "failed") return { record: egressRecord };
     try {
-      const response = await client.images.generate({
+      const bytes = await this.provider.image({
         model,
         prompt: request.prompt,
-        n: 1,
-        size: "1536x1024",
-        quality: "high",
-        background: "opaque",
-        output_format: "png",
       });
-      const encoded = response.data?.[0]?.b64_json;
-      if (!encoded) {
-        throw new Error("IMAGE_PAYLOAD_MISSING");
-      }
-      const bytes = Buffer.from(encoded, "base64");
-      if (bytes.length === 0) {
-        throw new Error("IMAGE_PAYLOAD_EMPTY");
-      }
       return {
         bytes,
-        record: await this.finishRecord(record, {
+        record: await this.finishRecord(egressRecord, {
           status: "passed",
           responseSha256: sha256Bytes(bytes),
         }),
       };
     } catch (error) {
       return {
-        record: await this.finishRecord(record, {
+        record: await this.finishRecord(egressRecord, {
           status: "failed",
           errorCode: classifyModelError(error),
         }),
@@ -186,13 +160,15 @@ export class OpenAiService {
     }
   }
 
-  private async blockReason(runId: string): Promise<string | undefined> {
+  private async blockState(
+    runId: string,
+  ): Promise<{ errorCode: string; authorized: boolean } | undefined> {
     const run = await this.runs.get(runId);
     if (!run.modelEgressAuthorized) {
-      return "MODEL_EGRESS_NOT_AUTHORIZED";
+      return { errorCode: "MODEL_EGRESS_NOT_AUTHORIZED", authorized: false };
     }
-    if (!this.client) {
-      return "OPENAI_API_KEY_NOT_CONFIGURED";
+    if (!this.provider.configured) {
+      return { errorCode: "OPENAI_API_KEY_NOT_CONFIGURED", authorized: true };
     }
     return undefined;
   }
@@ -207,7 +183,7 @@ export class OpenAiService {
     return this.config.getOrThrow(key, { infer: true });
   }
 
-  private async createPendingRecord(
+  private async createRunningRecord(
     request: { runId: string; role: ModelRole },
     model: string,
     requestSha256: string,
@@ -215,57 +191,61 @@ export class OpenAiService {
     const record = createModelCallView(
       request,
       model,
-      this.endpoint.identity,
+      this.provider.endpointIdentity,
       requestSha256,
-      "passed",
+      "running",
       true,
+      false,
     );
-    await this.connection.database.insert(modelCalls).values({
-      ...toDatabaseRecord(record),
-      status: "running",
-    });
+    await this.calls.create(record);
     return record;
+  }
+
+  private async beginEgress(record: ModelCallView): Promise<ModelCallView> {
+    if (await this.calls.markEgressPerformed(record.id)) {
+      return { ...record, modelEgressPerformed: true };
+    }
+    return this.finishRecord(record, {
+      status: "failed",
+      errorCode: "MODEL_EGRESS_STATE_CONFLICT",
+    });
   }
 
   private async recordBlocked(
     request: { runId: string; role: ModelRole },
     model: string,
     requestSha256: string,
-    errorCode: string,
+    blocked: { errorCode: string; authorized: boolean },
   ): Promise<ModelCallView> {
     const record = createModelCallView(
       request,
       model,
-      this.endpoint.identity,
+      this.provider.endpointIdentity,
       requestSha256,
       "blocked",
+      blocked.authorized,
       false,
-      errorCode,
+      blocked.errorCode,
     );
-    await this.connection.database
-      .insert(modelCalls)
-      .values(toDatabaseRecord(record));
+    await this.calls.create(record);
     return record;
   }
 
   private async finishRecord(
     record: ModelCallView,
-    result: Pick<
-      ModelCallView,
-      "status" | "responseId" | "responseSha256" | "errorCode"
-    >,
+    completion: ModelCallCompletion,
   ): Promise<ModelCallView> {
     const finishedAt = new Date();
-    await this.connection.database
-      .update(modelCalls)
-      .set({ ...result, finishedAt })
-      .where(eq(modelCalls.id, record.id));
-    return { ...record, ...result, finishedAtUtc: finishedAt.toISOString() };
+    if (!(await this.calls.finish(record.id, completion, finishedAt))) {
+      throw new Error("MODEL_CALL_STATE_CONFLICT");
+    }
+    return {
+      ...record,
+      ...completion,
+      finishedAtUtc: finishedAt.toISOString(),
+    };
   }
 }
-
-import { eq } from "drizzle-orm";
-import { createHash } from "node:crypto";
 
 function createModelCallView(
   request: { runId: string; role: ModelRole },
@@ -274,6 +254,7 @@ function createModelCallView(
   requestSha256: string,
   status: ModelCallView["status"],
   modelEgressAuthorized: boolean,
+  modelEgressPerformed: boolean,
   errorCode?: string,
 ): ModelCallView {
   const createdAtUtc = new Date().toISOString();
@@ -286,29 +267,10 @@ function createModelCallView(
     requestSha256,
     status,
     modelEgressAuthorized,
+    modelEgressPerformed,
     ...(errorCode ? { errorCode } : {}),
     createdAtUtc,
-    ...(status === "blocked" ? { finishedAtUtc: createdAtUtc } : {}),
-  };
-}
-
-function toDatabaseRecord(
-  record: ModelCallView,
-): typeof modelCalls.$inferInsert {
-  return {
-    id: record.id,
-    runId: record.runId,
-    role: record.role,
-    model: record.model,
-    endpointIdentity: record.endpointIdentity,
-    requestSha256: record.requestSha256,
-    status: record.status,
-    modelEgressAuthorized: record.modelEgressAuthorized,
-    ...(record.errorCode ? { errorCode: record.errorCode } : {}),
-    createdAt: new Date(record.createdAtUtc),
-    ...(record.finishedAtUtc
-      ? { finishedAt: new Date(record.finishedAtUtc) }
-      : {}),
+    ...(status !== "running" ? { finishedAtUtc: createdAtUtc } : {}),
   };
 }
 

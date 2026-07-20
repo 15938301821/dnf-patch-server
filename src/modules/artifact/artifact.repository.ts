@@ -12,6 +12,15 @@ import { artifactProvenanceSchema } from "./artifact.contracts.js";
 export class ArtifactRepository {
   constructor(private readonly connection: DatabaseService) {}
 
+  async findRunId(id: string): Promise<string | undefined> {
+    const [row] = await this.connection.database
+      .select({ runId: artifacts.runId })
+      .from(artifacts)
+      .where(eq(artifacts.id, id))
+      .limit(1);
+    return row?.runId;
+  }
+
   async create(
     runId: string,
     id: string,

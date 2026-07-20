@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { DatabaseService } from "../../common/db/database.service.js";
+import { immutableSafetyStateSchema } from "../../common/contracts/index.js";
 import { projectSnapshots, projects } from "../../common/db/schema.js";
 import type {
   CreateProjectInput,
@@ -37,6 +38,23 @@ export class ProjectRepository {
       .where(eq(projects.canonicalName, name))
       .limit(1);
     return row ? toProjectView(row) : undefined;
+  }
+
+  async findSnapshotById(
+    projectId: string,
+    snapshotId: string,
+  ): Promise<ProjectSnapshotView | undefined> {
+    const [row] = await this.connection.database
+      .select()
+      .from(projectSnapshots)
+      .where(
+        and(
+          eq(projectSnapshots.projectId, projectId),
+          eq(projectSnapshots.id, snapshotId),
+        ),
+      )
+      .limit(1);
+    return row ? toProjectSnapshotView(row) : undefined;
   }
 
   async create(
@@ -122,5 +140,27 @@ function toProjectView(row: typeof projects.$inferSelect): ProjectView {
     archived: row.archived,
     createdAtUtc: row.createdAt.toISOString(),
     updatedAtUtc: row.updatedAt.toISOString(),
+  };
+}
+
+function toProjectSnapshotView(
+  row: typeof projectSnapshots.$inferSelect,
+): ProjectSnapshotView {
+  const safetyState = immutableSafetyStateSchema.parse({
+    fullSkillCoverageProven: row.fullSkillCoverageProven,
+  });
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    clientSnapshotId: row.clientSnapshotId,
+    rootRulesSha256: row.rootRulesSha256,
+    ...(row.manifestSha256 ? { manifestSha256: row.manifestSha256 } : {}),
+    promptTreeSha256: row.promptTreeSha256,
+    toolCatalogSha256: row.toolCatalogSha256,
+    ...(row.repositoryRevision
+      ? { repositoryRevision: row.repositoryRevision }
+      : {}),
+    fullSkillCoverageProven: safetyState.fullSkillCoverageProven,
+    createdAtUtc: row.createdAt.toISOString(),
   };
 }

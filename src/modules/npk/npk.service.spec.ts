@@ -1,0 +1,85 @@
+/**
+ * @fileoverview 验证 NPK Inventory 的 producing Run、Artifact 归属和路径规范化边界。
+ * @module npk
+ * @author AI生成
+ * @created 2026-07-20
+ * @relatedPlan /memories/session/plan.md Phase 1 evidence ownership
+ */
+import { ConflictException, NotFoundException } from "@nestjs/common";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  normalizeNpkInternalPath,
+  type CreateInventoryInput,
+} from "./npk.contracts.js";
+import { NpkService } from "./npk.service.js";
+
+describe("NpkService evidence ownership", () => {
+  const inventories = { create: vi.fn(), list: vi.fn() };
+  const runs = { get: vi.fn() };
+  const artifacts = { findRunId: vi.fn() };
+  let service: NpkService;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    service = new NpkService(inventories, runs, artifacts);
+    runs.get.mockResolvedValue({ id: "run-a", projectId: "project-a" });
+    artifacts.findRunId.mockResolvedValue("run-a");
+    inventories.create.mockResolvedValue({ id: "inventory-a" });
+  });
+
+  it("拒绝不属于目标项目的 producing Run", async () => {
+    runs.get.mockResolvedValue({ id: "run-b", projectId: "project-b" });
+    await expect(
+      service.create("project-a", inventoryInput()),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(inventories.create).not.toHaveBeenCalled();
+  });
+
+  it("拒绝缺失或跨 Run 的来源 Artifact", async () => {
+    artifacts.findRunId.mockResolvedValue(undefined);
+    await expect(
+      service.create("project-a", inventoryInput()),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    artifacts.findRunId.mockResolvedValue("run-b");
+    await expect(
+      service.create("project-a", inventoryInput()),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("对路径使用确定性的分隔符、Unicode 和大小写规范化", () => {
+    expect(normalizeNpkInternalPath("FX\\A\u0308/Frame.PNG")).toBe(
+      "fx/ä/frame.png",
+    );
+  });
+
+  it("同项目同 Run 的 inventory 可以持久化", async () => {
+    await expect(
+      service.create("project-a", inventoryInput()),
+    ).resolves.toEqual({ id: "inventory-a" });
+    expect(inventories.create).toHaveBeenCalledWith(
+      "project-a",
+      "run-a",
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+});
+
+function inventoryInput(): CreateInventoryInput {
+  return {
+    runId: "run-a",
+    sourceLabel: "verified-source",
+    sourceLength: 1,
+    sourceSha256: "A".repeat(64),
+    inventoryArtifactId: "artifact-a",
+    entries: [
+      {
+        internalPath: "FX\\Frame.PNG",
+        imgVersion: 1,
+        frameCount: 1,
+        metadataSha256: "B".repeat(64),
+      },
+    ],
+  };
+}

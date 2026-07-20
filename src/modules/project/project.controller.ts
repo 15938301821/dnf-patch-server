@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import {
   createProjectSchema,
@@ -20,7 +21,9 @@ export class ProjectController {
   }
 
   @Get(":id")
-  get(@Param("id") id: string): Promise<ProjectView> {
+  get(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+  ): Promise<ProjectView> {
     return this.projects.get(id);
   }
 
@@ -33,7 +36,7 @@ export class ProjectController {
 
   @Post(":id/snapshots")
   createSnapshot(
-    @Param("id") projectId: string,
+    @Param("id", new ZodValidationPipe(idSchema)) projectId: string,
     @Body(new ZodValidationPipe(projectSnapshotSchema))
     input: CreateProjectSnapshotInput,
   ): Promise<ProjectSnapshotView> {

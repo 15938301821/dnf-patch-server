@@ -1,15 +1,31 @@
 import { Injectable } from "@nestjs/common";
 import { desc, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../../common/db/database.service.js";
 import { npkInventories, npkInventoryEntries } from "../../common/db/schema.js";
-import type { CreateInventoryInput, InventoryView } from "./npk.contracts.js";
+import {
+  normalizeNpkInternalPath,
+  type CreateInventoryInput,
+  type InventoryView,
+} from "./npk.contracts.js";
+
+export interface NpkRepositoryPort {
+  create(
+    projectId: string,
+    runId: string,
+    id: string,
+    input: CreateInventoryInput,
+  ): Promise<InventoryView>;
+  list(projectId: string): Promise<InventoryView[]>;
+}
 
 @Injectable()
-export class NpkRepository {
+export class NpkRepository implements NpkRepositoryPort {
   constructor(private readonly connection: DatabaseService) {}
 
   async create(
     projectId: string,
+    runId: string,
     id: string,
     input: CreateInventoryInput,
   ): Promise<InventoryView> {
@@ -18,6 +34,7 @@ export class NpkRepository {
       await transaction.insert(npkInventories).values({
         id,
         projectId,
+        runId,
         sourceLabel: input.sourceLabel,
         sourceLength: input.sourceLength,
         sourceSha256: input.sourceSha256.toUpperCase(),
@@ -30,9 +47,9 @@ export class NpkRepository {
       });
       await transaction.insert(npkInventoryEntries).values(
         input.entries.map((entry) => ({
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           inventoryId: id,
-          internalPath: entry.internalPath.replaceAll("\\", "/"),
+          internalPath: normalizeNpkInternalPath(entry.internalPath),
           imgVersion: entry.imgVersion,
           frameCount: entry.frameCount,
           metadataSha256: entry.metadataSha256.toUpperCase(),
@@ -41,6 +58,7 @@ export class NpkRepository {
       return toInventoryView({
         id,
         projectId,
+        runId,
         sourceLabel: input.sourceLabel,
         sourceLength: input.sourceLength,
         sourceSha256: input.sourceSha256.toUpperCase(),
@@ -68,6 +86,7 @@ function toInventoryView(
   return {
     id: row.id,
     projectId: row.projectId,
+    runId: row.runId,
     sourceLabel: row.sourceLabel,
     sourceLength: row.sourceLength,
     sourceSha256: row.sourceSha256,

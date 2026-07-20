@@ -1,0 +1,4 @@
+ALTER TABLE `model_calls` ADD `model_egress_performed` boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE `model_calls` ADD CONSTRAINT `model_calls_status_ck` CHECK (`model_calls`.`status` in ('running', 'passed', 'failed', 'blocked', 'abandoned'));--> statement-breakpoint
+ALTER TABLE `model_calls` ADD CONSTRAINT `model_calls_egress_ck` CHECK (`model_calls`.`model_egress_performed` = false or `model_calls`.`model_egress_authorized` = true);--> statement-breakpoint
+ALTER TABLE `model_calls` ADD CONSTRAINT `model_calls_finished_ck` CHECK ((`model_calls`.`status` = 'running' and `model_calls`.`finished_at` is null) or (`model_calls`.`status` <> 'running' and `model_calls`.`finished_at` is not null));

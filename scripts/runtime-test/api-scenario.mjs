@@ -1,10 +1,22 @@
-import { createHash, randomUUID } from "node:crypto";
-import { io } from "socket.io-client";
+import { randomUUID } from "node:crypto";
+import {
+  requestJson,
+  sha256Json,
+  socketEventMatching,
+  subscribeRun,
+} from "./api-support.mjs";
+import { exerciseJobIntegrityQuarantine } from "./job-integrity-scenario.mjs";
+import { exerciseEvidenceApi } from "./evidence-scenario.mjs";
 import { assert } from "./process.mjs";
 
 const host = "127.0.0.1";
 
-export async function exerciseApi({ apiPort, clientToken, workerToken }) {
+export async function exerciseApi({
+  apiPort,
+  clientToken,
+  workerToken,
+  database,
+}) {
   const baseUrl = `http://${host}:${String(apiPort)}/v1`;
   await requestJson(baseUrl, "/projects", {}, 401);
   await requestJson(
@@ -14,11 +26,14 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
     401,
   );
 
+  const policySha256 = "6".repeat(64);
   const config = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     profileId: "runtime-profile",
     policyId: "runtime-policy",
+    policySha256,
     allowedJobKinds: ["context-freeze"],
+    jobContracts: [{ kind: "context-freeze", schemaVersion: 1 }],
     arbitraryExecution: false,
     deploymentAuthorized: false,
   };
@@ -29,8 +44,8 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
       method: "POST",
       clientToken,
       body: {
-        id: "runtime-factory-v1",
-        version: "1.0.0",
+        id: "runtime-factory-v2",
+        version: "2.0.0",
         displayName: "Runtime Factory",
         config,
         configSha256: sha256Json(config),
@@ -74,16 +89,33 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
   const idempotencyHeaders = {
     "Idempotency-Key": "runtime-run-idempotency",
   };
-  const run = await requestJson(
-    baseUrl,
-    "/runs",
-    {
-      method: "POST",
-      clientToken,
-      headers: idempotencyHeaders,
-      body: runBody,
-    },
-    201,
+  const [run, concurrentReplay] = await Promise.all([
+    requestJson(
+      baseUrl,
+      "/runs",
+      {
+        method: "POST",
+        clientToken,
+        headers: idempotencyHeaders,
+        body: runBody,
+      },
+      201,
+    ),
+    requestJson(
+      baseUrl,
+      "/runs",
+      {
+        method: "POST",
+        clientToken,
+        headers: idempotencyHeaders,
+        body: runBody,
+      },
+      201,
+    ),
+  ]);
+  assert(
+    run.id === concurrentReplay.id,
+    "Concurrent idempotent Run creation returned different Runs.",
   );
   const replay = await requestJson(
     baseUrl,
@@ -97,6 +129,36 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
     201,
   );
   assert(run.id === replay.id, "Idempotent Run creation returned a new Run.");
+  const idempotencyConflict = await requestJson(
+    baseUrl,
+    "/runs",
+    {
+      method: "POST",
+      clientToken,
+      headers: idempotencyHeaders,
+      body: { ...runBody, requestSha256: "7".repeat(64) },
+    },
+    409,
+  );
+  assert(
+    idempotencyConflict.code === "IDEMPOTENCY_KEY_REUSED",
+    "Idempotency-Key reuse with a different request was not rejected.",
+  );
+  const clientRunConflict = await requestJson(
+    baseUrl,
+    "/runs",
+    {
+      method: "POST",
+      clientToken,
+      headers: { "Idempotency-Key": "runtime-client-run-conflict" },
+      body: runBody,
+    },
+    409,
+  );
+  assert(
+    clientRunConflict.code === "CLIENT_RUN_ID_CONFLICT",
+    "A clientRunId reused under a different idempotency key was not rejected.",
+  );
   const events = await requestJson(
     baseUrl,
     `/runs/${run.id}/events?afterSequence=-1&limit=10`,
@@ -111,6 +173,11 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
 
   const workerId = randomUUID();
   let job;
+  let retryRun;
+  let retryJob;
+  let integrityRun;
+  let integrityJobId;
+  let evidence;
   try {
     await requestJson(
       baseUrl,
@@ -126,7 +193,12 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
       },
       201,
     );
-    const runningEventPromise = socketEvent(liveSocket, "run:event", 5_000);
+    const runningEventPromise = socketEventMatching(
+      liveSocket,
+      "run:event",
+      (event) => event.runId === run.id && event.sequence === 1,
+      5_000,
+    );
     job = await requestJson(
       baseUrl,
       "/internal/jobs/claim",
@@ -134,7 +206,9 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
       201,
     );
     assert(
-      job.status === "leased" && job.attemptCount === 1,
+      job.status === "leased" &&
+        job.attemptCount === 1 &&
+        typeof job.leaseId === "string",
       "Worker did not lease the queued job.",
     );
     const runningEvent = await runningEventPromise;
@@ -145,10 +219,19 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
     await requestJson(
       baseUrl,
       `/internal/jobs/${job.id}/heartbeat`,
-      { method: "POST", workerToken, body: { workerId } },
+      {
+        method: "POST",
+        workerToken,
+        body: { workerId, leaseId: job.leaseId },
+      },
       201,
     );
-    const passedEventPromise = socketEvent(liveSocket, "run:event", 5_000);
+    const passedEventPromise = socketEventMatching(
+      liveSocket,
+      "run:event",
+      (event) => event.runId === run.id && event.sequence === 2,
+      5_000,
+    );
     await requestJson(
       baseUrl,
       `/internal/jobs/${job.id}/complete`,
@@ -157,6 +240,7 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
         workerToken,
         body: {
           workerId,
+          leaseId: job.leaseId,
           status: "passed",
           resultSha256: "a".repeat(64),
         },
@@ -168,66 +252,155 @@ export async function exerciseApi({ apiPort, clientToken, workerToken }) {
       passedEvent.sequence === 2 && passedEvent.stage === "passed",
       "Job completion did not publish the terminal Run event.",
     );
+
+    retryRun = await requestJson(
+      baseUrl,
+      "/runs",
+      {
+        method: "POST",
+        clientToken,
+        headers: { "Idempotency-Key": "runtime-retry-idempotency" },
+        body: createRunBody(project.id, snapshot.id, {
+          clientRunId: "runtime-retry-run",
+          requestSha256: "8".repeat(64),
+          scope: "runtime-retry",
+        }),
+      },
+      201,
+    );
+    const firstLease = await requestJson(
+      baseUrl,
+      "/internal/jobs/claim",
+      { method: "POST", workerToken, body: { workerId } },
+      201,
+    );
+    assert(
+      firstLease.attemptCount === 1 && typeof firstLease.leaseId === "string",
+      "Retry scenario did not create the first fenced lease.",
+    );
+    await expireLease(database, firstLease.id);
+    retryJob = await requestJson(
+      baseUrl,
+      "/internal/jobs/claim",
+      { method: "POST", workerToken, body: { workerId } },
+      201,
+    );
+    assert(
+      retryJob.id === firstLease.id &&
+        retryJob.attemptCount === 2 &&
+        typeof retryJob.leaseId === "string" &&
+        retryJob.leaseId !== firstLease.leaseId,
+      "Expired task was not reclaimed with a new fencing token.",
+    );
+    const staleLease = await requestJson(
+      baseUrl,
+      `/internal/jobs/${retryJob.id}/heartbeat`,
+      {
+        method: "POST",
+        workerToken,
+        body: { workerId, leaseId: firstLease.leaseId },
+      },
+      409,
+    );
+    assert(
+      staleLease.code === "JOB_LEASE_MISMATCH",
+      "A stale fencing token was not rejected.",
+    );
+    const missingLease = await requestJson(
+      baseUrl,
+      `/internal/jobs/${retryJob.id}/heartbeat`,
+      { method: "POST", workerToken, body: { workerId } },
+      409,
+    );
+    assert(
+      missingLease.code === "WORKER_PROTOCOL_UPGRADE_REQUIRED",
+      "A retried task accepted the legacy tokenless Worker protocol.",
+    );
+    await requestJson(
+      baseUrl,
+      `/internal/jobs/${retryJob.id}/heartbeat`,
+      {
+        method: "POST",
+        workerToken,
+        body: { workerId, leaseId: retryJob.leaseId },
+      },
+      201,
+    );
+    await assertReclaimedAttemptState(database, retryJob.id);
+    evidence = await exerciseEvidenceApi({
+      baseUrl,
+      clientToken,
+      projectId: project.id,
+      runId: run.id,
+      otherRunId: retryRun.id,
+    });
+    const integrity = await exerciseJobIntegrityQuarantine({
+      baseUrl,
+      clientToken,
+      workerToken,
+      database,
+      workerId,
+      projectId: project.id,
+      snapshotId: snapshot.id,
+      createRunBody,
+    });
+    integrityRun = { id: integrity.runId };
+    integrityJobId = integrity.jobId;
+    await expireLease(database, retryJob.id);
   } finally {
     liveSocket.close();
   }
   assert(job !== undefined, "Runtime job scenario did not create a job.");
+  assert(
+    retryRun !== undefined && retryJob !== undefined,
+    "Runtime reaper scenario did not create a retried job.",
+  );
+  assert(
+    integrityRun !== undefined && integrityJobId !== undefined,
+    "Runtime integrity scenario did not create a quarantined job.",
+  );
+  assert(evidence !== undefined, "Runtime evidence scenario did not run.");
   return {
     projectId: project.id,
+    snapshotId: snapshot.id,
     runId: run.id,
     jobId: job.id,
+    retryRunId: retryRun.id,
+    retryJobId: retryJob.id,
+    integrityRunId: integrityRun.id,
+    integrityJobId,
+    artifactId: evidence.artifactId,
+    inventoryId: evidence.inventoryId,
     workerId,
     authentication: {
       clientWithoutTokenStatus: 401,
       workerWithoutTokenStatus: 401,
     },
     idempotentCreate: true,
+    concurrentIdempotentCreate: true,
+    idempotencyConflictRejected: true,
+    clientRunIdConflictRejected: true,
     worker: {
       registered: true,
       claimed: true,
       heartbeatRenewed: true,
       completed: true,
+      reclaimedWithNewLease: true,
+      staleLeaseRejected: true,
+      tokenlessRetryRejected: true,
+      integrityFailureQuarantined: true,
     },
+    evidence: { httpOwnershipEnforced: evidence.httpOwnershipEnforced },
     liveEventsReceived: true,
   };
 }
-
-export async function verifyPersistence({
-  apiPort,
-  clientToken,
-  runId,
-  projectId,
-}) {
-  const baseUrl = `http://${host}:${String(apiPort)}/v1`;
-  const project = await requestJson(
-    baseUrl,
-    `/projects/${projectId}`,
-    { clientToken },
-    200,
-  );
-  const run = await requestJson(
-    baseUrl,
-    `/runs/${runId}`,
-    { clientToken },
-    200,
-  );
-  assert(
-    project.id === projectId && run.id === runId,
-    "Restarted service did not read persisted rows.",
-  );
-  return {
-    persistedAfterRestart: true,
-    webSocket: await verifyWebSocket(apiPort, clientToken, runId),
-  };
-}
-
-function createRunBody(projectId, snapshotId) {
+function createRunBody(projectId, snapshotId, overrides = {}) {
   return {
     projectId,
     snapshotId,
-    clientRunId: "runtime-run",
+    clientRunId: overrides.clientRunId ?? "runtime-run",
     action: "validate-only",
-    requestSha256: "5".repeat(64),
+    requestSha256: overrides.requestSha256 ?? "5".repeat(64),
     serverConnectionEnabled: true,
     modelEgressAuthorized: false,
     deploymentAuthorized: false,
@@ -237,7 +410,13 @@ function createRunBody(projectId, snapshotId) {
     jobs: [
       {
         kind: "context-freeze",
-        payload: { scope: "runtime-integration" },
+        payload: {
+          schemaVersion: 1,
+          profileId: "runtime-profile",
+          parameters: {
+            scope: overrides.scope ?? "runtime-integration",
+          },
+        },
         maxAttempts: 2,
       },
     ],
@@ -246,158 +425,24 @@ function createRunBody(projectId, snapshotId) {
   };
 }
 
-async function verifyWebSocket(port, token, runId) {
-  const url = `http://${host}:${String(port)}/runs`;
-  const rejected = createSocket(url, "invalid-runtime-token");
-  try {
-    const rejectionPromise = socketEvent(rejected, "connect_error", 5_000);
-    rejected.connect();
-    const rejection = await rejectionPromise;
-    assert(
-      rejection.message === "CLIENT_AUTH_FAILED",
-      "Socket.IO accepted an invalid token.",
-    );
-  } finally {
-    rejected.close();
-  }
-
-  const socket = createSocket(url, token);
-  try {
-    const connected = socketEvent(socket, "connect", 5_000);
-    socket.connect();
-    await connected;
-    const snapshotPromise = socketEvent(socket, "run:snapshot", 5_000);
-    const acknowledgment = await socketAcknowledgment(socket, "run:subscribe", {
-      runId,
-      afterSequence: -1,
-    });
-    const snapshot = await snapshotPromise;
-    assert(
-      acknowledgment.status === "subscribed",
-      "Run subscription was not acknowledged.",
-    );
-    assert(snapshot.run.id === runId, "Run snapshot returned the wrong Run.");
-    assert(snapshot.run.status === "passed", "Run snapshot was not terminal.");
-    assert(
-      snapshot.events.length === 3,
-      "Run snapshot event history is incomplete.",
-    );
-    assert(
-      snapshot.events.every((event, index) => event.sequence === index),
-      "Run snapshot event sequence is not contiguous.",
-    );
-  } finally {
-    socket.close();
-  }
-  return { invalidTokenRejected: true, snapshotReceived: true };
-}
-
-async function subscribeRun(port, token, runId, expectedSnapshotEvents) {
-  const socket = createSocket(`http://${host}:${String(port)}/runs`, token);
-  try {
-    const connected = socketEvent(socket, "connect", 5_000);
-    socket.connect();
-    await connected;
-    const snapshotPromise = socketEvent(socket, "run:snapshot", 5_000);
-    const acknowledgment = await socketAcknowledgment(socket, "run:subscribe", {
-      runId,
-      afterSequence: -1,
-    });
-    const snapshot = await snapshotPromise;
-    assert(
-      acknowledgment.status === "subscribed",
-      "Live Run subscription was not acknowledged.",
-    );
-    assert(
-      snapshot.events.length === expectedSnapshotEvents,
-      "Live Run snapshot returned an unexpected event count.",
-    );
-    return socket;
-  } catch (error) {
-    socket.close();
-    throw error;
-  }
-}
-
-function createSocket(url, token) {
-  return io(url, {
-    auth: { token },
-    autoConnect: false,
-    forceNew: true,
-    reconnection: false,
-    transports: ["websocket"],
-  });
-}
-
-async function requestJson(baseUrl, path, options, expectedStatus) {
-  const headers = { ...(options.headers ?? {}) };
-  if (options.clientToken) {
-    headers.Authorization = `Bearer ${options.clientToken}`;
-  }
-  if (options.workerToken) {
-    headers["X-Worker-Token"] = options.workerToken;
-  }
-  if (options.body !== undefined) {
-    headers["Content-Type"] = "application/json";
-  }
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: options.method ?? "GET",
-    headers,
-    ...(options.body !== undefined
-      ? { body: JSON.stringify(options.body) }
-      : {}),
-    signal: AbortSignal.timeout(5_000),
-  });
-  const text = await response.text();
-  const payload = text.length > 0 ? JSON.parse(text) : undefined;
-  assert(
-    response.status === expectedStatus,
-    `${options.method ?? "GET"} ${path} returned ${String(response.status)}: ${text}`,
+async function expireLease(database, jobId) {
+  const [result] = await database.query(
+    "UPDATE jobs SET lease_expires_at = CURRENT_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE id = ? AND status = 'leased'",
+    [jobId],
   );
-  return payload;
+  assert(result.affectedRows === 1, "Could not expire the active test lease.");
 }
 
-function socketEvent(socket, event, timeoutMs) {
-  return new Promise((resolveEvent, rejectEvent) => {
-    const timer = setTimeout(
-      () => rejectEvent(new Error(`Socket event ${event} timed out.`)),
-      timeoutMs,
-    );
-    socket.once(event, (value) => {
-      clearTimeout(timer);
-      resolveEvent(value);
-    });
-  });
-}
-
-function socketAcknowledgment(socket, event, payload) {
-  return new Promise((resolveAck, rejectAck) => {
-    const timer = setTimeout(
-      () => rejectAck(new Error(`Socket acknowledgment ${event} timed out.`)),
-      5_000,
-    );
-    socket.emit(event, payload, (acknowledgment) => {
-      clearTimeout(timer);
-      resolveAck(acknowledgment);
-    });
-  });
-}
-
-function sha256Json(value) {
-  return createHash("sha256")
-    .update(JSON.stringify(sortJson(value)), "utf8")
-    .digest("hex")
-    .toUpperCase();
-}
-
-function sortJson(value) {
-  if (Array.isArray(value)) return value.map(sortJson);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, child]) => [key, sortJson(child)]),
-    );
-  }
-  return value;
+async function assertReclaimedAttemptState(database, jobId) {
+  const [attempts] = await database.query(
+    "SELECT attempt, status, error_code AS errorCode FROM job_attempts WHERE job_id = ? ORDER BY attempt",
+    [jobId],
+  );
+  assert(
+    attempts.length === 2 &&
+      attempts[0].status === "timed_out" &&
+      attempts[0].errorCode === "LEASE_EXPIRED" &&
+      attempts[1].status === "running",
+    "Reclaim did not close the expired attempt before opening a new attempt.",
+  );
 }

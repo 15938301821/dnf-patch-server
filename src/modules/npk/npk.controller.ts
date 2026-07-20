@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import {
   createInventorySchema,
@@ -12,13 +13,15 @@ export class NpkController {
   constructor(private readonly inventories: NpkService) {}
 
   @Get()
-  list(@Param("projectId") projectId: string): Promise<InventoryView[]> {
+  list(
+    @Param("projectId", new ZodValidationPipe(idSchema)) projectId: string,
+  ): Promise<InventoryView[]> {
     return this.inventories.list(projectId);
   }
 
   @Post()
   create(
-    @Param("projectId") projectId: string,
+    @Param("projectId", new ZodValidationPipe(idSchema)) projectId: string,
     @Body(new ZodValidationPipe(createInventorySchema))
     input: CreateInventoryInput,
   ): Promise<InventoryView> {

@@ -1,4 +1,5 @@
 import { Body, Controller, Param, Post, UseGuards } from "@nestjs/common";
+import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import { WorkerTokenGuard } from "../../common/security/worker-token.guard.js";
 import {
@@ -26,7 +27,7 @@ export class JobController {
 
   @Post(":id/heartbeat")
   async heartbeat(
-    @Param("id") jobId: string,
+    @Param("id", new ZodValidationPipe(idSchema)) jobId: string,
     @Body(new ZodValidationPipe(heartbeatJobSchema)) input: HeartbeatJobInput,
   ): Promise<{ status: "renewed" }> {
     await this.jobs.heartbeat(jobId, input);
@@ -35,7 +36,7 @@ export class JobController {
 
   @Post(":id/complete")
   async complete(
-    @Param("id") jobId: string,
+    @Param("id", new ZodValidationPipe(idSchema)) jobId: string,
     @Body(new ZodValidationPipe(completeJobSchema)) input: CompleteJobInput,
   ): Promise<{ status: "accepted" }> {
     await this.jobs.complete(jobId, input);

@@ -2,10 +2,18 @@ import { randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { exerciseApi } from "./runtime-test/api-scenario.mjs";
 import {
-  exerciseApi,
-  verifyPersistence,
-} from "./runtime-test/api-scenario.mjs";
+  restorePublishedRunEventToPending,
+  waitForRunOutboxDrained,
+  waitForRunOutboxReplay,
+} from "./runtime-test/outbox-scenario.mjs";
+import {
+  insertStaleModelCall,
+  verifyStaleModelCallRecovered,
+} from "./runtime-test/model-recovery-scenario.mjs";
+import { exerciseMigrationPreflight } from "./runtime-test/migration-preflight-scenario.mjs";
+import { verifyPersistence } from "./runtime-test/persistence-scenario.mjs";
 import {
   connectDatabase,
   createDatabase,
@@ -57,6 +65,7 @@ try {
   });
   database = await connectDatabase(databasePort);
   const schema = await inspectSchema(database);
+  const migrationPreflight = await exerciseMigrationPreflight(databasePort);
 
   const clientToken = randomBytes(32).toString("hex");
   const workerToken = randomBytes(32).toString("hex");
@@ -68,17 +77,38 @@ try {
   });
   appProcess = startApplication(applicationEnvironment);
   const health = await waitForApplication(appProcess, apiPort);
-  const scenario = await exerciseApi({ apiPort, clientToken, workerToken });
+  const scenario = await exerciseApi({
+    apiPort,
+    clientToken,
+    workerToken,
+    database,
+  });
+  await waitForRunOutboxDrained(database);
   await stopChild(appProcess, "Production service");
   appProcess = undefined;
+  const replayOutboxId = await restorePublishedRunEventToPending(
+    database,
+    scenario.runId,
+  );
+  const staleModelCallId = await insertStaleModelCall(database, scenario.runId);
 
-  appProcess = startApplication(applicationEnvironment);
+  appProcess = startApplication({
+    ...applicationEnvironment,
+    WORKER_REAPER_INTERVAL_MS: "1000",
+  });
   await waitForApplication(appProcess, apiPort);
+  const outbox = await waitForRunOutboxReplay(database, replayOutboxId);
+  const modelRecovery = await verifyStaleModelCallRecovered(
+    database,
+    staleModelCallId,
+  );
   const persistence = await verifyPersistence({
     apiPort,
     clientToken,
     runId: scenario.runId,
     projectId: scenario.projectId,
+    retryRunId: scenario.retryRunId,
+    integrityRunId: scenario.integrityRunId,
   });
   const databaseState = await inspectDatabaseState(database, scenario);
   result = {
@@ -94,6 +124,9 @@ try {
     authentication: scenario.authentication,
     run: {
       idempotentCreate: scenario.idempotentCreate,
+      concurrentIdempotentCreate: scenario.concurrentIdempotentCreate,
+      idempotencyConflictRejected: scenario.idempotencyConflictRejected,
+      clientRunIdConflictRejected: scenario.clientRunIdConflictRejected,
       persistedAfterRestart: persistence.persistedAfterRestart,
       statusAfterJobCompletion: databaseState.status,
       deploymentAuthorized: Boolean(databaseState.deploymentAuthorized),
@@ -104,10 +137,16 @@ try {
       ),
     },
     worker: scenario.worker,
+    evidence: scenario.evidence,
+    reaper: persistence.reaper,
+    integrity: persistence.integrity,
     webSocket: {
       ...persistence.webSocket,
       liveEventsReceived: scenario.liveEventsReceived,
     },
+    outbox,
+    modelRecovery,
+    migrationPreflight,
     rows: databaseState.rows,
   };
 } catch (error) {
@@ -166,7 +205,11 @@ function createApplicationEnvironment({
     OPENAI_ORCHESTRATOR_MODEL: "gpt-5.6-sol",
     OPENAI_ENGINEER_MODEL: "gpt-5.5",
     OPENAI_IMAGE_MODEL: "gpt-image-2",
+    OUTBOX_DISPATCH_INTERVAL_MS: "100",
+    OUTBOX_DISPATCH_BATCH_SIZE: "25",
     WORKER_LEASE_SECONDS: "60",
+    WORKER_REAPER_INTERVAL_MS: "60000",
+    WORKER_REAPER_BATCH_SIZE: "25",
   };
   delete environment.OPENAI_API_KEY;
   return environment;

@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   datetime,
   foreignKey,
   index,
@@ -14,7 +16,6 @@ import {
 const id = (name: string) => varchar(name, { length: 64 });
 const sha256 = (name: string) => varchar(name, { length: 64 });
 const utc = (name: string) => datetime(name, { mode: "date", fsp: 3 });
-
 export const factories = mysqlTable(
   "factories",
   {
@@ -70,6 +71,10 @@ export const projectSnapshots = mysqlTable(
   },
   (table) => [
     index("project_snapshots_project_idx").on(table.projectId),
+    check(
+      "project_snapshots_safety_state_ck",
+      sql`${table.fullSkillCoverageProven} = false`,
+    ),
     uniqueIndex("project_snapshots_project_id_uq").on(
       table.projectId,
       table.id,
@@ -97,6 +102,7 @@ export const runs = mysqlTable(
     status: varchar("status", { length: 48 }).notNull(),
     currentStage: varchar("current_stage", { length: 96 }).notNull(),
     requestSha256: sha256("request_sha256").notNull(),
+    requestFingerprintSha256: sha256("request_fingerprint_sha256"),
     serverConnectionEnabled: boolean("server_connection_enabled")
       .notNull()
       .default(true),
@@ -121,11 +127,20 @@ export const runs = mysqlTable(
   },
   (table) => [
     index("runs_project_idx").on(table.projectId),
+    check(
+      "runs_status_ck",
+      sql`${table.status} in ('queued', 'running', 'passed', 'failed', 'blocked')`,
+    ),
+    check(
+      "runs_safety_state_ck",
+      sql`${table.deploymentAuthorized} = false and ${table.deploymentPerformed} = false and ${table.fullSkillCoverageProven} = false and ${table.clientCompatibilityProven} = false`,
+    ),
     foreignKey({
       columns: [table.projectId, table.snapshotId],
       foreignColumns: [projectSnapshots.projectId, projectSnapshots.id],
       name: "runs_snapshot_project_fk",
     }).onDelete("restrict"),
+    uniqueIndex("runs_project_id_uq").on(table.projectId, table.id),
     uniqueIndex("runs_idempotency_uq").on(
       table.projectId,
       table.idempotencyKey,
@@ -145,14 +160,16 @@ export const runEvents = mysqlTable(
     level: varchar("level", { length: 16 }).notNull(),
     stage: varchar("stage", { length: 96 }).notNull(),
     message: text("message").notNull(),
-    evidenceArtifactId: id("evidence_artifact_id").references(
-      () => artifacts.id,
-      { onDelete: "restrict" },
-    ),
+    evidenceArtifactId: id("evidence_artifact_id"),
     createdAt: utc("created_at").notNull(),
   },
   (table) => [
     uniqueIndex("run_events_sequence_uq").on(table.runId, table.sequence),
+    foreignKey({
+      columns: [table.runId, table.evidenceArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "run_events_evidence_artifact_run_fk",
+    }).onDelete("restrict"),
   ],
 );
 
@@ -183,6 +200,7 @@ export const jobs = mysqlTable(
     leaseOwnerId: id("lease_owner_id").references(() => workers.id, {
       onDelete: "restrict",
     }),
+    leaseId: id("lease_id"),
     leaseExpiresAt: utc("lease_expires_at"),
     attemptCount: int("attempt_count", { unsigned: true }).notNull().default(0),
     maxAttempts: int("max_attempts", { unsigned: true }).notNull().default(3),
@@ -192,6 +210,18 @@ export const jobs = mysqlTable(
   (table) => [
     index("jobs_claim_idx").on(table.status, table.kind, table.leaseExpiresAt),
     index("jobs_run_idx").on(table.runId),
+    check(
+      "jobs_status_ck",
+      sql`${table.status} in ('queued', 'leased', 'passed', 'failed', 'blocked')`,
+    ),
+    check(
+      "jobs_attempt_limit_ck",
+      sql`${table.attemptCount} <= ${table.maxAttempts}`,
+    ),
+    check(
+      "jobs_lease_fields_ck",
+      sql`(${table.status} = 'leased' and ${table.leaseOwnerId} is not null and ${table.leaseId} is not null and ${table.leaseExpiresAt} is not null) or (${table.status} <> 'leased' and ${table.leaseOwnerId} is null and ${table.leaseId} is null and ${table.leaseExpiresAt} is null)`,
+    ),
   ],
 );
 
@@ -205,6 +235,7 @@ export const jobAttempts = mysqlTable(
     workerId: id("worker_id")
       .notNull()
       .references(() => workers.id, { onDelete: "restrict" }),
+    leaseId: id("lease_id"),
     attempt: int("attempt", { unsigned: true }).notNull(),
     status: varchar("status", { length: 32 }).notNull(),
     resultSha256: sha256("result_sha256"),
@@ -213,7 +244,13 @@ export const jobAttempts = mysqlTable(
     startedAt: utc("started_at").notNull(),
     finishedAt: utc("finished_at"),
   },
-  (table) => [uniqueIndex("job_attempts_uq").on(table.jobId, table.attempt)],
+  (table) => [
+    uniqueIndex("job_attempts_uq").on(table.jobId, table.attempt),
+    check(
+      "job_attempts_status_ck",
+      sql`${table.status} in ('running', 'passed', 'failed', 'blocked', 'timed_out')`,
+    ),
+  ],
 );
 
 export const artifacts = mysqlTable(
@@ -231,7 +268,10 @@ export const artifacts = mysqlTable(
     provenance: json("provenance").$type<Record<string, unknown>>().notNull(),
     createdAt: utc("created_at").notNull(),
   },
-  (table) => [index("artifacts_run_idx").on(table.runId)],
+  (table) => [
+    index("artifacts_run_idx").on(table.runId),
+    uniqueIndex("artifacts_run_id_uq").on(table.runId, table.id),
+  ],
 );
 
 export const npkInventories = mysqlTable(
@@ -241,18 +281,28 @@ export const npkInventories = mysqlTable(
     projectId: id("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "restrict" }),
+    runId: id("run_id").notNull(),
     sourceLabel: varchar("source_label", { length: 200 }).notNull(),
     sourceLength: int("source_length", { unsigned: true }).notNull(),
     sourceSha256: sha256("source_sha256").notNull(),
     entryCount: int("entry_count", { unsigned: true }).notNull(),
     status: varchar("status", { length: 40 }).notNull(),
-    inventoryArtifactId: id("inventory_artifact_id").references(
-      () => artifacts.id,
-      { onDelete: "restrict" },
-    ),
+    inventoryArtifactId: id("inventory_artifact_id"),
     createdAt: utc("created_at").notNull(),
   },
-  (table) => [index("npk_inventories_project_idx").on(table.projectId)],
+  (table) => [
+    index("npk_inventories_project_idx").on(table.projectId),
+    foreignKey({
+      columns: [table.projectId, table.runId],
+      foreignColumns: [runs.projectId, runs.id],
+      name: "npk_inventories_project_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.inventoryArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "npk_inventories_inventory_artifact_run_fk",
+    }).onDelete("restrict"),
+  ],
 );
 
 export const npkInventoryEntries = mysqlTable(
@@ -290,11 +340,29 @@ export const modelCalls = mysqlTable(
     responseId: varchar("response_id", { length: 160 }),
     status: varchar("status", { length: 32 }).notNull(),
     modelEgressAuthorized: boolean("model_egress_authorized").notNull(),
+    modelEgressPerformed: boolean("model_egress_performed")
+      .notNull()
+      .default(false),
     errorCode: varchar("error_code", { length: 80 }),
     createdAt: utc("created_at").notNull(),
     finishedAt: utc("finished_at"),
   },
-  (table) => [index("model_calls_run_idx").on(table.runId)],
+  (table) => [
+    index("model_calls_run_idx").on(table.runId),
+    uniqueIndex("model_calls_run_id_uq").on(table.runId, table.id),
+    check(
+      "model_calls_status_ck",
+      sql`${table.status} in ('running', 'passed', 'failed', 'blocked', 'abandoned')`,
+    ),
+    check(
+      "model_calls_egress_ck",
+      sql`${table.modelEgressPerformed} = false or ${table.modelEgressAuthorized} = true`,
+    ),
+    check(
+      "model_calls_finished_ck",
+      sql`(${table.status} = 'running' and ${table.finishedAt} is null) or (${table.status} <> 'running' and ${table.finishedAt} is not null)`,
+    ),
+  ],
 );
 
 export const imageAttempts = mysqlTable(
@@ -304,24 +372,32 @@ export const imageAttempts = mysqlTable(
     runId: id("run_id")
       .notNull()
       .references(() => runs.id, { onDelete: "restrict" }),
-    modelCallId: id("model_call_id").references(() => modelCalls.id, {
-      onDelete: "restrict",
-    }),
+    modelCallId: id("model_call_id"),
     promptSha256: sha256("prompt_sha256").notNull(),
     inputSnapshotSha256: sha256("input_snapshot_sha256").notNull(),
     generationConfigSha256: sha256("generation_config_sha256").notNull(),
     actualSeed: varchar("actual_seed", { length: 80 }),
     adapterIdentity: varchar("adapter_identity", { length: 200 }).notNull(),
-    outputArtifactId: id("output_artifact_id").references(() => artifacts.id, {
-      onDelete: "restrict",
-    }),
+    outputArtifactId: id("output_artifact_id"),
     status: varchar("status", { length: 32 }).notNull(),
     directRuntimeUseAllowed: boolean("direct_runtime_use_allowed")
       .notNull()
       .default(false),
     createdAt: utc("created_at").notNull(),
   },
-  (table) => [index("image_attempts_run_idx").on(table.runId)],
+  (table) => [
+    index("image_attempts_run_idx").on(table.runId),
+    foreignKey({
+      columns: [table.runId, table.modelCallId],
+      foreignColumns: [modelCalls.runId, modelCalls.id],
+      name: "image_attempts_model_call_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.outputArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "image_attempts_output_artifact_run_fk",
+    }).onDelete("restrict"),
+  ],
 );
 
 export const guardrailDecisions = mysqlTable(
@@ -351,14 +427,18 @@ export const manualReviews = mysqlTable(
       .references(() => runs.id, { onDelete: "restrict" }),
     status: varchar("status", { length: 32 }).notNull(),
     reviewer: varchar("reviewer", { length: 160 }),
-    evidenceArtifactId: id("evidence_artifact_id").references(
-      () => artifacts.id,
-      { onDelete: "restrict" },
-    ),
+    evidenceArtifactId: id("evidence_artifact_id"),
     createdAt: utc("created_at").notNull(),
     completedAt: utc("completed_at"),
   },
-  (table) => [index("manual_reviews_run_idx").on(table.runId)],
+  (table) => [
+    index("manual_reviews_run_idx").on(table.runId),
+    foreignKey({
+      columns: [table.runId, table.evidenceArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "manual_reviews_evidence_artifact_run_fk",
+    }).onDelete("restrict"),
+  ],
 );
 
 export const outboxEvents = mysqlTable(

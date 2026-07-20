@@ -24,7 +24,9 @@ for (const file of sqlFiles) {
     throw new Error(`Migration contains destructive delete behavior: ${file}`);
   }
   for (const statement of sql.split("--> statement-breakpoint")) {
-    if (!/FOREIGN\s+KEY/iu.test(statement)) continue;
+    if (!/ADD\s+CONSTRAINT[\s\S]*FOREIGN\s+KEY/iu.test(statement)) {
+      continue;
+    }
     foreignKeyCount += 1;
     if (!/ON\s+DELETE\s+restrict/iu.test(statement)) {
       throw new Error(`Foreign key is not delete-restrictive in ${file}.`);

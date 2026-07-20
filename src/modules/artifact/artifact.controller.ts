@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import {
   createArtifactSchema,
@@ -12,13 +13,15 @@ export class ArtifactController {
   constructor(private readonly artifacts: ArtifactService) {}
 
   @Get()
-  list(@Param("runId") runId: string): Promise<ArtifactView[]> {
+  list(
+    @Param("runId", new ZodValidationPipe(idSchema)) runId: string,
+  ): Promise<ArtifactView[]> {
     return this.artifacts.listByRun(runId);
   }
 
   @Post()
   create(
-    @Param("runId") runId: string,
+    @Param("runId", new ZodValidationPipe(idSchema)) runId: string,
     @Body(new ZodValidationPipe(createArtifactSchema))
     input: CreateArtifactInput,
   ): Promise<ArtifactView> {

@@ -55,4 +55,21 @@ export class ProjectService {
     await this.get(projectId);
     return this.projects.createSnapshot(projectId, input, randomUUID());
   }
+
+  async getSnapshot(
+    projectId: string,
+    snapshotId: string,
+  ): Promise<ProjectSnapshotView> {
+    const snapshot = await this.projects.findSnapshotById(
+      projectId,
+      snapshotId,
+    );
+    if (!snapshot) {
+      throw new NotFoundException({
+        code: "PROJECT_SNAPSHOT_NOT_FOUND",
+        message: "项目快照不存在或不属于当前项目。",
+      });
+    }
+    return snapshot;
+  }
 }
