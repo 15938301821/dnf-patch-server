@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "tiers": [
+    { "tier": 1, "scope": "keyframe", "strategy": "source-preserving" },
+    {
+      "tier": 2,
+      "scope": "profession",
+      "strategy": "prompt-bound-frame-workflow"
+    },
+    { "tier": 3, "scope": "shared-fx", "strategy": "registered-shared-worker" },
+    { "tier": 4, "scope": "manual-review", "strategy": "human-only" }
+  ]
+}

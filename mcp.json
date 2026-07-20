@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "servers": [],
+  "policy": {
+    "networkDefault": "deny",
+    "arbitraryExecution": false,
+    "note": "MCP 适配器必须在项目规则中注册并固定版本、超时、读写边界与输出 schema。"
+  }
+}

@@ -1,0 +1,23 @@
+ALTER TABLE `project_snapshots` ADD CONSTRAINT `project_snapshots_project_id_uq` UNIQUE(`project_id`,`id`);--> statement-breakpoint
+ALTER TABLE `artifacts` ADD CONSTRAINT `artifacts_run_id_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `runs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `guardrail_decisions` ADD CONSTRAINT `guardrail_decisions_run_id_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `runs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `image_attempts` ADD CONSTRAINT `image_attempts_run_id_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `runs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `image_attempts` ADD CONSTRAINT `image_attempts_model_call_id_model_calls_id_fk` FOREIGN KEY (`model_call_id`) REFERENCES `model_calls`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `image_attempts` ADD CONSTRAINT `image_attempts_output_artifact_id_artifacts_id_fk` FOREIGN KEY (`output_artifact_id`) REFERENCES `artifacts`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `job_attempts` ADD CONSTRAINT `job_attempts_job_id_jobs_id_fk` FOREIGN KEY (`job_id`) REFERENCES `jobs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `job_attempts` ADD CONSTRAINT `job_attempts_worker_id_workers_id_fk` FOREIGN KEY (`worker_id`) REFERENCES `workers`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `jobs` ADD CONSTRAINT `jobs_run_id_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `runs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `jobs` ADD CONSTRAINT `jobs_lease_owner_id_workers_id_fk` FOREIGN KEY (`lease_owner_id`) REFERENCES `workers`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `manual_reviews` ADD CONSTRAINT `manual_reviews_run_id_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `runs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `manual_reviews` ADD CONSTRAINT `manual_reviews_evidence_artifact_id_artifacts_id_fk` FOREIGN KEY (`evidence_artifact_id`) REFERENCES `artifacts`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `model_calls` ADD CONSTRAINT `model_calls_run_id_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `runs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `npk_inventories` ADD CONSTRAINT `npk_inventories_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `npk_inventories` ADD CONSTRAINT `npk_inventories_inventory_artifact_id_artifacts_id_fk` FOREIGN KEY (`inventory_artifact_id`) REFERENCES `artifacts`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `npk_inventory_entries` ADD CONSTRAINT `npk_inventory_entries_inventory_id_npk_inventories_id_fk` FOREIGN KEY (`inventory_id`) REFERENCES `npk_inventories`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `project_snapshots` ADD CONSTRAINT `project_snapshots_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `projects` ADD CONSTRAINT `projects_factory_id_factories_id_fk` FOREIGN KEY (`factory_id`) REFERENCES `factories`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `run_events` ADD CONSTRAINT `run_events_run_id_runs_id_fk` FOREIGN KEY (`run_id`) REFERENCES `runs`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `run_events` ADD CONSTRAINT `run_events_evidence_artifact_id_artifacts_id_fk` FOREIGN KEY (`evidence_artifact_id`) REFERENCES `artifacts`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `runs` ADD CONSTRAINT `runs_project_id_projects_id_fk` FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `runs` ADD CONSTRAINT `runs_snapshot_id_project_snapshots_id_fk` FOREIGN KEY (`snapshot_id`) REFERENCES `project_snapshots`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `runs` ADD CONSTRAINT `runs_snapshot_project_fk` FOREIGN KEY (`project_id`,`snapshot_id`) REFERENCES `project_snapshots`(`project_id`,`id`) ON DELETE restrict ON UPDATE no action;
