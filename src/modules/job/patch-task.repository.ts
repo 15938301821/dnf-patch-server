@@ -6,7 +6,7 @@
  * @relatedPlan N/A（对应当前前端业务与后端工作流直接需求）
  */
 import { Injectable } from "@nestjs/common";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { DatabaseService } from "../../common/db/database.service.js";
 import {
   artifacts,
@@ -24,7 +24,6 @@ import {
 import type {
   PatchTaskArtifactView,
   PatchTaskReportResult,
-  PatchTaskStatus,
   PatchTaskView,
   PlannedPatchTaskPackage,
   PlannedPatchTaskSkill,
@@ -32,6 +31,7 @@ import type {
   ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
 import { validateLeaseMutation } from "./job-lease.js";
+import { mapPatchTaskStatus } from "./patch-task-status.js";
 
 @Injectable()
 export class PatchTaskRepository {
@@ -40,17 +40,44 @@ export class PatchTaskRepository {
   async createPlan(
     pack: PlannedPatchTaskPackage,
     skills: PlannedPatchTaskSkill[],
+    disposition: "dispatch" | "blocked",
   ): Promise<void> {
     const now = new Date();
     await this.connection.database.transaction(async (transaction) => {
+      const [run] = await transaction
+        .select({ id: runs.id })
+        .from(runs)
+        .where(eq(runs.id, pack.runId))
+        .limit(1)
+        .for("update");
+      if (!run) throw new Error("PATCH_TASK_RUN_NOT_FOUND");
+      const [existing] = await transaction
+        .select({
+          professionId: stylePackages.professionId,
+          styleId: stylePackages.styleId,
+        })
+        .from(stylePackages)
+        .where(eq(stylePackages.runId, pack.runId))
+        .limit(1)
+        .for("update");
+      if (existing) {
+        if (
+          existing.professionId !== pack.professionId ||
+          existing.styleId !== pack.styleId
+        ) {
+          throw new Error("PATCH_TASK_IDEMPOTENCY_PLAN_MISMATCH");
+        }
+        return;
+      }
       await transaction.insert(stylePackages).values({
         id: pack.id,
         professionId: pack.professionId,
         styleId: pack.styleId,
         runId: pack.runId,
-        status: "queued",
+        status: disposition === "dispatch" ? "queued" : "blocked",
         createdAt: now,
         updatedAt: now,
+        ...(disposition === "blocked" ? { finishedAt: now } : {}),
       });
       await transaction.insert(styleSkillProductions).values(
         skills.map((skill) => ({
@@ -62,11 +89,27 @@ export class PatchTaskRepository {
           sourceRunId: skill.sourceRunId,
           sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
           promptSha256: skill.promptSha256,
-          status: "planned",
+          status: disposition === "dispatch" ? "planned" : "blocked",
           createdAt: now,
           updatedAt: now,
+          ...(disposition === "blocked" ? { finishedAt: now } : {}),
         })),
       );
+      if (disposition === "blocked") return;
+      const activation = await transaction
+        .update(jobs)
+        .set({ dispatchReadyAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(jobs.runId, pack.runId),
+            eq(jobs.kind, "profession"),
+            eq(jobs.status, "queued"),
+            isNull(jobs.dispatchReadyAt),
+          ),
+        );
+      if (activation[0].affectedRows !== 1) {
+        throw new Error("PATCH_TASK_DISPATCH_ACTIVATION_FAILED");
+      }
     });
   }
 
@@ -117,7 +160,7 @@ export class PatchTaskRepository {
       id: row.id,
       professionName: row.professionName,
       styleName: row.styleName,
-      status: toPatchTaskStatus(row.runStatus, row.packageStatus),
+      status: mapPatchTaskStatus(row.runStatus, row.packageStatus),
       progress: progress(row.totalSkills, row.passedSkills, row.runStatus),
       createdAt: row.createdAt.toISOString(),
       ...(row.artifactName ? { artifactName: row.artifactName } : {}),
@@ -360,18 +403,6 @@ function isTerminalProduction(status: string): boolean {
 
 function isTerminalPackage(status: string): boolean {
   return status === "passed" || status === "failed" || status === "blocked";
-}
-
-function toPatchTaskStatus(
-  runStatus: string,
-  packageStatus: string,
-): PatchTaskStatus {
-  if (runStatus === "failed" || packageStatus === "failed") return "failed";
-  if (runStatus === "passed" && packageStatus === "passed") return "passed";
-  if (runStatus === "running" || packageStatus === "building") {
-    return "running";
-  }
-  return "queued";
 }
 
 function progress(

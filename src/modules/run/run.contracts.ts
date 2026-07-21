@@ -103,4 +103,8 @@ export interface RunView {
   finishedAtUtc?: string;
 }
 
+export interface RunCreateOptions {
+  deferJobDispatch?: boolean;
+}
+
 export type RunEventView = z.infer<typeof runEventSchema>;

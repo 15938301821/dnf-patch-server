@@ -5,16 +5,22 @@
  * @created 2026-07-21
  * @relatedPlan N/A（对应当前前端业务与后端工作流直接需求）
  */
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import {
+  ConflictException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PatchTaskService } from "./patch-task.service.js";
 import type { StyleBuildContext } from "../profession/profession.contracts.js";
+import { createRunSchema } from "../run/run.contracts.js";
 
 const professionId = "11111111-1111-4111-8111-111111111111";
 const styleId = "22222222-2222-4222-8222-222222222222";
 const workflowProjectId = "33333333-3333-4333-8333-333333333333";
 const snapshotId = "44444444-4444-4444-8444-444444444444";
 const sourceRunId = "55555555-5555-4555-8555-555555555555";
+const idempotencyKey = "patch.test-request";
 
 describe("PatchTaskService", () => {
   const patchTasks = {
@@ -27,7 +33,7 @@ describe("PatchTaskService", () => {
   const professions = { getStyleBuildContext: vi.fn() };
   const factories = { get: vi.fn() };
   const projects = { get: vi.fn() };
-  const runs = { create: vi.fn() };
+  const runs = { create: vi.fn(), blockDeferredDispatch: vi.fn() };
   let service: PatchTaskService;
 
   beforeEach(() => {
@@ -56,11 +62,12 @@ describe("PatchTaskService", () => {
       id: "66666666-6666-4666-8666-666666666666",
       createdAtUtc: "2026-07-21T00:00:00.000Z",
     });
+    runs.blockDeferredDispatch.mockResolvedValue(undefined);
   });
 
   it("creates one guarded profession job and planned skill productions", async () => {
     await expect(
-      service.create({ professionId, styleId }),
+      service.create({ professionId, styleId }, idempotencyKey),
     ).resolves.toMatchObject({
       professionName: "剑魂",
       styleName: "暗蓝幻影",
@@ -73,12 +80,67 @@ describe("PatchTaskService", () => {
         action: "generate-patch",
         jobs: [expect.objectContaining({ kind: "profession" })],
       }),
-      expect.stringMatching(/^patch\./u),
+      idempotencyKey,
+      { deferJobDispatch: true },
     );
+    const createInput = createRunSchema.parse(
+      runs.create.mock.calls[0]?.[0] as unknown,
+    );
+    expect(createInput.clientRunId).toMatch(/^patch\.[A-F0-9]{64}$/u);
     expect(patchTasks.createPlan).toHaveBeenCalledWith(
       expect.objectContaining({ professionId, styleId }),
       [expect.objectContaining({ sourceRunId })],
+      "dispatch",
     );
+  });
+
+  it("persists an auditable blocked plan without dispatching it", async () => {
+    runs.create.mockResolvedValue({
+      id: "66666666-6666-4666-8666-666666666666",
+      status: "blocked",
+      createdAtUtc: "2026-07-21T00:00:00.000Z",
+    });
+
+    await expect(
+      service.create({ professionId, styleId }, idempotencyKey),
+    ).resolves.toMatchObject({ status: "blocked" });
+    expect(patchTasks.createPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ professionId, styleId }),
+      [expect.objectContaining({ sourceRunId })],
+      "blocked",
+    );
+  });
+
+  it("blocks a deferred Run when plan persistence fails", async () => {
+    patchTasks.createPlan.mockRejectedValue(new Error("database failure"));
+
+    const error: unknown = await service
+      .create({ professionId, styleId }, idempotencyKey)
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    if (!(error instanceof ServiceUnavailableException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "PATCH_TASK_PLAN_FAILED",
+      runId: "66666666-6666-4666-8666-666666666666",
+    });
+    expect(runs.blockDeferredDispatch).toHaveBeenCalledWith(
+      "66666666-6666-4666-8666-666666666666",
+    );
+  });
+
+  it("reports an unresolved compensation without leaking the cause", async () => {
+    patchTasks.createPlan.mockRejectedValue(new Error("database failure"));
+    runs.blockDeferredDispatch.mockRejectedValue(new Error("database offline"));
+
+    const error: unknown = await service
+      .create({ professionId, styleId }, idempotencyKey)
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    if (!(error instanceof ServiceUnavailableException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "PATCH_TASK_PLAN_COMPENSATION_FAILED",
+      runId: "66666666-6666-4666-8666-666666666666",
+    });
   });
 
   it("fails closed when the profession has no workflow project", async () => {
@@ -90,7 +152,7 @@ describe("PatchTaskService", () => {
       },
     });
     await expect(
-      service.create({ professionId, styleId }),
+      service.create({ professionId, styleId }, idempotencyKey),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(runs.create).not.toHaveBeenCalled();
   });

@@ -69,6 +69,7 @@ export class JobRepository {
         .where(
           and(
             inArray(jobs.kind, capabilities),
+            sql`${jobs.dispatchReadyAt} is not null`,
             lt(jobs.attemptCount, jobs.maxAttempts),
             or(
               eq(jobs.status, "queued"),

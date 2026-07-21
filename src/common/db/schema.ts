@@ -202,13 +202,21 @@ export const jobs = mysqlTable(
     }),
     leaseId: id("lease_id"),
     leaseExpiresAt: utc("lease_expires_at"),
+    dispatchReadyAt: utc("dispatch_ready_at").default(
+      sql`CURRENT_TIMESTAMP(3)`,
+    ),
     attemptCount: int("attempt_count", { unsigned: true }).notNull().default(0),
     maxAttempts: int("max_attempts", { unsigned: true }).notNull().default(3),
     createdAt: utc("created_at").notNull(),
     updatedAt: utc("updated_at").notNull(),
   },
   (table) => [
-    index("jobs_claim_idx").on(table.status, table.kind, table.leaseExpiresAt),
+    index("jobs_claim_idx").on(
+      table.status,
+      table.kind,
+      table.dispatchReadyAt,
+      table.leaseExpiresAt,
+    ),
     index("jobs_run_idx").on(table.runId),
     uniqueIndex("jobs_run_id_uq").on(table.runId, table.id),
     check(

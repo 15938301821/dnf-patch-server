@@ -268,6 +268,18 @@ export async function exerciseApi({
       },
       201,
     );
+    const deferredJobId = await deferQueuedJob(database, retryRun.id);
+    const deferredClaim = await requestJson(
+      baseUrl,
+      "/internal/jobs/claim",
+      { method: "POST", workerToken, body: { workerId } },
+      201,
+    );
+    assert(
+      deferredClaim === undefined,
+      "Worker claimed a Job before its dispatch plan was ready.",
+    );
+    await activateDeferredJob(database, deferredJobId);
     const firstLease = await requestJson(
       baseUrl,
       "/internal/jobs/claim",
@@ -388,12 +400,39 @@ export async function exerciseApi({
       reclaimedWithNewLease: true,
       staleLeaseRejected: true,
       tokenlessRetryRejected: true,
+      deferredDispatchEnforced: true,
       integrityFailureQuarantined: true,
     },
     evidence: { httpOwnershipEnforced: evidence.httpOwnershipEnforced },
     liveEventsReceived: true,
   };
 }
+
+async function deferQueuedJob(database, runId) {
+  const [result] = await database.query(
+    "UPDATE jobs SET dispatch_ready_at = NULL WHERE run_id = ? AND status = 'queued'",
+    [runId],
+  );
+  assert(result.affectedRows === 1, "Could not defer the queued test Job.");
+  const [rows] = await database.query(
+    "SELECT id FROM jobs WHERE run_id = ? AND dispatch_ready_at IS NULL",
+    [runId],
+  );
+  assert(rows.length === 1, "Deferred test Job was not persisted.");
+  return rows[0].id;
+}
+
+async function activateDeferredJob(database, jobId) {
+  const [result] = await database.query(
+    "UPDATE jobs SET dispatch_ready_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND dispatch_ready_at IS NULL",
+    [jobId],
+  );
+  assert(
+    result.affectedRows === 1,
+    "Could not activate the deferred test Job.",
+  );
+}
+
 function createRunBody(projectId, snapshotId, overrides = {}) {
   return {
     projectId,

@@ -10,6 +10,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { sha256Json, sha256JcsV1 } from "../../common/utils/canonical.js";
@@ -17,7 +18,7 @@ import { FactoryService } from "../factory/factory.service.js";
 import { ProfessionService } from "../profession/profession.service.js";
 import { ProjectService } from "../project/project.service.js";
 import { RunService } from "../run/run.service.js";
-import type { CreateRunInput } from "../run/run.contracts.js";
+import type { CreateRunInput, RunCreateOptions } from "../run/run.contracts.js";
 import type {
   CreatePatchTaskInput,
   PatchTaskArtifactView,
@@ -34,6 +35,7 @@ interface PatchTaskRepositoryPort {
   createPlan(
     pack: Parameters<PatchTaskRepository["createPlan"]>[0],
     skills: PlannedPatchTaskSkill[],
+    disposition: "dispatch" | "blocked",
   ): Promise<void>;
   findArtifact(runId: string): Promise<PatchTaskArtifactView | undefined>;
   reportSkillProduction(
@@ -65,7 +67,11 @@ interface RunCreatePort {
   create(
     input: CreateRunInput,
     idempotencyKey: string,
+    options?: RunCreateOptions,
   ): ReturnType<RunService["create"]>;
+  blockDeferredDispatch(
+    runId: string,
+  ): ReturnType<RunService["blockDeferredDispatch"]>;
 }
 
 @Injectable()
@@ -84,7 +90,10 @@ export class PatchTaskService {
     return this.patchTasks.list();
   }
 
-  async create(input: CreatePatchTaskInput): Promise<PatchTaskView> {
+  async create(
+    input: CreatePatchTaskInput,
+    idempotencyKey: string,
+  ): Promise<PatchTaskView> {
     const context = await this.professions.getStyleBuildContext(
       input.professionId,
       input.styleId,
@@ -105,37 +114,57 @@ export class PatchTaskService {
         message: "制作任务需要使用 Factory v2 工作流。",
       });
     }
-    const runIdempotencyKey = `patch.${context.style.id}.${crypto.randomUUID()}`;
-    const runInput = createRunInput(context, factory.config);
-    const run = await this.runs.create(runInput, runIdempotencyKey);
-    await this.patchTasks.createPlan(
-      {
-        id: randomUUID(),
-        professionId: context.profession.id,
-        styleId: context.style.id,
-        runId: run.id,
-      },
-      context.skills.map(
-        (skill): PlannedPatchTaskSkill => ({
+    const runInput = createRunInput(context, factory.config, idempotencyKey);
+    const run = await this.runs.create(runInput, idempotencyKey, {
+      deferJobDispatch: true,
+    });
+    try {
+      await this.patchTasks.createPlan(
+        {
+          id: randomUUID(),
           professionId: context.profession.id,
           styleId: context.style.id,
-          skillId: skill.id,
-          sourceRunId: skill.sourceRunId,
-          sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
-          sourceMetadataSha256: skill.sourceMetadataSha256,
-          promptSha256: sha256Json({
-            stylePrompt: context.style.prompt,
+          runId: run.id,
+        },
+        context.skills.map(
+          (skill): PlannedPatchTaskSkill => ({
+            professionId: context.profession.id,
+            styleId: context.style.id,
             skillId: skill.id,
+            sourceRunId: skill.sourceRunId,
+            sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
             sourceMetadataSha256: skill.sourceMetadataSha256,
+            promptSha256: sha256Json({
+              stylePrompt: context.style.prompt,
+              skillId: skill.id,
+              sourceMetadataSha256: skill.sourceMetadataSha256,
+            }),
           }),
-        }),
-      ),
-    );
+        ),
+        run.status === "blocked" ? "blocked" : "dispatch",
+      );
+    } catch {
+      try {
+        await this.runs.blockDeferredDispatch(run.id);
+      } catch {
+        throw new ServiceUnavailableException({
+          code: "PATCH_TASK_PLAN_COMPENSATION_FAILED",
+          message:
+            "制作任务计划失败，且安全补偿未能确认，请稍后查询 Run 状态。",
+          runId: run.id,
+        });
+      }
+      throw new ServiceUnavailableException({
+        code: "PATCH_TASK_PLAN_FAILED",
+        message: "制作任务计划未能完整建立，Run 已安全阻断。",
+        runId: run.id,
+      });
+    }
     return {
       id: run.id,
       professionName: context.profession.name,
       styleName: context.style.name,
-      status: "queued",
+      status: run.status === "blocked" ? "blocked" : "queued",
       progress: 0,
       createdAt: run.createdAtUtc,
     };
@@ -278,6 +307,7 @@ type FactoryV2Config = Extract<
 function createRunInput(
   context: Awaited<ReturnType<ProfessionService["getStyleBuildContext"]>>,
   factoryConfig: FactoryV2Config,
+  idempotencyKey: string,
 ): CreateRunInput {
   if (
     !context.profession.workflowProjectId ||
@@ -314,7 +344,11 @@ function createRunInput(
   return {
     projectId: context.profession.workflowProjectId,
     snapshotId: context.profession.catalogSnapshotId,
-    clientRunId: `style.${crypto.randomUUID()}`,
+    clientRunId: `patch.${sha256JcsV1({
+      idempotencyKey,
+      professionId: context.profession.id,
+      styleId: context.style.id,
+    })}`,
     action: "generate-patch",
     requestSha256: sha256JcsV1(requestBody),
     serverConnectionEnabled: true,

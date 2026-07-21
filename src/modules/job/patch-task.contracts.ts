@@ -113,7 +113,12 @@ export type ReportPatchTaskSkillProductionInput = z.infer<
 export type ReportPatchTaskPackageInput = z.infer<
   typeof reportPatchTaskPackageSchema
 >;
-export type PatchTaskStatus = "queued" | "running" | "passed" | "failed";
+export type PatchTaskStatus =
+  | "queued"
+  | "running"
+  | "passed"
+  | "failed"
+  | "blocked";
 
 export type PatchTaskReportStatus =
   | "accepted"

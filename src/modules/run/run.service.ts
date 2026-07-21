@@ -12,6 +12,7 @@ import { parseJobPayload } from "../job/job-payload-contracts.js";
 import { ProjectService } from "../project/project.service.js";
 import type {
   CreateRunInput,
+  RunCreateOptions,
   RunEventQuery,
   RunEventView,
   RunView,
@@ -42,6 +43,7 @@ export class RunService {
   async create(
     input: CreateRunInput,
     idempotencyKey: string,
+    options: RunCreateOptions = {},
   ): Promise<RunView> {
     const requestFingerprintSha256 = createRunRequestFingerprint(input);
     const existing = await this.runs.findByIdempotency(
@@ -126,6 +128,7 @@ export class RunService {
           requestFingerprintSha256,
           randomUUID(),
           decisions,
+          options,
         )
       ).run;
     } catch (error) {
@@ -150,6 +153,13 @@ export class RunService {
   async events(id: string, query: RunEventQuery): Promise<RunEventView[]> {
     await this.get(id);
     return this.runs.events(id, query);
+  }
+
+  /** 计划事务失败时只阻断尚未派发的 Job，并由 Repository 同步写入权威事件。 */
+  async blockDeferredDispatch(runId: string): Promise<void> {
+    if (!(await this.runs.blockDeferredDispatch(runId))) {
+      throw new Error("DEFERRED_JOB_COMPENSATION_CONFLICT");
+    }
   }
 
   private resolveReplay(

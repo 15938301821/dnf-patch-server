@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Res,
@@ -21,6 +23,7 @@ import {
   type JobView,
 } from "./job.contracts.js";
 import { JobService } from "./job.service.js";
+import { idempotencyKeySchema } from "../run/run.contracts.js";
 import {
   createPatchTaskSchema,
   reportPatchTaskPackageSchema,
@@ -43,10 +46,20 @@ export class PatchTaskController {
 
   @Post()
   create(
+    @Headers("idempotency-key") idempotencyKey: unknown,
     @Body(new ZodValidationPipe(createPatchTaskSchema))
     input: CreatePatchTaskInput,
   ): Promise<{ data: PatchTaskView }> {
-    return this.patchTasks.create(input).then((data) => ({ data }));
+    const parsed = idempotencyKeySchema.safeParse(idempotencyKey);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        code: "IDEMPOTENCY_KEY_INVALID",
+        message: "Idempotency-Key 请求头缺失或格式无效。",
+      });
+    }
+    return this.patchTasks
+      .create(input, parsed.data)
+      .then((data) => ({ data }));
   }
 
   @Get(":id/artifact")

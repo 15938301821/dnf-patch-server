@@ -142,6 +142,7 @@ export async function inspectSchema(connection) {
   );
   const requiredColumns = [
     "job_attempts.lease_id",
+    "jobs.dispatch_ready_at",
     "jobs.lease_id",
     "model_calls.model_egress_performed",
     "npk_inventories.run_id",

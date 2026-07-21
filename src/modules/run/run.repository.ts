@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, max } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { immutableSafetyStateSchema } from "../../common/contracts/index.js";
 import { DatabaseService } from "../../common/db/database.service.js";
@@ -15,6 +15,7 @@ import type { GuardrailEvaluation } from "../guardrail/guardrail.contracts.js";
 import type { JobView } from "../job/job.contracts.js";
 import type {
   CreateRunInput,
+  RunCreateOptions,
   RunEventQuery,
   RunEventView,
   RunView,
@@ -88,6 +89,7 @@ export class RunRepository {
     requestFingerprintSha256: string,
     id: string,
     decisions: GuardrailEvaluation[],
+    options: RunCreateOptions = {},
   ): Promise<CreateRunTransactionResult> {
     const now = new Date();
     const blocked = decisions.some((decision) => decision.decision === "deny");
@@ -146,6 +148,7 @@ export class RunRepository {
             status: job.status,
             payload: job.payload,
             payloadSha256: job.payloadSha256,
+            dispatchReadyAt: options.deferJobDispatch ? null : now,
             attemptCount: 0,
             maxAttempts: job.maxAttempts,
             createdAt: now,
@@ -202,6 +205,81 @@ export class RunRepository {
         jobs: jobViews,
         event,
       };
+    });
+  }
+
+  /** 仅补偿尚未开放领取的 Run，避免计划失败留下永久 queued Job。 */
+  async blockDeferredDispatch(runId: string): Promise<boolean> {
+    return this.connection.database.transaction(async (transaction) => {
+      const [run] = await transaction
+        .select({ status: runs.status })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1)
+        .for("update");
+      if (!run) return false;
+      if (run.status === "blocked") return true;
+      if (run.status !== "queued") return false;
+      const deferredJobs = await transaction
+        .select({
+          id: jobs.id,
+          status: jobs.status,
+          dispatchReadyAt: jobs.dispatchReadyAt,
+        })
+        .from(jobs)
+        .where(eq(jobs.runId, runId))
+        .for("update");
+      if (
+        deferredJobs.length === 0 ||
+        deferredJobs.some(
+          (job) => job.status !== "queued" || job.dispatchReadyAt !== null,
+        )
+      ) {
+        return false;
+      }
+      const now = new Date();
+      await transaction
+        .update(jobs)
+        .set({ status: "blocked", updatedAt: now })
+        .where(eq(jobs.runId, runId));
+      await transaction
+        .update(runs)
+        .set({
+          status: "blocked",
+          currentStage: "planning",
+          updatedAt: now,
+          finishedAt: now,
+        })
+        .where(eq(runs.id, runId));
+      const [sequenceRow] = await transaction
+        .select({ sequence: max(runEvents.sequence) })
+        .from(runEvents)
+        .where(eq(runEvents.runId, runId));
+      const event: RunEventView = {
+        runId,
+        sequence: (sequenceRow?.sequence ?? -1) + 1,
+        level: "error",
+        stage: "planning",
+        message: "制作任务计划未能完整持久化，Run 已安全阻断。",
+        createdAtUtc: now.toISOString(),
+      };
+      await transaction.insert(runEvents).values({
+        id: randomUUID(),
+        runId,
+        sequence: event.sequence,
+        level: event.level,
+        stage: event.stage,
+        message: event.message,
+        createdAt: now,
+      });
+      await transaction.insert(outboxEvents).values({
+        id: randomUUID(),
+        topic: "run.event",
+        aggregateId: runId,
+        payload: { ...event },
+        createdAt: now,
+      });
+      return true;
     });
   }
 
