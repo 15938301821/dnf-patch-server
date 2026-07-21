@@ -7,7 +7,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
-import type { Response } from "express";
+import type { FastifyReply } from "fastify";
 import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import { WorkerTokenGuard } from "../../common/security/worker-token.guard.js";
@@ -52,13 +52,13 @@ export class PatchTaskController {
   @Get(":id/artifact")
   async artifact(
     @Param("id", new ZodValidationPipe(idSchema)) id: string,
-    @Res() response: Response,
+    @Res() response: FastifyReply,
   ): Promise<void> {
     const artifact = await this.patchTasks.findArtifact(id);
-    response
-      .status(200)
+    await response
+      .code(200)
       .type("application/json")
-      .setHeader(
+      .header(
         "Content-Disposition",
         `attachment; filename="${downloadFileName(artifact.artifactName)}"`,
       )

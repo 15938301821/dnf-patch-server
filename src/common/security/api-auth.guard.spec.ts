@@ -87,8 +87,8 @@ function context(
     switchToHttp: () => ({
       getRequest: () => ({
         method,
-        path,
-        header: (name: string) => headers[name.toLowerCase()],
+        url: path,
+        headers,
       }),
     }),
   } as ExecutionContext;

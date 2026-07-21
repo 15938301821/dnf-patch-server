@@ -13,6 +13,7 @@
     "check:migrations": "node scripts/check-migrations.mjs",
     "validate:project": "node scripts/validate-project.mjs",
     "test:smoke": "node scripts/smoke-dist.mjs",
+    "test:startup-exceptions": "npm run build && node scripts/audit-startup-exceptions.mjs",
     "test:mysql": "npm run build && node scripts/test-mysql-runtime.mjs",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
@@ -28,9 +29,11 @@
     "@nestjs/common": "11.1.6",
     "@nestjs/config": "4.0.2",
     "@nestjs/core": "11.1.6",
-    "@nestjs/platform-express": "11.1.6",
+    "@nestjs/microservices": "11.1.6",
+    "@nestjs/platform-fastify": "^11.1.6",
     "@nestjs/platform-socket.io": "11.1.6",
     "@nestjs/websockets": "11.1.6",
+    "cardinal": "2.1.1",
     "drizzle-orm": "0.44.5",
     "mysql2": "3.15.3",
     "openai": "6.48.0",
@@ -54,7 +57,8 @@
     "tsx": "4.23.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.48.1",
-    "vitest": "4.0.15"
+    "vitest": "4.0.15",
+    "ws": "^8.21.1"
   },
   "engines": {
     "node": ">=20.19.0"

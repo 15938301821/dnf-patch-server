@@ -76,6 +76,19 @@ export class NpkService {
     return this.inventories.list(projectId);
   }
 
+  /** 查询项目最近的 frozen Inventory，用于展示已验证的历史导入版本。 */
+  findLatest(projectId: string): Promise<InventoryView | undefined> {
+    return this.inventories.findLatest(projectId);
+  }
+
+  /** 查询指定 producing Run 的 frozen Inventory 元数据，不返回资源正文。 */
+  findByRun(
+    projectId: string,
+    runId: string,
+  ): Promise<InventoryView | undefined> {
+    return this.inventories.findByRun(projectId, runId);
+  }
+
   /** 提供已冻结 Inventory Entry 的最小归属证据，不返回 NPK/IMG 正文。 */
   async getEntryEvidence(
     inventoryId: string,

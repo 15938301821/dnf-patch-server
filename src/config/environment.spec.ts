@@ -19,6 +19,7 @@ describe("environment configuration", () => {
       OUTBOX_DISPATCH_BATCH_SIZE: 25,
       WORKER_REAPER_INTERVAL_MS: 5_000,
       WORKER_REAPER_BATCH_SIZE: 25,
+      RESOURCE_IMPORT_SERVER_MIRROR_ENABLED: false,
     });
   });
 
@@ -46,5 +47,23 @@ describe("environment configuration", () => {
         WORKER_SHARED_TOKEN: token,
       }),
     ).toThrow();
+  });
+
+  it("requires project and snapshot identifiers when resource import is enabled", () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment(),
+        RESOURCE_IMPORT_SERVER_MIRROR_ENABLED: "true",
+      }),
+    ).toThrow();
+
+    expect(
+      validateEnvironment({
+        ...validEnvironment(),
+        RESOURCE_IMPORT_SERVER_MIRROR_ENABLED: "true",
+        RESOURCE_IMPORT_PROJECT_ID: "11111111-1111-4111-8111-111111111111",
+        RESOURCE_IMPORT_SNAPSHOT_ID: "22222222-2222-4222-8222-222222222222",
+      }).RESOURCE_IMPORT_SERVER_MIRROR_ENABLED,
+    ).toBe(true);
   });
 });

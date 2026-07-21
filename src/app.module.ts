@@ -10,6 +10,7 @@ import { GuardrailModule } from "./modules/guardrail/guardrail.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 import { ImageModule } from "./modules/image/image.module.js";
 import { JobModule } from "./modules/job/job.module.js";
+import { ResourceImportModule } from "./modules/job/resource-import.module.js";
 import { ModelConfigurationModule } from "./modules/model-configuration/model-configuration.module.js";
 import { NpkModule } from "./modules/npk/npk.module.js";
 import { OpenAiModule } from "./modules/openai/openai.module.js";
@@ -33,6 +34,7 @@ import { WorkerModule } from "./modules/worker/worker.module.js";
     ProjectModule,
     RunModule,
     JobModule,
+    ResourceImportModule,
     ModelConfigurationModule,
     WorkerModule,
     ArtifactModule,

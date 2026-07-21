@@ -1,18 +1,24 @@
+import "./config/websocket-runtime.js";
 import "reflect-metadata";
 import { Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
+import {
+  FastifyAdapter,
+  type NestFastifyApplication,
+} from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module.js";
 import { HttpExceptionFilter } from "./common/http/http-exception.filter.js";
 import type { Environment } from "./config/environment.js";
 import { parseCorsOrigins } from "./config/environment.js";
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter(),
+    { bufferLogs: true },
+  );
   const config = app.get(ConfigService<Environment, true>);
-
-  console.log("正在启动 DNF Patch Server...", config);
-
   const host = config.getOrThrow("HOST", { infer: true });
   const port = config.getOrThrow("PORT", { infer: true });
   const origins = parseCorsOrigins(
@@ -23,7 +29,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.enableCors({
     origin: origins,
-    credentials: false,
+    credentials: true,
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: [
       "Authorization",

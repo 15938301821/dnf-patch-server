@@ -17,6 +17,8 @@ describe("NpkService evidence ownership", () => {
   const inventories = {
     create: vi.fn(),
     list: vi.fn(),
+    findLatest: vi.fn(),
+    findByRun: vi.fn(),
     findEntryEvidence: vi.fn(),
   };
   const runs = { get: vi.fn() };

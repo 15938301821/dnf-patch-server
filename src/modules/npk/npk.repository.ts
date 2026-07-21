@@ -18,6 +18,11 @@ export interface NpkRepositoryPort {
     input: CreateInventoryInput,
   ): Promise<InventoryView>;
   list(projectId: string): Promise<InventoryView[]>;
+  findLatest(projectId: string): Promise<InventoryView | undefined>;
+  findByRun(
+    projectId: string,
+    runId: string,
+  ): Promise<InventoryView | undefined>;
   findEntryEvidence(
     inventoryId: string,
     entryId: string,
@@ -82,6 +87,40 @@ export class NpkRepository implements NpkRepositoryPort {
       .where(eq(npkInventories.projectId, projectId))
       .orderBy(desc(npkInventories.createdAt));
     return rows.map(toInventoryView);
+  }
+
+  async findLatest(projectId: string): Promise<InventoryView | undefined> {
+    const [row] = await this.connection.database
+      .select()
+      .from(npkInventories)
+      .where(
+        and(
+          eq(npkInventories.projectId, projectId),
+          eq(npkInventories.status, "frozen"),
+        ),
+      )
+      .orderBy(desc(npkInventories.createdAt))
+      .limit(1);
+    return row ? toInventoryView(row) : undefined;
+  }
+
+  async findByRun(
+    projectId: string,
+    runId: string,
+  ): Promise<InventoryView | undefined> {
+    const [row] = await this.connection.database
+      .select()
+      .from(npkInventories)
+      .where(
+        and(
+          eq(npkInventories.projectId, projectId),
+          eq(npkInventories.runId, runId),
+          eq(npkInventories.status, "frozen"),
+        ),
+      )
+      .orderBy(desc(npkInventories.createdAt))
+      .limit(1);
+    return row ? toInventoryView(row) : undefined;
   }
 
   async findEntryEvidence(

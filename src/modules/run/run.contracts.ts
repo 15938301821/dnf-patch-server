@@ -13,6 +13,7 @@ export const createRunSchema = z
       "generate-patch",
       "validate-only",
       "package-bpk",
+      "import-resources",
     ]),
     requestSha256: sha256Schema,
     serverConnectionEnabled: z.literal(true).default(true),

@@ -2,6 +2,14 @@ import { z } from "zod";
 import { boundedJsonRecordSchema } from "../../common/contracts/index.js";
 import { allowedJobKindSchema } from "../guardrail/guardrail.contracts.js";
 
+export const persistedJobStatusSchema = z.enum([
+  "queued",
+  "leased",
+  "passed",
+  "failed",
+  "blocked",
+]);
+
 export const createJobSchema = z
   .object({
     kind: allowedJobKindSchema,
@@ -66,6 +74,14 @@ export interface JobView {
   leaseExpiresAtUtc?: string;
   attemptCount: number;
   maxAttempts: number;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface JobStateView {
+  id: string;
+  runId: string;
+  status: z.infer<typeof persistedJobStatusSchema>;
   createdAtUtc: string;
   updatedAtUtc: string;
 }

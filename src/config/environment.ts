@@ -25,11 +25,17 @@ export const environmentSchema = z
       .enum(["development", "test", "production"])
       .default("development"),
     HOST: loopbackHostSchema.default("127.0.0.1"),
-    PORT: z.coerce.number().int().min(1).max(65_535).default(56_789),
-    CORS_ORIGINS: z.string().default("http://127.0.0.1:3000"),
+    PORT: z.coerce.number().int().min(1).max(65_535).default(56_789), // 仅允许非特权端口，避免与系统服务冲突。
+    CORS_ORIGINS: z.string().default("http://127.0.0.1:3000"), // 仅允许本地开发环境访问，避免意外暴露服务。
     DATABASE_URL: z.string().regex(/^mysql:\/\//u),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
     DNF_REPOSITORY_ROOT: z.string().min(1).default("../dnf-patch"),
+    RESOURCE_IMPORT_SERVER_MIRROR_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    RESOURCE_IMPORT_PROJECT_ID: z.uuid().optional(),
+    RESOURCE_IMPORT_SNAPSHOT_ID: z.uuid().optional(),
     CLIENT_SHARED_TOKEN: z.string().min(32),
     OPENAI_API_KEY: z.string().min(1).optional(),
     OPENAI_BASE_URL: openAiBaseUrlSchema.default("https://kldai.cc/v1"),
@@ -81,6 +87,16 @@ export const environmentSchema = z
         code: "custom",
         path: ["WORKER_SHARED_TOKEN"],
         message: "客户端与 Worker 凭据必须使用不同值。",
+      });
+    }
+    if (
+      value.RESOURCE_IMPORT_SERVER_MIRROR_ENABLED &&
+      (!value.RESOURCE_IMPORT_PROJECT_ID || !value.RESOURCE_IMPORT_SNAPSHOT_ID)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["RESOURCE_IMPORT_PROJECT_ID"],
+        message: "启用资源镜像导入时必须配置 Project 与 Snapshot UUID。",
       });
     }
   });

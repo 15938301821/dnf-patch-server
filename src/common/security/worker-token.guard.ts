@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { Request } from "express";
+import { readHttpHeader, type HttpRequestLike } from "../http/http-request.js";
 import type { Environment } from "../../config/environment.js";
 
 @Injectable()
@@ -14,8 +14,8 @@ export class WorkerTokenGuard implements CanActivate {
   constructor(private readonly config: ConfigService<Environment, true>) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<Request>();
-    const provided = request.header("x-worker-token") ?? "";
+    const request = context.switchToHttp().getRequest<HttpRequestLike>();
+    const provided = readHttpHeader(request, "x-worker-token") ?? "";
     const expected = this.config.getOrThrow("WORKER_SHARED_TOKEN", {
       infer: true,
     });

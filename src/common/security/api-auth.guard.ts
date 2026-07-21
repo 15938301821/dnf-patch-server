@@ -5,7 +5,11 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { Request } from "express";
+import {
+  readHttpHeader,
+  requestPath,
+  type HttpRequestLike,
+} from "../http/http-request.js";
 import type { Environment } from "../../config/environment.js";
 import { verifyBrowserSessionToken } from "./browser-session.js";
 import { secureEqual } from "./client-token.guard.js";
@@ -22,8 +26,8 @@ export class ApiAuthGuard implements CanActivate {
     if (context.getType() !== "http") {
       return true;
     }
-    const request = context.switchToHttp().getRequest<Request>();
-    const path = request.path;
+    const request = context.switchToHttp().getRequest<HttpRequestLike>();
+    const path = requestPath(request);
     if (request.method === "OPTIONS") {
       return true;
     }
@@ -38,14 +42,14 @@ export class ApiAuthGuard implements CanActivate {
     }
     if (path.includes("/internal/")) {
       return this.requireToken(
-        request.header("x-worker-token") ?? "",
+        readHttpHeader(request, "x-worker-token") ?? "",
         this.config.getOrThrow("WORKER_SHARED_TOKEN", { infer: true }),
         "WORKER_AUTH_FAILED",
       );
     }
-    const bearer = request
-      .header("authorization")
-      ?.match(/^Bearer\s+(.+)$/iu)?.[1];
+    const bearer = readHttpHeader(request, "authorization")?.match(
+      /^Bearer\s+(.+)$/iu,
+    )?.[1];
     const expected = this.config.getOrThrow("CLIENT_SHARED_TOKEN", {
       infer: true,
     });

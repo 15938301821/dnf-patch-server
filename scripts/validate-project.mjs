@@ -175,6 +175,17 @@ async function validateStructure() {
     );
   }
 
+  const environmentExample = await readFile(
+    pathFromRoot(".env.example"),
+    "utf8",
+  );
+  for (const variable of ["MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD"]) {
+    assert(
+      new RegExp(`^${variable}=.+$`, "mu").test(environmentExample),
+      `.env.example must define the Compose-required ${variable}.`,
+    );
+  }
+
   const mcp = await readJson("mcp.json");
   assert(mcp.schemaVersion === 1, "mcp.json schemaVersion must be 1.");
   assert(Array.isArray(mcp.servers), "mcp.json servers must be an array.");

@@ -5,7 +5,7 @@ import {
   type ArgumentsHost,
   type ExceptionFilter,
 } from "@nestjs/common";
-import type { Request, Response } from "express";
+import type { FastifyReply, FastifyRequest } from "fastify";
 
 interface ErrorResponse {
   schemaVersion: 1;
@@ -22,8 +22,8 @@ interface ErrorResponse {
 export class HttpExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
-    const request = context.getRequest<Request>();
-    const response = context.getResponse<Response>();
+    const request = context.getRequest<FastifyRequest>();
+    const response = context.getResponse<FastifyReply>();
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
@@ -42,7 +42,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       timestampUtc: new Date().toISOString(),
       ...(details ? { details } : {}),
     };
-    response.status(status).json(body);
+    void response.status(status).send(body);
   }
 }
 

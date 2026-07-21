@@ -2,6 +2,7 @@ import { ConflictException, Injectable } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { DatabaseService } from "../../common/db/database.service.js";
 import { workers } from "../../common/db/schema.js";
+import type { AllowedJobKind } from "../guardrail/guardrail.contracts.js";
 import {
   type RegisterWorkerInput,
   type WorkerView,
@@ -12,6 +13,17 @@ import { validateWorkerReregistration } from "./worker-registration.js";
 @Injectable()
 export class WorkerService {
   constructor(private readonly connection: DatabaseService) {}
+
+  /** 判断是否有启用的 Worker 声明指定能力；不推断其本机路径或资源内容。 */
+  async hasEnabledCapability(capability: AllowedJobKind): Promise<boolean> {
+    const rows = await this.connection.database
+      .select({ capabilities: workers.capabilities })
+      .from(workers)
+      .where(eq(workers.disabled, false));
+    return rows.some((row) =>
+      workerCapabilitiesSchema.parse(row.capabilities).includes(capability),
+    );
+  }
 
   async register(input: RegisterWorkerInput): Promise<WorkerView> {
     const now = new Date();

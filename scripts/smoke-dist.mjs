@@ -61,8 +61,30 @@ try {
       `Unauthenticated project request returned ${String(protectedResponse.status)}.`,
     );
   }
+  const corsOrigin = "http://127.0.0.1:3000";
+  const preflightResponse = await fetch(
+    `http://${host}:${String(apiPort)}/v1/auth/refresh`,
+    {
+      method: "OPTIONS",
+      headers: {
+        Origin: corsOrigin,
+        "Access-Control-Request-Method": "POST",
+      },
+      signal: AbortSignal.timeout(2_000),
+    },
+  );
+  if (
+    preflightResponse.status !== 204 ||
+    preflightResponse.headers.get("access-control-allow-origin") !==
+      corsOrigin ||
+    preflightResponse.headers.get("access-control-allow-credentials") !== "true"
+  ) {
+    throw new Error(
+      "Credentialed CORS preflight did not preserve the allowlist.",
+    );
+  }
   process.stdout.write(
-    `${JSON.stringify({ status: "passed", healthStatus: health.status, database: health.database, unauthenticatedProjectsStatus: protectedResponse.status }, null, 2)}\n`,
+    `${JSON.stringify({ status: "passed", healthStatus: health.status, database: health.database, unauthenticatedProjectsStatus: protectedResponse.status, credentialedCorsOrigin: corsOrigin }, null, 2)}\n`,
   );
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
