@@ -3,7 +3,10 @@ import { ConfigService } from "@nestjs/config";
 import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
 import { createPool, type Pool } from "mysql2/promise";
 import type { Environment } from "../../config/environment.js";
-import * as schema from "./schema.js";
+import * as controlSchema from "./schema.js";
+import * as studioSchema from "./studio-schema.js";
+
+const schema = { ...controlSchema, ...studioSchema };
 
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {

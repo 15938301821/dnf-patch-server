@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { resolveOpenAiEndpoint } from "./openai-endpoint.js";
 
-const loopbackHostSchema = z.enum(["127.0.0.1", "::1", "localhost"]);
+const loopbackHostSchema = z.enum(["127.0.0.1", "::1", "localhost"]); // 仅允许本地回环地址，避免意外暴露服务。
+
+/**
+ * 验证环境变量的完整性和一致性，确保数据库、Worker 凭据和模型端点配置正确。
+ * 仅在应用启动时调用一次，拒绝缺失或错误的配置。
+ * @throws {z.ZodError} 如果环境变量不符合预期格式或逻辑约束。
+ */
 const openAiBaseUrlSchema = z.string().superRefine((value, context) => {
   try {
     resolveOpenAiEndpoint(value);
@@ -20,13 +26,13 @@ export const environmentSchema = z
       .default("development"),
     HOST: loopbackHostSchema.default("127.0.0.1"),
     PORT: z.coerce.number().int().min(1).max(65_535).default(56_789),
-    CORS_ORIGINS: z.string().default("http://127.0.0.1:5173"),
+    CORS_ORIGINS: z.string().default("http://127.0.0.1:3000"),
     DATABASE_URL: z.string().regex(/^mysql:\/\//u),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
     DNF_REPOSITORY_ROOT: z.string().min(1).default("../dnf-patch"),
     CLIENT_SHARED_TOKEN: z.string().min(32),
     OPENAI_API_KEY: z.string().min(1).optional(),
-    OPENAI_BASE_URL: openAiBaseUrlSchema.default("https://api.openai.com/v1"),
+    OPENAI_BASE_URL: openAiBaseUrlSchema.default("https://kldai.cc/v1"),
     OPENAI_ORCHESTRATOR_MODEL: z.string().min(1).default("gpt-5.6-sol"),
     OPENAI_ENGINEER_MODEL: z.string().min(1).default("gpt-5.5"),
     OPENAI_IMAGE_MODEL: z.string().min(1).default("gpt-image-2"),

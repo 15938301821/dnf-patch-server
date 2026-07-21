@@ -14,7 +14,7 @@ describe("environment configuration", () => {
     expect(validateEnvironment(validEnvironment())).toMatchObject({
       HOST: "127.0.0.1",
       PORT: 56_789,
-      OPENAI_BASE_URL: "https://api.openai.com/v1",
+      OPENAI_BASE_URL: "https://kldai.cc/v1",
       OUTBOX_DISPATCH_INTERVAL_MS: 1_000,
       OUTBOX_DISPATCH_BATCH_SIZE: 25,
       WORKER_REAPER_INTERVAL_MS: 5_000,

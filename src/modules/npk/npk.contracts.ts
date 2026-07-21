@@ -56,3 +56,11 @@ export interface InventoryView {
   entryCount: number;
   createdAtUtc: string;
 }
+
+export interface InventoryEntryEvidence {
+  id: string;
+  inventoryId: string;
+  projectId: string;
+  runId: string;
+  metadataSha256: string;
+}

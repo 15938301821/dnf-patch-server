@@ -14,7 +14,11 @@ import {
 import { NpkService } from "./npk.service.js";
 
 describe("NpkService evidence ownership", () => {
-  const inventories = { create: vi.fn(), list: vi.fn() };
+  const inventories = {
+    create: vi.fn(),
+    list: vi.fn(),
+    findEntryEvidence: vi.fn(),
+  };
   const runs = { get: vi.fn() };
   const artifacts = { findRunId: vi.fn() };
   let service: NpkService;

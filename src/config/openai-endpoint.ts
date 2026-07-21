@@ -33,6 +33,6 @@ export function resolveOpenAiEndpoint(value: string): OpenAiEndpoint {
   return {
     baseUrl,
     identity: `${url.host}${pathname}`,
-    custom: baseUrl !== "https://api.openai.com/v1",
+    custom: baseUrl !== "https://kldai.cc/v1",
   };
 }

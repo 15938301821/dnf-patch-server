@@ -50,13 +50,16 @@ const requiredFiles = [
 ];
 const requiredModuleFiles = {
   artifact: ["contracts", "controller", "module", "repository", "service"],
+  auth: ["contracts", "controller", "module", "service"],
   factory: ["contracts", "controller", "module", "repository", "service"],
   guardrail: ["contracts", "controller", "module", "service"],
   health: ["controller", "module", "service"],
   image: ["contracts", "controller", "module", "service"],
   job: ["contracts", "controller", "module", "repository", "service"],
+  "model-configuration": ["contracts", "controller", "module", "service"],
   npk: ["contracts", "controller", "module", "repository", "service"],
   openai: ["contracts", "module", "service"],
+  profession: ["contracts", "controller", "module", "repository", "service"],
   project: ["contracts", "controller", "module", "repository", "service"],
   run: [
     "contracts",
@@ -70,13 +73,16 @@ const requiredModuleFiles = {
 };
 const moduleClassNames = {
   artifact: "ArtifactModule",
+  auth: "AuthModule",
   factory: "FactoryModule",
   guardrail: "GuardrailModule",
   health: "HealthModule",
   image: "ImageModule",
   job: "JobModule",
+  "model-configuration": "ModelConfigurationModule",
   npk: "NpkModule",
   openai: "OpenAiModule",
+  profession: "ProfessionModule",
   project: "ProjectModule",
   run: "RunModule",
   worker: "WorkerModule",

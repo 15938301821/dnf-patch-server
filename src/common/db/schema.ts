@@ -210,6 +210,7 @@ export const jobs = mysqlTable(
   (table) => [
     index("jobs_claim_idx").on(table.status, table.kind, table.leaseExpiresAt),
     index("jobs_run_idx").on(table.runId),
+    uniqueIndex("jobs_run_id_uq").on(table.runId, table.id),
     check(
       "jobs_status_ck",
       sql`${table.status} in ('queued', 'leased', 'passed', 'failed', 'blocked')`,
@@ -292,6 +293,7 @@ export const npkInventories = mysqlTable(
   },
   (table) => [
     index("npk_inventories_project_idx").on(table.projectId),
+    uniqueIndex("npk_inventories_run_id_uq").on(table.runId, table.id),
     foreignKey({
       columns: [table.projectId, table.runId],
       foreignColumns: [runs.projectId, runs.id],
@@ -318,6 +320,7 @@ export const npkInventoryEntries = mysqlTable(
     metadataSha256: sha256("metadata_sha256").notNull(),
   },
   (table) => [
+    uniqueIndex("npk_entries_inventory_id_uq").on(table.inventoryId, table.id),
     uniqueIndex("npk_entries_path_uq").on(
       table.inventoryId,
       table.internalPath,
@@ -387,6 +390,7 @@ export const imageAttempts = mysqlTable(
   },
   (table) => [
     index("image_attempts_run_idx").on(table.runId),
+    uniqueIndex("image_attempts_run_id_uq").on(table.runId, table.id),
     foreignKey({
       columns: [table.runId, table.modelCallId],
       foreignColumns: [modelCalls.runId, modelCalls.id],

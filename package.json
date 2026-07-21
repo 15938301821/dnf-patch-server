@@ -20,7 +20,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:generate": "drizzle-kit generate",
+    "db:generate": "tsc -p tsconfig.build.json && drizzle-kit generate",
     "db:migrate": "tsx src/common/db/migrate.ts",
     "gate": "npm run check:credentials && npm run validate:project && npm run typecheck && npm run lint && npm run test && npm run check:migrations && npm run build && npm run test:smoke"
   },

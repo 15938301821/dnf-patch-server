@@ -10,6 +10,9 @@ import { parseCorsOrigins } from "./config/environment.js";
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   const config = app.get(ConfigService<Environment, true>);
+
+  console.log("正在启动 DNF Patch Server...", config);
+
   const host = config.getOrThrow("HOST", { infer: true });
   const port = config.getOrThrow("PORT", { infer: true });
   const origins = parseCorsOrigins(

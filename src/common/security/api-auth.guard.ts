@@ -7,6 +7,7 @@ import {
 import { ConfigService } from "@nestjs/config";
 import type { Request } from "express";
 import type { Environment } from "../../config/environment.js";
+import { verifyBrowserSessionToken } from "./browser-session.js";
 import { secureEqual } from "./client-token.guard.js";
 
 /**
@@ -23,7 +24,16 @@ export class ApiAuthGuard implements CanActivate {
     }
     const request = context.switchToHttp().getRequest<Request>();
     const path = request.path;
+    if (request.method === "OPTIONS") {
+      return true;
+    }
     if (request.method === "GET" && path.endsWith("/health")) {
+      return true;
+    }
+    if (
+      request.method === "POST" &&
+      (path.endsWith("/auth/login") || path.endsWith("/auth/refresh"))
+    ) {
       return true;
     }
     if (path.includes("/internal/")) {
@@ -36,11 +46,20 @@ export class ApiAuthGuard implements CanActivate {
     const bearer = request
       .header("authorization")
       ?.match(/^Bearer\s+(.+)$/iu)?.[1];
-    return this.requireToken(
-      bearer ?? "",
-      this.config.getOrThrow("CLIENT_SHARED_TOKEN", { infer: true }),
-      "CLIENT_AUTH_FAILED",
-    );
+    const expected = this.config.getOrThrow("CLIENT_SHARED_TOKEN", {
+      infer: true,
+    });
+    if (secureEqual(bearer ?? "", expected)) return true;
+    if (
+      bearer &&
+      verifyBrowserSessionToken(expected, bearer, "access") !== undefined
+    ) {
+      return true;
+    }
+    throw new UnauthorizedException({
+      code: "CLIENT_AUTH_FAILED",
+      message: "身份验证失败。",
+    });
   }
 
   private requireToken(provided: string, expected: string, code: string): true {

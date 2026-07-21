@@ -10,6 +10,7 @@ import { RunService } from "../run/run.service.js";
 import {
   normalizeNpkInternalPath,
   type CreateInventoryInput,
+  type InventoryEntryEvidence,
   type InventoryView,
 } from "./npk.contracts.js";
 import { NpkRepository, type NpkRepositoryPort } from "./npk.repository.js";
@@ -73,5 +74,23 @@ export class NpkService {
 
   list(projectId: string): Promise<InventoryView[]> {
     return this.inventories.list(projectId);
+  }
+
+  /** 提供已冻结 Inventory Entry 的最小归属证据，不返回 NPK/IMG 正文。 */
+  async getEntryEvidence(
+    inventoryId: string,
+    entryId: string,
+  ): Promise<InventoryEntryEvidence> {
+    const evidence = await this.inventories.findEntryEvidence(
+      inventoryId,
+      entryId,
+    );
+    if (!evidence) {
+      throw new NotFoundException({
+        code: "INVENTORY_ENTRY_NOT_FOUND",
+        message: "Inventory Entry 不存在或不属于目标 Inventory。",
+      });
+    }
+    return evidence;
   }
 }
