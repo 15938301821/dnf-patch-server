@@ -15,6 +15,7 @@ import type {
   RunCreateOptions,
   RunEventQuery,
   RunEventView,
+  RunModelContext,
   RunView,
 } from "./run.contracts.js";
 import { createRunRequestFingerprint } from "./run-fingerprint.js";
@@ -40,12 +41,26 @@ export class RunService {
     return run;
   }
 
+  async getModelContext(id: string): Promise<RunModelContext> {
+    const context = await this.runs.findModelContext(id);
+    if (!context) {
+      throw new NotFoundException({
+        code: "RUN_NOT_FOUND",
+        message: "Run 不存在。",
+      });
+    }
+    return context;
+  }
+
   async create(
     input: CreateRunInput,
     idempotencyKey: string,
     options: RunCreateOptions = {},
   ): Promise<RunView> {
-    const requestFingerprintSha256 = createRunRequestFingerprint(input);
+    const requestFingerprintSha256 = createRunRequestFingerprint(
+      input,
+      options.ownerUserId,
+    );
     const existing = await this.runs.findByIdempotency(
       input.projectId,
       idempotencyKey,

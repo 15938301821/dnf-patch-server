@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ModelConfigurationModule } from "../model-configuration/model-configuration.module.js";
 import { RunModule } from "../run/run.module.js";
 import { OpenAiProvider } from "./openai.provider.js";
 import { OpenAiRecoveryService } from "./openai-recovery.service.js";
@@ -6,7 +7,7 @@ import { OpenAiRepository } from "./openai.repository.js";
 import { OpenAiService } from "./openai.service.js";
 
 @Module({
-  imports: [RunModule],
+  imports: [ModelConfigurationModule, RunModule],
   providers: [
     OpenAiProvider,
     OpenAiRepository,

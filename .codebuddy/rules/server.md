@@ -104,7 +104,7 @@ dnf-patch-server/
 ## 8. REST、WebSocket 与鉴权
 
 - `GET /v1/health` 可公开，但只能返回服务和数据库健康状态，不得返回配置、连接串或凭据状态细节。
-- 普通 REST 使用 `Authorization: Bearer <CLIENT_SHARED_TOKEN>`；`/v1/internal/*` 使用独立 `X-Worker-Token`。两类 token 必须在部署配置中使用不同值，并通过已有守卫进行恒定时间比较；若新增跨字段环境校验，必须同步测试与配置说明。
+- 普通业务 REST 使用浏览器 access token 或 `Authorization: Bearer <CLIENT_SHARED_TOKEN>`；用户模型配置写入、轮换和删除只接受绑定稳定持久化用户的浏览器 access token，不接受共享客户端 token 作为用户归属。`/v1/internal/*` 使用独立 `X-Worker-Token`。各类 token 必须在部署配置中使用不同值，并通过已有守卫进行恒定时间比较；若新增跨字段环境校验，必须同步测试与配置说明。
 - Socket.IO `/runs` 命名空间使用握手 `auth.token` 校验客户端 token；订阅 payload 必须通过 Zod。
 - WebSocket 只用于提交后通知。数据库中的 `run_events` 与 `outbox_events` 是权威记录，客户端必须能通过 sequence 断点恢复。
 - 不得通过 REST 或 WebSocket 返回数据库驱动错误、堆栈、凭据、绝对游戏路径或模型原始响应。
@@ -115,10 +115,12 @@ dnf-patch-server/
 - MySQL 只保存元数据、仓库相对引用、长度、SHA-256 和 provenance；不得保存官方 NPK、源帧、runtime 图片或其他大文件 BLOB。
 - 官方 NPK 与 ImagePacks2 保持只读。inventory 记录来源标签、长度、哈希、内部相对路径、IMG 版本、帧数和元数据哈希，不承担解包或部署。
 - 图片模型输出字节只能短暂返回给受控的服务内调用方；数据库只记录调用和 attempt 元数据，且 `directRuntimeUseAllowed` 固定为 `false`。
-- 模型角色和模型 ID 由服务端环境配置映射，调用方不得选择任意模型、端点、工具或存储策略。
+- 模型角色由服务端固定映射。经过认证的用户可为固定角色配置受策略约束的 HTTPS endpoint、模型 ID 和 BYOK 密钥；业务任务调用方不得在 Run/Job payload 中临时选择任意模型、端点、密钥、工具或存储策略。
 - `modelEgressAuthorized` 为 `false`、模型密钥缺失或端点不合法时必须记录 blocked，不得尝试外发。
 - 模型请求使用固定超时、重试、空工具列表和禁用 provider 存储；响应必须按 Zod schema 解析或按字节哈希处理。
-- 模型密钥只存在于服务进程内存；模型调用记录只能保存端点身份、请求/响应哈希、provider response ID、状态和稳定错误码。
+- 用户模型密钥只允许经专用认证 HTTPS 配置端点进入服务端，并在调用或加密期间短暂存在于进程内存。持久化仅允许外部 Secret Manager 引用，或使用环境/KMS 主密钥执行的认证加密密文；模型调用记录只能保存用户配置版本、端点身份、请求/响应哈希、provider response ID、状态和稳定错误码。
+- 模型配置读取响应只能返回固定角色、endpoint、模型 ID、配置版本和 `keyConfigured`；不得返回密钥、密文、nonce、认证标签、Secret 引用或可用于离线猜测密钥的材料。配置写入成功后也不得回显提交值。
+- 后台模型调用必须从 Run 的稳定 owner 解析同一用户的配置快照；缺少 owner、配置、密钥、配置版本或所有权证据时必须 blocked，不得回退到其他用户或全局 Key。
 
 ## 10. 错误、日志与安全响应
 
@@ -126,7 +128,7 @@ dnf-patch-server/
 - 非 HTTP 内部不变量可以抛出 `Error`，但必须在边界处映射为稳定状态或通用 500 响应；不得把原始 message 直接返回客户端。
 - 全局异常过滤器必须保持统一 schema，并过滤堆栈、环境变量、数据库原始对象、模型原始响应和敏感路径。
 - 服务日志使用 Nest `Logger` 或等价的依赖注入日志设施，只记录稳定事件/错误码和必要的脱敏标识。
-- 不得记录 token、API Key、数据库 URL、完整 payload、Prompt、模型输出或绝对路径。后台 reaper 等循环失败必须记录稳定码并继续受控调度。
+- 不得记录 token、API Key、用户凭据密文材料、Secret 引用、数据库 URL、完整 payload、Prompt、模型输出或绝对路径。后台 reaper 等循环失败必须记录稳定码并继续受控调度。
 
 ## 11. 验证与交付
 

@@ -31,13 +31,16 @@ import type {
 import { PatchTaskRepository } from "./patch-task.repository.js";
 
 interface PatchTaskRepositoryPort {
-  list(): Promise<PatchTaskView[]>;
+  list(ownerUserId: string): Promise<PatchTaskView[]>;
   createPlan(
     pack: Parameters<PatchTaskRepository["createPlan"]>[0],
     skills: PlannedPatchTaskSkill[],
     disposition: "dispatch" | "blocked",
   ): Promise<void>;
-  findArtifact(runId: string): Promise<PatchTaskArtifactView | undefined>;
+  findArtifact(
+    runId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskArtifactView | undefined>;
   reportSkillProduction(
     jobId: string,
     input: ReportPatchTaskSkillProductionInput,
@@ -86,13 +89,14 @@ export class PatchTaskService {
     @Inject(RunService) private readonly runs: RunCreatePort,
   ) {}
 
-  list(): Promise<PatchTaskView[]> {
-    return this.patchTasks.list();
+  list(ownerUserId: string): Promise<PatchTaskView[]> {
+    return this.patchTasks.list(ownerUserId);
   }
 
   async create(
     input: CreatePatchTaskInput,
     idempotencyKey: string,
+    ownerUserId: string,
   ): Promise<PatchTaskView> {
     const context = await this.professions.getStyleBuildContext(
       input.professionId,
@@ -117,6 +121,7 @@ export class PatchTaskService {
     const runInput = createRunInput(context, factory.config, idempotencyKey);
     const run = await this.runs.create(runInput, idempotencyKey, {
       deferJobDispatch: true,
+      ownerUserId,
     });
     try {
       await this.patchTasks.createPlan(
@@ -167,11 +172,15 @@ export class PatchTaskService {
       status: run.status === "blocked" ? "blocked" : "queued",
       progress: 0,
       createdAt: run.createdAtUtc,
+      artifactAvailable: false,
     };
   }
 
-  async findArtifact(runId: string): Promise<PatchTaskArtifactView> {
-    const artifact = await this.patchTasks.findArtifact(runId);
+  async findArtifact(
+    runId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskArtifactView> {
+    const artifact = await this.patchTasks.findArtifact(runId, ownerUserId);
     if (!artifact) {
       throw new NotFoundException({
         code: "PATCH_TASK_ARTIFACT_NOT_READY",

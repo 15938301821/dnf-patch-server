@@ -147,7 +147,7 @@ export interface PatchTaskView {
   progress: number;
   createdAt: string;
   artifactName?: string;
-  downloadUrl?: string;
+  artifactAvailable: boolean;
 }
 
 export interface PatchTaskArtifactView {

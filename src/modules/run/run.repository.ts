@@ -18,6 +18,7 @@ import type {
   RunCreateOptions,
   RunEventQuery,
   RunEventView,
+  RunModelContext,
   RunView,
 } from "./run.contracts.js";
 
@@ -43,6 +44,23 @@ export class RunRepository {
       .where(eq(runs.id, id))
       .limit(1);
     return row ? toRunView(row) : undefined;
+  }
+
+  async findModelContext(id: string): Promise<RunModelContext | undefined> {
+    const [row] = await this.connection.database
+      .select({
+        modelEgressAuthorized: runs.modelEgressAuthorized,
+        ownerUserId: runs.ownerUserId,
+      })
+      .from(runs)
+      .where(eq(runs.id, id))
+      .limit(1);
+    return row
+      ? {
+          modelEgressAuthorized: row.modelEgressAuthorized,
+          ...(row.ownerUserId ? { ownerUserId: row.ownerUserId } : {}),
+        }
+      : undefined;
   }
 
   async findByIdempotency(
@@ -96,6 +114,7 @@ export class RunRepository {
     return this.connection.database.transaction(async (transaction) => {
       await transaction.insert(runs).values({
         id,
+        ...(options.ownerUserId ? { ownerUserId: options.ownerUserId } : {}),
         projectId: input.projectId,
         snapshotId: input.snapshotId,
         clientRunId: input.clientRunId,

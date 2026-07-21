@@ -6,9 +6,14 @@
  * @relatedPlan /memories/session/plan.md Phase 2 model evidence
  */
 import { Inject, Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "node:crypto";
 import { sha256Json } from "../../common/utils/canonical.js";
+import { resolveOpenAiEndpoint } from "../../config/openai-endpoint.js";
+import type {
+  ModelRole as ConfigurationRole,
+  ResolvedModelRoleConfiguration,
+} from "../model-configuration/model-configuration.contracts.js";
+import { ModelConfigurationService } from "../model-configuration/model-configuration.service.js";
 import { RunService } from "../run/run.service.js";
 import type {
   ImageModelRequest,
@@ -18,33 +23,51 @@ import type {
   StructuredModelRequest,
   StructuredModelResult,
 } from "./openai.contracts.js";
-import { OpenAiProvider, type OpenAiProviderPort } from "./openai.provider.js";
+import {
+  OpenAiProvider,
+  type OpenAiCallConfiguration,
+  type OpenAiProviderPort,
+} from "./openai.provider.js";
 import {
   OpenAiRepository,
   type ModelCallCompletion,
   type OpenAiRepositoryPort,
 } from "./openai.repository.js";
 
-interface ModelConfigPort {
-  getOrThrow(
-    key:
-      | "OPENAI_ORCHESTRATOR_MODEL"
-      | "OPENAI_ENGINEER_MODEL"
-      | "OPENAI_IMAGE_MODEL",
-    options: { infer: true },
-  ): string;
+interface ModelConfigurationLookupPort {
+  resolve(
+    userId: string,
+    role: ConfigurationRole,
+  ): ReturnType<ModelConfigurationService["resolve"]>;
 }
 
 interface RunLookupPort {
-  get(id: string): ReturnType<RunService["get"]>;
+  getModelContext(id: string): ReturnType<RunService["getModelContext"]>;
 }
+
+interface ResolvedCallContext {
+  blocked?: undefined;
+  model: string;
+  endpointIdentity: string;
+  modelConfigurationVersion: number;
+  provider: OpenAiCallConfiguration;
+}
+
+interface BlockedCallContext {
+  blocked: { errorCode: string; authorized: boolean };
+  model: string;
+  endpointIdentity: string;
+}
+
+type ModelCallContext = ResolvedCallContext | BlockedCallContext;
 
 @Injectable()
 export class OpenAiService {
   constructor(
-    @Inject(ConfigService) private readonly config: ModelConfigPort,
     @Inject(OpenAiRepository) private readonly calls: OpenAiRepositoryPort,
     @Inject(RunService) private readonly runs: RunLookupPort,
+    @Inject(ModelConfigurationService)
+    private readonly configurations: ModelConfigurationLookupPort,
     @Inject(OpenAiProvider) private readonly provider: OpenAiProviderPort,
   ) {}
 
@@ -52,41 +75,42 @@ export class OpenAiService {
   async structured<T>(
     request: StructuredModelRequest<T>,
   ): Promise<StructuredModelResult<T>> {
-    const model = this.modelFor(request.role);
+    const context = await this.resolveContext(request.runId, request.role);
     const requestSha256 = sha256Json({
-      model,
+      model: context.model,
+      endpointIdentity: context.endpointIdentity,
+      ...(context.blocked
+        ? {}
+        : { modelConfigurationVersion: context.modelConfigurationVersion }),
       instructions: request.instructions,
       input: request.input,
       schemaName: request.schemaName,
       tools: [],
       store: false,
     });
-    const blocked = await this.blockState(request.runId);
-    if (blocked) {
+    if (context.blocked) {
       return {
-        record: await this.recordBlocked(
-          request,
-          model,
-          requestSha256,
-          blocked,
-        ),
+        record: await this.recordBlocked(request, context, requestSha256),
       };
     }
     const record = await this.createRunningRecord(
       request,
-      model,
+      context,
       requestSha256,
     );
     const egressRecord = await this.beginEgress(record);
     if (egressRecord.status === "failed") return { record: egressRecord };
     try {
-      const response = await this.provider.structured({
-        model,
-        instructions: request.instructions,
-        input: request.input,
-        schema: request.schema,
-        schemaName: request.schemaName,
-      });
+      const response = await this.provider.structured(
+        {
+          model: context.model,
+          instructions: request.instructions,
+          input: request.input,
+          schema: request.schema,
+          schemaName: request.schemaName,
+        },
+        context.provider,
+      );
       return {
         value: response.value,
         record: await this.finishRecord(egressRecord, {
@@ -110,9 +134,13 @@ export class OpenAiService {
 
   /** 图像调用只返回短暂字节与哈希证据，不把图片 BLOB 写入数据库。 */
   async image(request: ImageModelRequest): Promise<ImageModelResult> {
-    const model = this.modelFor("artist");
+    const context = await this.resolveContext(request.runId, "artist");
     const requestSha256 = sha256Json({
-      model,
+      model: context.model,
+      endpointIdentity: context.endpointIdentity,
+      ...(context.blocked
+        ? {}
+        : { modelConfigurationVersion: context.modelConfigurationVersion }),
       prompt: request.prompt,
       n: 1,
       size: "1536x1024",
@@ -120,29 +148,26 @@ export class OpenAiService {
       background: "opaque",
       outputFormat: "png",
     });
-    const blocked = await this.blockState(request.runId);
-    if (blocked) {
+    if (context.blocked) {
       return {
-        record: await this.recordBlocked(
-          request,
-          model,
-          requestSha256,
-          blocked,
-        ),
+        record: await this.recordBlocked(request, context, requestSha256),
       };
     }
     const record = await this.createRunningRecord(
       request,
-      model,
+      context,
       requestSha256,
     );
     const egressRecord = await this.beginEgress(record);
     if (egressRecord.status === "failed") return { record: egressRecord };
     try {
-      const bytes = await this.provider.image({
-        model,
-        prompt: request.prompt,
-      });
+      const bytes = await this.provider.image(
+        {
+          model: context.model,
+          prompt: request.prompt,
+        },
+        context.provider,
+      );
       return {
         bytes,
         record: await this.finishRecord(egressRecord, {
@@ -160,42 +185,55 @@ export class OpenAiService {
     }
   }
 
-  private async blockState(
+  private async resolveContext(
     runId: string,
-  ): Promise<{ errorCode: string; authorized: boolean } | undefined> {
-    const run = await this.runs.get(runId);
+    role: ModelRole,
+  ): Promise<ModelCallContext> {
+    const run = await this.runs.getModelContext(runId);
     if (!run.modelEgressAuthorized) {
-      return { errorCode: "MODEL_EGRESS_NOT_AUTHORIZED", authorized: false };
+      return blockedContext("MODEL_EGRESS_NOT_AUTHORIZED", false);
     }
-    if (!this.provider.configured) {
-      return { errorCode: "OPENAI_API_KEY_NOT_CONFIGURED", authorized: true };
+    if (!run.ownerUserId) {
+      return blockedContext("MODEL_CONFIGURATION_OWNER_REQUIRED", true);
     }
-    return undefined;
-  }
-
-  private modelFor(role: ModelRole): string {
-    const key =
-      role === "orchestrator"
-        ? "OPENAI_ORCHESTRATOR_MODEL"
-        : role === "engineer"
-          ? "OPENAI_ENGINEER_MODEL"
-          : "OPENAI_IMAGE_MODEL";
-    return this.config.getOrThrow(key, { infer: true });
+    let configuration: ResolvedModelRoleConfiguration | undefined;
+    try {
+      configuration = await this.configurations.resolve(
+        run.ownerUserId,
+        configurationRoleFor(role),
+      );
+    } catch {
+      return blockedContext("MODEL_CONFIGURATION_UNAVAILABLE", true);
+    }
+    if (!configuration) {
+      return blockedContext("MODEL_CONFIGURATION_NOT_CONFIGURED", true);
+    }
+    const endpoint = resolveOpenAiEndpoint(configuration.endpoint);
+    return {
+      model: configuration.model,
+      endpointIdentity: endpoint.identity,
+      modelConfigurationVersion: configuration.version,
+      provider: {
+        apiKey: configuration.apiKey,
+        baseUrl: endpoint.baseUrl,
+      },
+    };
   }
 
   private async createRunningRecord(
     request: { runId: string; role: ModelRole },
-    model: string,
+    context: ResolvedCallContext,
     requestSha256: string,
   ): Promise<ModelCallView> {
     const record = createModelCallView(
       request,
-      model,
-      this.provider.endpointIdentity,
+      context.model,
+      context.endpointIdentity,
       requestSha256,
       "running",
       true,
       false,
+      context.modelConfigurationVersion,
     );
     await this.calls.create(record);
     return record;
@@ -213,19 +251,19 @@ export class OpenAiService {
 
   private async recordBlocked(
     request: { runId: string; role: ModelRole },
-    model: string,
+    context: BlockedCallContext,
     requestSha256: string,
-    blocked: { errorCode: string; authorized: boolean },
   ): Promise<ModelCallView> {
     const record = createModelCallView(
       request,
-      model,
-      this.provider.endpointIdentity,
+      context.model,
+      context.endpointIdentity,
       requestSha256,
       "blocked",
-      blocked.authorized,
+      context.blocked.authorized,
       false,
-      blocked.errorCode,
+      undefined,
+      context.blocked.errorCode,
     );
     await this.calls.create(record);
     return record;
@@ -255,6 +293,7 @@ function createModelCallView(
   status: ModelCallView["status"],
   modelEgressAuthorized: boolean,
   modelEgressPerformed: boolean,
+  modelConfigurationVersion?: number,
   errorCode?: string,
 ): ModelCallView {
   const createdAtUtc = new Date().toISOString();
@@ -264,6 +303,7 @@ function createModelCallView(
     role: request.role,
     model,
     endpointIdentity,
+    ...(modelConfigurationVersion ? { modelConfigurationVersion } : {}),
     requestSha256,
     status,
     modelEgressAuthorized,
@@ -272,6 +312,25 @@ function createModelCallView(
     createdAtUtc,
     ...(status !== "running" ? { finishedAtUtc: createdAtUtc } : {}),
   };
+}
+
+function blockedContext(
+  errorCode: string,
+  authorized: boolean,
+): BlockedCallContext {
+  return {
+    blocked: { errorCode, authorized },
+    model: "unconfigured",
+    endpointIdentity: "unconfigured",
+  };
+}
+
+function configurationRoleFor(role: ModelRole): ConfigurationRole {
+  return role === "orchestrator"
+    ? "orchestrator"
+    : role === "engineer"
+      ? "spriteProcessor"
+      : "referenceGenerator";
 }
 
 function sha256Bytes(value: Uint8Array): string {

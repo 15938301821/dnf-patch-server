@@ -36,7 +36,9 @@ export class ApiAuthGuard implements CanActivate {
     }
     if (
       request.method === "POST" &&
-      (path.endsWith("/auth/login") || path.endsWith("/auth/refresh"))
+      (path.endsWith("/auth/login") ||
+        path.endsWith("/auth/register") ||
+        path.endsWith("/auth/refresh"))
     ) {
       return true;
     }
@@ -56,7 +58,11 @@ export class ApiAuthGuard implements CanActivate {
     if (secureEqual(bearer ?? "", expected)) return true;
     if (
       bearer &&
-      verifyBrowserSessionToken(expected, bearer, "access") !== undefined
+      verifyBrowserSessionToken(
+        this.config.getOrThrow("BROWSER_SESSION_SECRET", { infer: true }),
+        bearer,
+        "access",
+      ) !== undefined
     ) {
       return true;
     }

@@ -6,6 +6,7 @@ function validEnvironment(): Record<string, unknown> {
     DATABASE_URL: "mysql://runtime-user@127.0.0.1:3306/dnf_patch",
     CLIENT_SHARED_TOKEN: "c".repeat(32),
     WORKER_SHARED_TOKEN: "x".repeat(32),
+    BROWSER_SESSION_SECRET: "s".repeat(32),
   };
 }
 
@@ -14,6 +15,7 @@ describe("environment configuration", () => {
     expect(validateEnvironment(validEnvironment())).toMatchObject({
       HOST: "127.0.0.1",
       PORT: 56_789,
+      CORS_ORIGINS: "http://127.0.0.1:5173",
       OPENAI_BASE_URL: "https://kldai.cc/v1",
       OUTBOX_DISPATCH_INTERVAL_MS: 1_000,
       OUTBOX_DISPATCH_BATCH_SIZE: 25,

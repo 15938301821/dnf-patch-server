@@ -58,4 +58,19 @@ describe("createRunRequestFingerprint", () => {
       createRunRequestFingerprint(changed),
     );
   });
+
+  it("不同 owner 不能复用同一个幂等指纹", () => {
+    const input = runInput();
+    expect(
+      createRunRequestFingerprint(
+        input,
+        "11111111-1111-4111-8111-111111111111",
+      ),
+    ).not.toBe(
+      createRunRequestFingerprint(
+        input,
+        "22222222-2222-4222-8222-222222222222",
+      ),
+    );
+  });
 });

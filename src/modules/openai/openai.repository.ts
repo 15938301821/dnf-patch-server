@@ -40,6 +40,9 @@ export class OpenAiRepository implements OpenAiRepositoryPort {
       role: record.role,
       model: record.model,
       endpointIdentity: record.endpointIdentity,
+      ...(record.modelConfigurationVersion
+        ? { modelConfigurationVersion: record.modelConfigurationVersion }
+        : {}),
       requestSha256: record.requestSha256,
       status: record.status,
       modelEgressAuthorized: record.modelEgressAuthorized,

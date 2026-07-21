@@ -6,10 +6,8 @@ import {
   Headers,
   Param,
   Post,
-  Res,
   UseGuards,
 } from "@nestjs/common";
-import type { FastifyReply } from "fastify";
 import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import { WorkerTokenGuard } from "../../common/security/worker-token.guard.js";
@@ -24,11 +22,13 @@ import {
 } from "./job.contracts.js";
 import { JobService } from "./job.service.js";
 import { idempotencyKeySchema } from "../run/run.contracts.js";
+import { AuthService } from "../auth/auth.service.js";
 import {
   createPatchTaskSchema,
   reportPatchTaskPackageSchema,
   reportPatchTaskSkillProductionSchema,
   type CreatePatchTaskInput,
+  type PatchTaskArtifactView,
   type PatchTaskView,
   type ReportPatchTaskPackageInput,
   type ReportPatchTaskSkillProductionInput,
@@ -37,16 +37,23 @@ import { PatchTaskService } from "./patch-task.service.js";
 
 @Controller("jobs")
 export class PatchTaskController {
-  constructor(private readonly patchTasks: PatchTaskService) {}
+  constructor(
+    private readonly patchTasks: PatchTaskService,
+    private readonly auth: AuthService,
+  ) {}
 
   @Get()
-  list(): Promise<{ data: PatchTaskView[] }> {
-    return this.patchTasks.list().then((data) => ({ data }));
+  async list(
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: PatchTaskView[] }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return { data: await this.patchTasks.list(user.id) };
   }
 
   @Post()
   create(
     @Headers("idempotency-key") idempotencyKey: unknown,
+    @Headers("authorization") authorization: string | undefined,
     @Body(new ZodValidationPipe(createPatchTaskSchema))
     input: CreatePatchTaskInput,
   ): Promise<{ data: PatchTaskView }> {
@@ -57,31 +64,23 @@ export class PatchTaskController {
         message: "Idempotency-Key 请求头缺失或格式无效。",
       });
     }
-    return this.patchTasks
-      .create(input, parsed.data)
-      .then((data) => ({ data }));
+    return this.auth
+      .requireBrowserUser(authorization)
+      .then((user) =>
+        this.patchTasks
+          .create(input, parsed.data, user.id)
+          .then((data) => ({ data })),
+      );
   }
 
   @Get(":id/artifact")
   async artifact(
     @Param("id", new ZodValidationPipe(idSchema)) id: string,
-    @Res() response: FastifyReply,
-  ): Promise<void> {
-    const artifact = await this.patchTasks.findArtifact(id);
-    await response
-      .code(200)
-      .type("application/json")
-      .header(
-        "Content-Disposition",
-        `attachment; filename="${downloadFileName(artifact.artifactName)}"`,
-      )
-      .send(JSON.stringify({ data: artifact }, null, 2));
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: PatchTaskArtifactView }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return { data: await this.patchTasks.findArtifact(id, user.id) };
   }
-}
-
-function downloadFileName(value: string): string {
-  const normalized = value.replace(/[^A-Za-z0-9._-]/gu, "_").slice(0, 120);
-  return normalized.length > 0 ? normalized : "patch-task-artifact.json";
 }
 
 @Controller("internal/jobs")

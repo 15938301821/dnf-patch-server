@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module.js";
 import { FactoryModule } from "../factory/factory.module.js";
 import { ProfessionModule } from "../profession/profession.module.js";
 import { ProjectModule } from "../project/project.module.js";
@@ -11,7 +12,13 @@ import { PatchTaskRepository } from "./patch-task.repository.js";
 import { PatchTaskService } from "./patch-task.service.js";
 
 @Module({
-  imports: [FactoryModule, ProfessionModule, ProjectModule, RunModule],
+  imports: [
+    AuthModule,
+    FactoryModule,
+    ProfessionModule,
+    ProjectModule,
+    RunModule,
+  ],
   controllers: [PatchTaskController, JobController],
   providers: [
     JobRepository,

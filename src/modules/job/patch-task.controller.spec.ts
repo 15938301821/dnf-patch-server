@@ -8,6 +8,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthService } from "../auth/auth.service.js";
 import { PatchTaskController } from "./job.controller.js";
 import type {
   CreatePatchTaskInput,
@@ -19,6 +20,7 @@ const input: CreatePatchTaskInput = {
   professionId: "11111111-1111-4111-8111-111111111111",
   styleId: "22222222-2222-4222-8222-222222222222",
 };
+const ownerUserId = "44444444-4444-4444-8444-444444444444";
 const task: PatchTaskView = {
   id: "33333333-3333-4333-8333-333333333333",
   professionName: "剑魂",
@@ -26,26 +28,36 @@ const task: PatchTaskView = {
   status: "queued",
   progress: 0,
   createdAt: "2026-07-21T00:00:00.000Z",
+  artifactAvailable: false,
 };
 
 describe("PatchTaskController", () => {
   const create =
     vi.fn<
-      (input: CreatePatchTaskInput, key: string) => Promise<PatchTaskView>
+      (
+        input: CreatePatchTaskInput,
+        key: string,
+        ownerUserId: string,
+      ) => Promise<PatchTaskView>
     >();
+  const requireBrowserUser = vi.fn();
   let controller: PatchTaskController;
 
   beforeEach(async () => {
     vi.resetAllMocks();
     create.mockResolvedValue(task);
+    requireBrowserUser.mockResolvedValue({ id: ownerUserId });
     const module = await Test.createTestingModule({
       providers: [
         { provide: PatchTaskService, useValue: { create } },
+        { provide: AuthService, useValue: { requireBrowserUser } },
         {
           provide: PatchTaskController,
-          inject: [PatchTaskService],
-          useFactory: (patchTasks: PatchTaskService): PatchTaskController =>
-            new PatchTaskController(patchTasks),
+          inject: [PatchTaskService, AuthService],
+          useFactory: (
+            patchTasks: PatchTaskService,
+            auth: AuthService,
+          ): PatchTaskController => new PatchTaskController(patchTasks, auth),
         },
       ],
     }).compile();
@@ -55,17 +67,18 @@ describe("PatchTaskController", () => {
   it.each([undefined, "", "contains spaces", "patch/"])(
     "rejects an invalid Idempotency-Key header: %s",
     (idempotencyKey) => {
-      expect(() => controller.create(idempotencyKey, input)).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        controller.create(idempotencyKey, "Bearer access", input),
+      ).toThrow(BadRequestException);
       expect(create).not.toHaveBeenCalled();
     },
   );
 
   it("passes a valid Idempotency-Key to the task service unchanged", async () => {
-    await expect(controller.create("patch.request-1", input)).resolves.toEqual({
-      data: task,
-    });
-    expect(create).toHaveBeenCalledWith(input, "patch.request-1");
+    await expect(
+      controller.create("patch.request-1", "Bearer access", input),
+    ).resolves.toEqual({ data: task });
+    expect(requireBrowserUser).toHaveBeenCalledWith("Bearer access");
+    expect(create).toHaveBeenCalledWith(input, "patch.request-1", ownerUserId);
   });
 });

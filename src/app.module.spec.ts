@@ -7,10 +7,10 @@ describe("application safety defaults", () => {
       DATABASE_URL: "mysql://runtime-user@127.0.0.1:3306/dnf_patch",
       CLIENT_SHARED_TOKEN: "c".repeat(32),
       WORKER_SHARED_TOKEN: "w".repeat(32),
+      BROWSER_SESSION_SECRET: "s".repeat(32),
     });
     expect(parsed.success).toBe(true);
     if (parsed.success) {
-      expect(parsed.data.OPENAI_API_KEY).toBeUndefined();
       expect(parsed.data.HOST).toBe("127.0.0.1");
     }
   });

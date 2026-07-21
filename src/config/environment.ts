@@ -19,6 +19,22 @@ const openAiBaseUrlSchema = z.string().superRefine((value, context) => {
   }
 });
 
+const credentialMasterKeySchema = z.string().superRefine((value, context) => {
+  try {
+    if (Buffer.from(value, "base64url").length !== 32) {
+      context.addIssue({
+        code: "custom",
+        message: "模型凭据主密钥必须是 32 字节 base64url。",
+      });
+    }
+  } catch {
+    context.addIssue({
+      code: "custom",
+      message: "模型凭据主密钥必须是有效 base64url。",
+    });
+  }
+});
+
 export const environmentSchema = z
   .object({
     NODE_ENV: z
@@ -26,7 +42,7 @@ export const environmentSchema = z
       .default("development"),
     HOST: loopbackHostSchema.default("127.0.0.1"),
     PORT: z.coerce.number().int().min(1).max(65_535).default(56_789), // 仅允许非特权端口，避免与系统服务冲突。
-    CORS_ORIGINS: z.string().default("http://127.0.0.1:3000"), // 仅允许本地开发环境访问，避免意外暴露服务。
+    CORS_ORIGINS: z.string().default("http://127.0.0.1:5173"), // 仅允许本地开发环境访问，避免意外暴露服务。
     DATABASE_URL: z.string().regex(/^mysql:\/\//u),
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
     DNF_REPOSITORY_ROOT: z.string().min(1).default("../dnf-patch"),
@@ -37,7 +53,13 @@ export const environmentSchema = z
     RESOURCE_IMPORT_PROJECT_ID: z.uuid().optional(),
     RESOURCE_IMPORT_SNAPSHOT_ID: z.uuid().optional(),
     CLIENT_SHARED_TOKEN: z.string().min(32),
-    OPENAI_API_KEY: z.string().min(1).optional(),
+    BROWSER_SESSION_SECRET: z.string().min(32),
+    USER_REGISTRATION_TOKEN: z.string().min(32).optional(),
+    MODEL_CREDENTIAL_MASTER_KEY: credentialMasterKeySchema.optional(),
+    MODEL_CREDENTIAL_KEY_VERSION: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,32}$/u)
+      .default("v1"),
     OPENAI_BASE_URL: openAiBaseUrlSchema.default("https://kldai.cc/v1"),
     OPENAI_ORCHESTRATOR_MODEL: z.string().min(1).default("gpt-5.6-sol"),
     OPENAI_ENGINEER_MODEL: z.string().min(1).default("gpt-5.5"),
@@ -87,6 +109,20 @@ export const environmentSchema = z
         code: "custom",
         path: ["WORKER_SHARED_TOKEN"],
         message: "客户端与 Worker 凭据必须使用不同值。",
+      });
+    }
+    if (value.BROWSER_SESSION_SECRET === value.CLIENT_SHARED_TOKEN) {
+      context.addIssue({
+        code: "custom",
+        path: ["BROWSER_SESSION_SECRET"],
+        message: "浏览器会话签名密钥必须与客户端共享令牌不同。",
+      });
+    }
+    if (value.BROWSER_SESSION_SECRET === value.WORKER_SHARED_TOKEN) {
+      context.addIssue({
+        code: "custom",
+        path: ["BROWSER_SESSION_SECRET"],
+        message: "浏览器会话签名密钥必须与 Worker 令牌不同。",
       });
     }
     if (

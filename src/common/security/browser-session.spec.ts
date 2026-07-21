@@ -13,7 +13,11 @@ import {
 } from "./browser-session.js";
 
 const secret = "c".repeat(32);
-const user = { username: "studio", displayName: "Studio" };
+const user = {
+  id: "11111111-1111-4111-8111-111111111111",
+  username: "studio",
+  displayName: "Studio",
+};
 
 describe("browser session tokens", () => {
   it("verifies a matching token kind and returns a stable API user", () => {
@@ -22,9 +26,9 @@ describe("browser session tokens", () => {
 
     expect(payload).toBeDefined();
     if (!payload) return;
-    expect(payload.subject).toBe("studio");
+    expect(payload.subject).toBe(user.id);
     const sessionUser = userFromSession(payload);
-    expect(sessionUser.id).toMatch(/^browser\.[a-f0-9]{16}$/u);
+    expect(sessionUser.id).toBe(user.id);
     expect(sessionUser).toMatchObject({
       username: "studio",
       displayName: "Studio",

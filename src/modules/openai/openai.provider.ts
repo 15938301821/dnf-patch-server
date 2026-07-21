@@ -11,7 +11,11 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import type { z } from "zod";
 import type { Environment } from "../../config/environment.js";
-import { resolveOpenAiEndpoint } from "../../config/openai-endpoint.js";
+
+export interface OpenAiCallConfiguration {
+  apiKey: string;
+  baseUrl: string;
+}
 
 export interface StructuredProviderRequest<T> {
   model: string;
@@ -27,48 +31,36 @@ export interface ImageProviderRequest {
 }
 
 export interface OpenAiProviderPort {
-  readonly configured: boolean;
-  readonly endpointIdentity: string;
   structured<T>(
     request: StructuredProviderRequest<T>,
+    configuration: OpenAiCallConfiguration,
   ): Promise<{ responseId: string; value: T }>;
-  image(request: ImageProviderRequest): Promise<Uint8Array>;
+  image(
+    request: ImageProviderRequest,
+    configuration: OpenAiCallConfiguration,
+  ): Promise<Uint8Array>;
 }
 
 @Injectable()
 export class OpenAiProvider implements OpenAiProviderPort {
-  readonly endpointIdentity: string;
-  private readonly client: OpenAI | undefined;
+  private readonly timeoutMs: number;
+  private readonly maxRetries: number;
 
   constructor(config: ConfigService<Environment, true>) {
-    const endpoint = resolveOpenAiEndpoint(
-      config.getOrThrow("OPENAI_BASE_URL", { infer: true }),
-    );
-    this.endpointIdentity = endpoint.identity;
-    const apiKey = config.get("OPENAI_API_KEY", { infer: true });
-    this.client = apiKey
-      ? new OpenAI({
-          apiKey,
-          baseURL: endpoint.baseUrl,
-          timeout: config.getOrThrow("OPENAI_REQUEST_TIMEOUT_MS", {
-            infer: true,
-          }),
-          maxRetries: config.getOrThrow("OPENAI_REQUEST_MAX_RETRIES", {
-            infer: true,
-          }),
-        })
-      : undefined;
-  }
-
-  get configured(): boolean {
-    return this.client !== undefined;
+    this.timeoutMs = config.getOrThrow("OPENAI_REQUEST_TIMEOUT_MS", {
+      infer: true,
+    });
+    this.maxRetries = config.getOrThrow("OPENAI_REQUEST_MAX_RETRIES", {
+      infer: true,
+    });
   }
 
   /** 调用固定结构化接口并在返回前执行调用方提供的 Zod schema。 */
   async structured<T>(
     request: StructuredProviderRequest<T>,
+    configuration: OpenAiCallConfiguration,
   ): Promise<{ responseId: string; value: T }> {
-    const client = this.requiredClient();
+    const client = this.client(configuration);
     const response = await client.responses.parse({
       model: request.model,
       instructions: request.instructions,
@@ -84,8 +76,11 @@ export class OpenAiProvider implements OpenAiProviderPort {
   }
 
   /** 调用固定图片接口，仅返回经过非空校验的 PNG 字节。 */
-  async image(request: ImageProviderRequest): Promise<Uint8Array> {
-    const client = this.requiredClient();
+  async image(
+    request: ImageProviderRequest,
+    configuration: OpenAiCallConfiguration,
+  ): Promise<Uint8Array> {
+    const client = this.client(configuration);
     const response = await client.images.generate({
       model: request.model,
       prompt: request.prompt,
@@ -102,8 +97,12 @@ export class OpenAiProvider implements OpenAiProviderPort {
     return bytes;
   }
 
-  private requiredClient(): OpenAI {
-    if (!this.client) throw new Error("OPENAI_API_KEY_NOT_CONFIGURED");
-    return this.client;
+  private client(configuration: OpenAiCallConfiguration): OpenAI {
+    return new OpenAI({
+      apiKey: configuration.apiKey,
+      baseURL: configuration.baseUrl,
+      timeout: this.timeoutMs,
+      maxRetries: this.maxRetries,
+    });
   }
 }

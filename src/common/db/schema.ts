@@ -12,10 +12,14 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
+import { users } from "./identity-schema.js";
+
+export { userModelConfigurations, users } from "./identity-schema.js";
 
 const id = (name: string) => varchar(name, { length: 64 });
 const sha256 = (name: string) => varchar(name, { length: 64 });
 const utc = (name: string) => datetime(name, { mode: "date", fsp: 3 });
+
 export const factories = mysqlTable(
   "factories",
   {
@@ -90,6 +94,9 @@ export const runs = mysqlTable(
   "runs",
   {
     id: id("id").primaryKey(),
+    ownerUserId: id("owner_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     projectId: id("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "restrict" }),
@@ -126,6 +133,7 @@ export const runs = mysqlTable(
     finishedAt: utc("finished_at"),
   },
   (table) => [
+    index("runs_owner_user_idx").on(table.ownerUserId),
     index("runs_project_idx").on(table.projectId),
     check(
       "runs_status_ck",
@@ -346,6 +354,9 @@ export const modelCalls = mysqlTable(
     role: varchar("role", { length: 32 }).notNull(),
     model: varchar("model", { length: 120 }).notNull(),
     endpointIdentity: varchar("endpoint_identity", { length: 300 }).notNull(),
+    modelConfigurationVersion: int("model_configuration_version", {
+      unsigned: true,
+    }),
     requestSha256: sha256("request_sha256").notNull(),
     responseSha256: sha256("response_sha256"),
     responseId: varchar("response_id", { length: 160 }),

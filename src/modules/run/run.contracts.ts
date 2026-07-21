@@ -105,6 +105,12 @@ export interface RunView {
 
 export interface RunCreateOptions {
   deferJobDispatch?: boolean;
+  ownerUserId?: string;
+}
+
+export interface RunModelContext {
+  modelEgressAuthorized: boolean;
+  ownerUserId?: string;
 }
 
 export type RunEventView = z.infer<typeof runEventSchema>;

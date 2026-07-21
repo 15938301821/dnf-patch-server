@@ -10,8 +10,10 @@ import type { FastifyReply } from "fastify";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import {
   loginSchema,
+  registerSchema,
   type AuthSession,
   type LoginInput,
+  type RegisterInput,
   type SessionUser,
 } from "./auth.contracts.js";
 import { AuthService } from "./auth.service.js";
@@ -21,30 +23,42 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post("login")
-  login(
+  async login(
     @Body(new ZodValidationPipe(loginSchema)) input: LoginInput,
     @Res({ passthrough: true }) response: FastifyReply,
-  ): { data: AuthSession } {
-    const result = this.auth.login(input);
+  ): Promise<{ data: AuthSession }> {
+    const result = await this.auth.login(input);
+    setRefreshCookie(response, result.refreshToken);
+    return { data: result.session };
+  }
+
+  @Post("register")
+  async register(
+    @Body(new ZodValidationPipe(registerSchema)) input: RegisterInput,
+    @Res({ passthrough: true }) response: FastifyReply,
+  ): Promise<{ data: AuthSession }> {
+    const result = await this.auth.register(input);
     setRefreshCookie(response, result.refreshToken);
     return { data: result.session };
   }
 
   @Post("refresh")
-  refresh(
+  async refresh(
     @Headers("cookie") cookie: string | undefined,
     @Res({ passthrough: true }) response: FastifyReply,
-  ): { data: AuthSession } {
-    const result = this.auth.refresh(readCookie(cookie, "dnf_patch_refresh"));
+  ): Promise<{ data: AuthSession }> {
+    const result = await this.auth.refresh(
+      readCookie(cookie, "dnf_patch_refresh"),
+    );
     setRefreshCookie(response, result.refreshToken);
     return { data: result.session };
   }
 
   @Get("me")
-  me(@Headers("authorization") authorization: string | undefined): {
-    data: SessionUser;
-  } {
-    return { data: this.auth.currentUser(authorization) };
+  async me(
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: SessionUser }> {
+    return { data: await this.auth.currentUser(authorization) };
   }
 
   @Post("logout")

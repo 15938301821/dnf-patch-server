@@ -12,12 +12,14 @@ export type BrowserSessionKind = "access" | "refresh";
 export interface BrowserSessionPayload {
   kind: BrowserSessionKind;
   subject: string;
+  username: string;
   displayName: string;
   expiresAt: number;
   nonce: string;
 }
 
 export interface BrowserSessionPrincipal {
+  id: string;
   username: string;
   displayName: string;
 }
@@ -34,7 +36,8 @@ export function createBrowserSessionToken(
 ): string {
   const payload: BrowserSessionPayload = {
     kind,
-    subject: user.username,
+    subject: user.id,
+    username: user.username,
     displayName: user.displayName,
     expiresAt: Math.floor(Date.now() / 1_000) + ttlSeconds,
     nonce: randomUUID(),
@@ -66,8 +69,8 @@ export function userFromSession(
   payload: BrowserSessionPayload,
 ): BrowserSessionUser {
   return {
-    id: `browser.${stableUserId(payload.subject)}`,
-    username: payload.subject,
+    id: payload.subject,
+    username: payload.username,
     displayName: payload.displayName,
   };
 }
@@ -82,6 +85,7 @@ function parsePayload(value: string): BrowserSessionPayload | undefined {
       typeof parsed !== "object" ||
       !("kind" in parsed) ||
       !("subject" in parsed) ||
+      !("username" in parsed) ||
       !("displayName" in parsed) ||
       !("expiresAt" in parsed) ||
       !("nonce" in parsed)
@@ -90,7 +94,11 @@ function parsePayload(value: string): BrowserSessionPayload | undefined {
     }
     const payload = parsed as BrowserSessionPayload;
     return typeof payload.subject === "string" &&
+      payload.subject.length <= 64 &&
+      typeof payload.username === "string" &&
+      payload.username.length <= 64 &&
       typeof payload.displayName === "string" &&
+      payload.displayName.length <= 160 &&
       typeof payload.expiresAt === "number" &&
       typeof payload.nonce === "string"
       ? payload
@@ -113,11 +121,4 @@ function secureEqual(left: string, right: string): boolean {
     leftBuffer.length === rightBuffer.length &&
     timingSafeEqual(leftBuffer, rightBuffer)
   );
-}
-
-function stableUserId(subject: string): string {
-  return createHmac("sha256", "dnf-patch-browser-user")
-    .update(subject, "utf8")
-    .digest("hex")
-    .slice(0, 16);
 }

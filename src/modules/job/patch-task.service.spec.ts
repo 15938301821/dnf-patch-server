@@ -21,6 +21,7 @@ const workflowProjectId = "33333333-3333-4333-8333-333333333333";
 const snapshotId = "44444444-4444-4444-8444-444444444444";
 const sourceRunId = "55555555-5555-4555-8555-555555555555";
 const idempotencyKey = "patch.test-request";
+const ownerUserId = "99999999-9999-4999-8999-999999999999";
 
 describe("PatchTaskService", () => {
   const patchTasks = {
@@ -67,7 +68,7 @@ describe("PatchTaskService", () => {
 
   it("creates one guarded profession job and planned skill productions", async () => {
     await expect(
-      service.create({ professionId, styleId }, idempotencyKey),
+      service.create({ professionId, styleId }, idempotencyKey, ownerUserId),
     ).resolves.toMatchObject({
       professionName: "剑魂",
       styleName: "暗蓝幻影",
@@ -81,7 +82,7 @@ describe("PatchTaskService", () => {
         jobs: [expect.objectContaining({ kind: "profession" })],
       }),
       idempotencyKey,
-      { deferJobDispatch: true },
+      { deferJobDispatch: true, ownerUserId },
     );
     const createInput = createRunSchema.parse(
       runs.create.mock.calls[0]?.[0] as unknown,
@@ -102,7 +103,7 @@ describe("PatchTaskService", () => {
     });
 
     await expect(
-      service.create({ professionId, styleId }, idempotencyKey),
+      service.create({ professionId, styleId }, idempotencyKey, ownerUserId),
     ).resolves.toMatchObject({ status: "blocked" });
     expect(patchTasks.createPlan).toHaveBeenCalledWith(
       expect.objectContaining({ professionId, styleId }),
@@ -115,7 +116,7 @@ describe("PatchTaskService", () => {
     patchTasks.createPlan.mockRejectedValue(new Error("database failure"));
 
     const error: unknown = await service
-      .create({ professionId, styleId }, idempotencyKey)
+      .create({ professionId, styleId }, idempotencyKey, ownerUserId)
       .catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(ServiceUnavailableException);
     if (!(error instanceof ServiceUnavailableException)) throw error;
@@ -133,7 +134,7 @@ describe("PatchTaskService", () => {
     runs.blockDeferredDispatch.mockRejectedValue(new Error("database offline"));
 
     const error: unknown = await service
-      .create({ professionId, styleId }, idempotencyKey)
+      .create({ professionId, styleId }, idempotencyKey, ownerUserId)
       .catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(ServiceUnavailableException);
     if (!(error instanceof ServiceUnavailableException)) throw error;
@@ -152,7 +153,7 @@ describe("PatchTaskService", () => {
       },
     });
     await expect(
-      service.create({ professionId, styleId }, idempotencyKey),
+      service.create({ professionId, styleId }, idempotencyKey, ownerUserId),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(runs.create).not.toHaveBeenCalled();
   });

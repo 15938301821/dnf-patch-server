@@ -201,6 +201,7 @@ function createApplicationEnvironment({
     DNF_REPOSITORY_ROOT: resolve("../dnf-patch"),
     CLIENT_SHARED_TOKEN: clientToken,
     WORKER_SHARED_TOKEN: workerToken,
+    BROWSER_SESSION_SECRET: randomBytes(32).toString("hex"),
     OPENAI_BASE_URL: "https://kldai.cc/v1",
     OPENAI_ORCHESTRATOR_MODEL: "gpt-5.6-sol",
     OPENAI_ENGINEER_MODEL: "gpt-5.5",
@@ -211,7 +212,6 @@ function createApplicationEnvironment({
     WORKER_REAPER_INTERVAL_MS: "60000",
     WORKER_REAPER_BATCH_SIZE: "25",
   };
-  delete environment.OPENAI_API_KEY;
   return environment;
 }
 

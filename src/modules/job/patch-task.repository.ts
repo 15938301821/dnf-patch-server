@@ -113,7 +113,7 @@ export class PatchTaskRepository {
     });
   }
 
-  async list(): Promise<PatchTaskView[]> {
+  async list(ownerUserId: string): Promise<PatchTaskView[]> {
     const rows = await this.connection.database
       .select({
         id: runs.id,
@@ -145,6 +145,7 @@ export class PatchTaskRepository {
         styleSkillProductions,
         eq(styleSkillProductions.runId, stylePackages.runId),
       )
+      .where(eq(runs.ownerUserId, ownerUserId))
       .groupBy(
         runs.id,
         professions.name,
@@ -164,14 +165,13 @@ export class PatchTaskRepository {
       progress: progress(row.totalSkills, row.passedSkills, row.runStatus),
       createdAt: row.createdAt.toISOString(),
       ...(row.artifactName ? { artifactName: row.artifactName } : {}),
-      ...(row.packageArtifactId
-        ? { downloadUrl: `/jobs/${row.id}/artifact` }
-        : {}),
+      artifactAvailable: row.packageArtifactId !== null,
     }));
   }
 
   async findArtifact(
     runId: string,
+    ownerUserId: string,
   ): Promise<PatchTaskArtifactView | undefined> {
     const [row] = await this.connection.database
       .select({
@@ -182,6 +182,7 @@ export class PatchTaskRepository {
         sha256: artifacts.sha256,
       })
       .from(stylePackages)
+      .innerJoin(runs, eq(runs.id, stylePackages.runId))
       .innerJoin(
         artifacts,
         and(
@@ -190,7 +191,11 @@ export class PatchTaskRepository {
         ),
       )
       .where(
-        and(eq(stylePackages.runId, runId), eq(stylePackages.status, "passed")),
+        and(
+          eq(stylePackages.runId, runId),
+          eq(stylePackages.status, "passed"),
+          eq(runs.ownerUserId, ownerUserId),
+        ),
       )
       .limit(1);
     return row;

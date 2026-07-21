@@ -12,19 +12,25 @@ import { ApiAuthGuard } from "./api-auth.guard.js";
 
 const clientToken = "c".repeat(32);
 const workerToken = "w".repeat(32);
+const sessionSecret = "s".repeat(32);
 
 describe("ApiAuthGuard browser compatibility", () => {
   const guard = new ApiAuthGuard(configService());
 
-  it("allows public login and refresh endpoints", () => {
+  it("allows public login, registration, and refresh endpoints", () => {
     expect(guard.canActivate(context("POST", "/v1/auth/login"))).toBe(true);
+    expect(guard.canActivate(context("POST", "/v1/auth/register"))).toBe(true);
     expect(guard.canActivate(context("POST", "/v1/auth/refresh"))).toBe(true);
   });
 
   it("allows browser access tokens without accepting them for internal routes", () => {
     const browserToken = createBrowserSessionToken(
-      clientToken,
-      { username: "studio", displayName: "Studio" },
+      sessionSecret,
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        username: "studio",
+        displayName: "Studio",
+      },
       "access",
       60,
     );
@@ -71,7 +77,13 @@ describe("ApiAuthGuard browser compatibility", () => {
 
 function configService(): ConstructorParameters<typeof ApiAuthGuard>[0] {
   return {
-    getOrThrow(key: "CLIENT_SHARED_TOKEN" | "WORKER_SHARED_TOKEN") {
+    getOrThrow(
+      key:
+        | "BROWSER_SESSION_SECRET"
+        | "CLIENT_SHARED_TOKEN"
+        | "WORKER_SHARED_TOKEN",
+    ) {
+      if (key === "BROWSER_SESSION_SECRET") return sessionSecret;
       return key === "CLIENT_SHARED_TOKEN" ? clientToken : workerToken;
     },
   } as ConstructorParameters<typeof ApiAuthGuard>[0];

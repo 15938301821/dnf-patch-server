@@ -29,6 +29,7 @@ export interface ModelCallView {
   role: ModelRole;
   model: string;
   endpointIdentity: string;
+  modelConfigurationVersion?: number;
   requestSha256: string;
   responseSha256?: string;
   responseId?: string;

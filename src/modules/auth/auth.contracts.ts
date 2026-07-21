@@ -9,12 +9,27 @@ import { z } from "zod";
 
 export const loginSchema = z
   .object({
-    username: z.string().trim().min(1).max(120),
-    password: z.string().min(1).max(1_000),
+    username: z
+      .string()
+      .trim()
+      .min(3)
+      .max(64)
+      .regex(/^[A-Za-z0-9._-]+$/u),
+    password: z.string().min(6).max(256),
   })
   .strict();
 
 export type LoginInput = z.infer<typeof loginSchema>;
+
+export const registerSchema = loginSchema
+  .extend({
+    password: z.string().min(8).max(256),
+    displayName: z.string().trim().min(1).max(160),
+    registrationToken: z.string().min(32).max(1_000),
+  })
+  .strict();
+
+export type RegisterInput = z.infer<typeof registerSchema>;
 
 export interface SessionUser {
   id: string;

@@ -9,6 +9,7 @@ const apiPort = await findFreePort();
 const databasePort = await findFreePort();
 const clientToken = randomBytes(24).toString("hex");
 const workerToken = randomBytes(24).toString("hex");
+const browserSessionSecret = randomBytes(32).toString("hex");
 const environment = {
   ...process.env,
   NODE_ENV: "test",
@@ -20,13 +21,13 @@ const environment = {
   DNF_REPOSITORY_ROOT: "../dnf-patch",
   CLIENT_SHARED_TOKEN: clientToken,
   WORKER_SHARED_TOKEN: workerToken,
+  BROWSER_SESSION_SECRET: browserSessionSecret,
   OPENAI_BASE_URL: "https://kldai.cc/v1",
   OPENAI_ORCHESTRATOR_MODEL: "gpt-5.6-sol",
   OPENAI_ENGINEER_MODEL: "gpt-5.5",
   OPENAI_IMAGE_MODEL: "gpt-image-2",
   WORKER_LEASE_SECONDS: "60",
 };
-delete environment.OPENAI_API_KEY;
 
 const child = spawn(process.execPath, [resolve("dist/main.js")], {
   cwd: process.cwd(),
