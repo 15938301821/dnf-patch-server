@@ -11,9 +11,11 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import { PatchTaskService } from "./patch-task.service.js";
 import type { StyleBuildContext } from "../profession/profession.contracts.js";
 import { createRunSchema } from "../run/run.contracts.js";
+import { styleSkillProductionJobPayloadV2Schema } from "./style-skill-production.contracts.js";
 
 const professionId = "11111111-1111-4111-8111-111111111111";
 const styleId = "22222222-2222-4222-8222-222222222222";
@@ -84,13 +86,38 @@ describe("PatchTaskService", () => {
       idempotencyKey,
       { deferJobDispatch: true, ownerUserId },
     );
+    expect(professions.getStyleBuildContext).toHaveBeenCalledWith(
+      professionId,
+      styleId,
+      ownerUserId,
+    );
     const createInput = createRunSchema.parse(
       runs.create.mock.calls[0]?.[0] as unknown,
     );
+    const payload = styleSkillProductionJobPayloadV2Schema.parse(
+      createInput.jobs[0]?.payload,
+    );
+    const frozenSkill = payload.parameters.promptPackage.skills[0];
+    if (!frozenSkill) throw new Error("TEST_SKILL_REQUIRED");
     expect(createInput.clientRunId).toMatch(/^patch\.[A-F0-9]{64}$/u);
+    expect(payload.parameters).toMatchObject({
+      workflow: "style-skill-production-v2",
+      selectedSkillIds: ["77777777-7777-4777-8777-777777777777"],
+      deploymentAuthorized: false,
+    });
+    expect(frozenSkill).toMatchObject({
+      professionPrompt: buildContext().skills[0]?.professionPrompt,
+      skillThemePrompt: buildContext().style.skillPrompts[0],
+      sourceEvidence: { sourceRunId },
+    });
     expect(patchTasks.createPlan).toHaveBeenCalledWith(
       expect.objectContaining({ professionId, styleId }),
-      [expect.objectContaining({ sourceRunId })],
+      [
+        expect.objectContaining({
+          sourceRunId,
+          promptSha256: frozenSkill.promptSha256,
+        }),
+      ],
       "dispatch",
     );
   });
@@ -206,6 +233,13 @@ describe("PatchTaskService", () => {
 });
 
 function buildContext(): StyleBuildContext {
+  const professionPrompt = {
+    schemaVersion: 1 as const,
+    stableSemantics: "保留技能身份",
+    commonPrompt: "保持角色与武器轮廓",
+    sourceConstraints: "只处理核验帧",
+    stageAcceptance: "逐帧通过来源约束",
+  };
   return {
     profession: {
       id: professionId,
@@ -223,9 +257,28 @@ function buildContext(): StyleBuildContext {
       professionId,
       name: "暗蓝幻影",
       description: "test",
-      agent: "keep source geometry",
-      prompt: "deep cobalt slash",
+      themeDefinition: {
+        schemaVersion: 1,
+        goal: "统一暗蓝剑气主题",
+        baseStyle: "deep cobalt slash",
+        colorAnchors: [{ name: "主色", value: "#123456" }],
+        materialRules: "保留清晰剑气边缘",
+        particleRules: "粒子跟随原动画节奏",
+        layeringRules: "不改变源帧层级语义",
+        constraints: "keep source geometry",
+        acceptanceCriteria: "逐帧轮廓可辨识",
+        exclusions: "不新增角色本体效果",
+      },
       selectedSkillIds: ["77777777-7777-4777-8777-777777777777"],
+      skillPrompts: [
+        {
+          skillId: "77777777-7777-4777-8777-777777777777",
+          themePrompt: "暗蓝月牙剑气",
+          changes: "替换剑气材质与粒子颜色",
+          acceptanceCriteria: "动作时间轴与原技能一致",
+          exclusions: "不修改命中范围",
+        },
+      ],
       publishStatus: "private",
       updatedAt: "2026-07-21T00:00:00.000Z",
     },
@@ -237,10 +290,13 @@ function buildContext(): StyleBuildContext {
         promptStatus: "reviewed",
         mappingStatus: "verified",
         executionStatus: "build-ready",
+        professionPrompt,
+        professionPromptSha256: sha256JcsV1(professionPrompt),
         sourceRunId,
         sourceFrameManifestArtifactId: "88888888-8888-4888-8888-888888888888",
         sourceMetadataSha256: "B".repeat(64),
       },
     ],
+    missingProfessionPromptSkillIds: [],
   };
 }

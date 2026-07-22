@@ -263,6 +263,12 @@ export const jobAttempts = mysqlTable(
   },
   (table) => [
     uniqueIndex("job_attempts_uq").on(table.jobId, table.attempt),
+    uniqueIndex("job_attempts_lease_evidence_uq").on(
+      table.jobId,
+      table.attempt,
+      table.workerId,
+      table.leaseId,
+    ),
     check(
       "job_attempts_status_ck",
       sql`${table.status} in ('running', 'passed', 'failed', 'blocked', 'timed_out')`,
@@ -455,12 +461,16 @@ export const manualReviews = mysqlTable(
     completedAt: utc("completed_at"),
   },
   (table) => [
-    index("manual_reviews_run_idx").on(table.runId),
+    uniqueIndex("manual_reviews_run_uq").on(table.runId),
     foreignKey({
       columns: [table.runId, table.evidenceArtifactId],
       foreignColumns: [artifacts.runId, artifacts.id],
       name: "manual_reviews_evidence_artifact_run_fk",
     }).onDelete("restrict"),
+    check(
+      "manual_reviews_status_ck",
+      sql`${table.status} in ('pending', 'approved', 'rejected')`,
+    ),
   ],
 );
 

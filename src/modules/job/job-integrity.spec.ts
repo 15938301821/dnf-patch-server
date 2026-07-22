@@ -11,12 +11,8 @@ import {
   type PersistedJobIntegrityInput,
   validatePersistedJobIntegrity,
 } from "./job-integrity.js";
+import { createSharedFxJobPayload } from "./shared-fx.contracts.js";
 
-const payload = {
-  schemaVersion: 1,
-  profileId: "runtime-profile",
-  parameters: { scope: "shared-fx" },
-};
 const factoryConfig = {
   schemaVersion: 2 as const,
   profileId: "runtime-profile",
@@ -27,6 +23,18 @@ const factoryConfig = {
   arbitraryExecution: false,
   deploymentAuthorized: false,
 };
+const payload = createSharedFxJobPayload({
+  profileId: factoryConfig.profileId,
+  policyId: factoryConfig.policyId,
+  policySha256: factoryConfig.policySha256,
+  snapshot: {
+    id: "11111111-1111-4111-8111-111111111111",
+    rootRulesSha256: "B".repeat(64),
+    manifestSha256: "C".repeat(64),
+    promptTreeSha256: "D".repeat(64),
+    toolCatalogSha256: "E".repeat(64),
+  },
+});
 
 function persisted(
   overrides: Partial<PersistedJobIntegrityInput> = {},

@@ -9,6 +9,7 @@ import { Injectable } from "@nestjs/common";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../../common/db/database.service.js";
+import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import {
   professionSkills,
   professionStyles,
@@ -23,6 +24,7 @@ import type {
   ProfessionStyle,
   ProfessionSummary,
   SaveProfessionStyleInput,
+  SkillThemePrompt,
   StyleBuildContext,
   VerifiedProfessionSkillRecord,
 } from "./profession.contracts.js";
@@ -30,6 +32,7 @@ import {
   toProfessionRecord,
   toProfessionSummary,
   toSkillSummary,
+  toSkillThemePrompt,
   toStyle,
 } from "./profession.mapper.js";
 
@@ -37,15 +40,23 @@ import {
 export class ProfessionRepository {
   constructor(private readonly connection: DatabaseService) {}
 
-  async list(): Promise<ProfessionSummary[]> {
+  async list(ownerUserId: string): Promise<ProfessionSummary[]> {
     const [professionRows, styleRows] = await Promise.all([
       this.connection.database
         .select()
         .from(professions)
+        .where(eq(professions.ownerUserId, ownerUserId))
         .orderBy(desc(professions.updatedAt)),
       this.connection.database
         .select({ professionId: professionStyles.professionId })
-        .from(professionStyles),
+        .from(professionStyles)
+        .innerJoin(
+          professions,
+          and(
+            eq(professionStyles.professionId, professions.id),
+            eq(professions.ownerUserId, ownerUserId),
+          ),
+        ),
     ]);
     const styleCounts = new Map<string, number>();
     for (const style of styleRows) {
@@ -73,18 +84,44 @@ export class ProfessionRepository {
     return toProfessionRecord(row, styleCount?.value ?? 0);
   }
 
+  async findOwnedById(
+    id: string,
+    ownerUserId: string,
+  ): Promise<ProfessionRecord | undefined> {
+    const [row] = await this.connection.database
+      .select()
+      .from(professions)
+      .where(
+        and(eq(professions.id, id), eq(professions.ownerUserId, ownerUserId)),
+      )
+      .limit(1);
+    if (!row) return undefined;
+    const [styleCount] = await this.connection.database
+      .select({ value: count() })
+      .from(professionStyles)
+      .where(eq(professionStyles.professionId, id));
+    return toProfessionRecord(row, styleCount?.value ?? 0);
+  }
+
   async findByCanonicalName(
+    ownerUserId: string,
     canonicalName: string,
   ): Promise<ProfessionRecord | undefined> {
     const [row] = await this.connection.database
       .select()
       .from(professions)
-      .where(eq(professions.canonicalName, canonicalName))
+      .where(
+        and(
+          eq(professions.ownerUserId, ownerUserId),
+          eq(professions.canonicalName, canonicalName),
+        ),
+      )
       .limit(1);
     return row ? toProfessionRecord(row, 0) : undefined;
   }
 
   async create(
+    ownerUserId: string,
     id: string,
     canonicalName: string,
     input: CreateProfessionInput,
@@ -92,6 +129,7 @@ export class ProfessionRepository {
     const now = new Date();
     await this.connection.database.insert(professions).values({
       id,
+      ownerUserId,
       name: input.name,
       slug: input.slug,
       canonicalName,
@@ -152,11 +190,11 @@ export class ProfessionRepository {
         ),
       )
       .orderBy(asc(professionStyleSkills.ordinal));
-    const selections = new Map<string, string[]>();
+    const selections = new Map<string, SkillThemePrompt[]>();
     for (const selection of selectionRows) {
-      const skillIds = selections.get(selection.styleId) ?? [];
-      skillIds.push(selection.skillId);
-      selections.set(selection.styleId, skillIds);
+      const prompts = selections.get(selection.styleId) ?? [];
+      prompts.push(toSkillThemePrompt(selection));
+      selections.set(selection.styleId, prompts);
     }
     return styleRows.map((row) => toStyle(row, selections.get(row.id) ?? []));
   }
@@ -177,6 +215,7 @@ export class ProfessionRepository {
     input: SaveProfessionStyleInput,
   ): Promise<ProfessionStyle> {
     const now = new Date();
+    const skillPrompts = orderedSkillPrompts(input);
     await this.connection.database.transaction(async (transaction) => {
       await transaction.insert(professionStyles).values({
         id: styleId,
@@ -184,22 +223,29 @@ export class ProfessionRepository {
         name: input.name,
         canonicalName,
         description: input.description,
-        agent: input.agent,
-        prompt: input.prompt,
+        agent: input.themeDefinition.constraints,
+        prompt: input.themeDefinition.baseStyle,
+        themeDefinition: input.themeDefinition,
         publishStatus: "private",
         createdAt: now,
         updatedAt: now,
       });
-      await transaction.insert(professionStyleSkills).values(
-        input.selectedSkillIds.map((skillId, ordinal) => ({
-          professionId,
-          styleId,
-          skillId,
-          ordinal,
-          createdAt: now,
-          updatedAt: now,
-        })),
-      );
+      if (skillPrompts.length > 0) {
+        await transaction.insert(professionStyleSkills).values(
+          skillPrompts.map((prompt, ordinal) => ({
+            professionId,
+            styleId,
+            skillId: prompt.skillId,
+            ordinal,
+            customPrompt: prompt.themePrompt,
+            changes: prompt.changes,
+            acceptanceCriteria: prompt.acceptanceCriteria,
+            exclusions: prompt.exclusions,
+            createdAt: now,
+            updatedAt: now,
+          })),
+        );
+      }
       await transaction
         .update(professions)
         .set({ updatedAt: now })
@@ -212,13 +258,14 @@ export class ProfessionRepository {
         name: input.name,
         canonicalName,
         description: input.description,
-        agent: input.agent,
-        prompt: input.prompt,
+        agent: input.themeDefinition.constraints,
+        prompt: input.themeDefinition.baseStyle,
+        themeDefinition: input.themeDefinition,
         publishStatus: "private",
         createdAt: now,
         updatedAt: now,
       },
-      input.selectedSkillIds,
+      skillPrompts,
     );
   }
 
@@ -229,6 +276,7 @@ export class ProfessionRepository {
     input: SaveProfessionStyleInput,
   ): Promise<ProfessionStyle> {
     const now = new Date();
+    const skillPrompts = orderedSkillPrompts(input);
     await this.connection.database.transaction(async (transaction) => {
       await transaction
         .update(professionStyles)
@@ -236,8 +284,9 @@ export class ProfessionRepository {
           name: input.name,
           canonicalName,
           description: input.description,
-          agent: input.agent,
-          prompt: input.prompt,
+          agent: input.themeDefinition.constraints,
+          prompt: input.themeDefinition.baseStyle,
+          themeDefinition: input.themeDefinition,
           publishStatus: "private",
           updatedAt: now,
         })
@@ -250,16 +299,22 @@ export class ProfessionRepository {
       await transaction
         .delete(professionStyleSkills)
         .where(eq(professionStyleSkills.styleId, styleId));
-      await transaction.insert(professionStyleSkills).values(
-        input.selectedSkillIds.map((skillId, ordinal) => ({
-          professionId,
-          styleId,
-          skillId,
-          ordinal,
-          createdAt: now,
-          updatedAt: now,
-        })),
-      );
+      if (skillPrompts.length > 0) {
+        await transaction.insert(professionStyleSkills).values(
+          skillPrompts.map((prompt, ordinal) => ({
+            professionId,
+            styleId,
+            skillId: prompt.skillId,
+            ordinal,
+            customPrompt: prompt.themePrompt,
+            changes: prompt.changes,
+            acceptanceCriteria: prompt.acceptanceCriteria,
+            exclusions: prompt.exclusions,
+            createdAt: now,
+            updatedAt: now,
+          })),
+        );
+      }
     });
     return {
       id: styleId,
@@ -318,6 +373,8 @@ export class ProfessionRepository {
           sourceInventoryEntryId: null,
           sourceFrameManifestArtifactId: null,
           sourceMetadataSha256: null,
+          professionPrompt: null,
+          professionPromptSha256: null,
           updatedAt: now,
         })
         .where(eq(professionSkills.professionId, professionId));
@@ -330,16 +387,23 @@ export class ProfessionRepository {
       );
       for (const skill of skills) {
         const current = byStableKey.get(skill.stableKey);
+        const professionPromptSha256 = skill.professionPrompt
+          ? sha256JcsV1(skill.professionPrompt)
+          : null;
         const values = {
           displayName: skill.displayName,
           promptStatus: skill.promptStatus,
           mappingStatus: "verified" as const,
-          executionStatus: "build-ready" as const,
+          executionStatus: skill.professionPrompt
+            ? ("build-ready" as const)
+            : ("draft-only" as const),
           sourceRunId: skill.sourceRunId,
           sourceInventoryId: skill.sourceInventoryId,
           sourceInventoryEntryId: skill.sourceInventoryEntryId,
           sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
           sourceMetadataSha256: skill.sourceMetadataSha256.toUpperCase(),
+          professionPrompt: skill.professionPrompt ?? null,
+          professionPromptSha256,
           updatedAt: now,
         };
         if (current) {
@@ -364,8 +428,9 @@ export class ProfessionRepository {
   async getBuildContext(
     professionId: string,
     styleId: string,
+    ownerUserId: string,
   ): Promise<StyleBuildContext | undefined> {
-    const profession = await this.findById(professionId);
+    const profession = await this.findOwnedById(professionId, ownerUserId);
     const style = await this.findStyle(professionId, styleId);
     if (!profession || !style) return undefined;
     const rows = await this.connection.database
@@ -382,26 +447,53 @@ export class ProfessionRepository {
       skillsById.get(skillId),
     );
     if (skills.some((skill) => skill === undefined)) return undefined;
+    const missingProfessionPromptSkillIds = skills
+      .filter(
+        (skill) => !skill?.professionPrompt || !skill.professionPromptSha256,
+      )
+      .map((skill) => skill?.id)
+      .filter((skillId): skillId is string => skillId !== undefined);
     return {
       profession,
       style,
-      skills: skills.map((skill) => {
+      missingProfessionPromptSkillIds,
+      skills: skills.flatMap((skill) => {
+        const summary = skill ? toSkillSummary(skill) : undefined;
         if (
           !skill ||
+          !summary?.professionPrompt ||
+          !summary.professionPromptSha256 ||
           skill.executionStatus !== "build-ready" ||
           !skill.sourceRunId ||
           !skill.sourceFrameManifestArtifactId ||
           !skill.sourceMetadataSha256
         ) {
-          throw new Error("STYLE_SKILL_NOT_BUILD_READY");
+          return [];
         }
-        return {
-          ...toSkillSummary(skill),
-          sourceRunId: skill.sourceRunId,
-          sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
-          sourceMetadataSha256: skill.sourceMetadataSha256,
-        };
+        return [
+          {
+            ...summary,
+            sourceRunId: skill.sourceRunId,
+            sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
+            sourceMetadataSha256: skill.sourceMetadataSha256,
+            professionPrompt: summary.professionPrompt,
+            professionPromptSha256: summary.professionPromptSha256,
+          },
+        ];
       }),
     };
   }
+}
+
+function orderedSkillPrompts(
+  input: SaveProfessionStyleInput,
+): SkillThemePrompt[] {
+  const bySkillId = new Map(
+    input.skillPrompts.map((prompt) => [prompt.skillId, prompt]),
+  );
+  return input.selectedSkillIds.map((skillId) => {
+    const prompt = bySkillId.get(skillId);
+    if (!prompt) throw new Error("STYLE_SKILL_PROMPT_MISSING");
+    return prompt;
+  });
 }

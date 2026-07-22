@@ -22,6 +22,16 @@ describe("environment configuration", () => {
       WORKER_REAPER_INTERVAL_MS: 5_000,
       WORKER_REAPER_BATCH_SIZE: 25,
       RESOURCE_IMPORT_SERVER_MIRROR_ENABLED: false,
+      OBJECT_STORAGE_ENABLED: false,
+      OBJECT_STORAGE_ENDPOINT: "http://127.0.0.1:9000",
+      OBJECT_STORAGE_REGION: "us-east-1",
+      OBJECT_STORAGE_BUCKET: "dnf-patch-artifacts",
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true,
+      OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: 300,
+      OBJECT_STORAGE_MAX_OBJECT_BYTES: 2_147_483_648,
+      OBJECT_STORAGE_MAX_RUN_BYTES: 10_737_418_240,
+      ARTIFACT_ORPHAN_REAPER_INTERVAL_MS: 30_000,
+      ARTIFACT_ORPHAN_REAPER_BATCH_SIZE: 25,
     });
   });
 
@@ -67,5 +77,48 @@ describe("environment configuration", () => {
         RESOURCE_IMPORT_SNAPSHOT_ID: "22222222-2222-4222-8222-222222222222",
       }).RESOURCE_IMPORT_SERVER_MIRROR_ENABLED,
     ).toBe(true);
+  });
+
+  it("requires independent credentials when object storage is enabled", () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment(),
+        OBJECT_STORAGE_ENABLED: "true",
+      }),
+    ).toThrow();
+
+    expect(
+      validateEnvironment({
+        ...validEnvironment(),
+        OBJECT_STORAGE_ENABLED: "true",
+        OBJECT_STORAGE_ACCESS_KEY: "dnf-patch-app",
+        OBJECT_STORAGE_SECRET_KEY: "o".repeat(32),
+      }).OBJECT_STORAGE_ENABLED,
+    ).toBe(true);
+  });
+
+  it("rejects public object storage endpoints", () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment(),
+        OBJECT_STORAGE_ENABLED: "true",
+        OBJECT_STORAGE_ENDPOINT: "https://storage.example.com",
+        OBJECT_STORAGE_ACCESS_KEY: "dnf-patch-app",
+        OBJECT_STORAGE_SECRET_KEY: "o".repeat(32),
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an object storage secret reused as another service credential", () => {
+    const workerToken = "w".repeat(32);
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment(),
+        WORKER_SHARED_TOKEN: workerToken,
+        OBJECT_STORAGE_ENABLED: "true",
+        OBJECT_STORAGE_ACCESS_KEY: "dnf-patch-app",
+        OBJECT_STORAGE_SECRET_KEY: workerToken,
+      }),
+    ).toThrow();
   });
 });

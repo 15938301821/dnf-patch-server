@@ -71,6 +71,34 @@
       "when": 1784653769346,
       "tag": "0009_handy_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1784694068444,
+      "tag": "0010_chubby_iron_lad",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1784694491659,
+      "tag": "0011_rare_lionheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1784698872408,
+      "tag": "0012_tiny_payback",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1784705142866,
+      "tag": "0013_cute_skreet",
+      "breakpoints": true
     }
   ]
 }

@@ -16,24 +16,29 @@
 
 ## 2. 项目定位与信任边界
 
-本项目是 DNF Patch Studio 的 NestJS/MySQL 审计型控制面，负责：
+DNF Patch Studio 的本地后端是部署在最终用户电脑上的完整业务系统，由本仓库的 NestJS 服务、MySQL、私有对象存储和仓库外独立 Windows Worker 共同组成。不能把 NestJS 进程的权限边界误写成整个本地后端不执行真实业务，也不能因此把 Worker 的本机权限引入 NestJS、Renderer 或 Electron。
+
+本仓库实现本地后端的业务编排、API 与审计持久化层，负责：
 
 - Factory、Project、Snapshot、Run、Job 和 Worker 注册及能力管理。
 - attempt、租约、心跳、超时回收、权威事件和 outbox 持久化。
-- Artifact 相对引用、NPK/IMG inventory 元数据和 Image attempt 证据。
+- 私有对象存储的受控上传、服务端哈希复核、短期下载授权与 Artifact 元数据。
+- NPK/IMG inventory 元数据、职业技能模板、生产状态和 Image attempt 证据。
 - Guardrail 决策、固定角色模型调用状态、请求/响应哈希和脱敏审计记录。
-- 通过版本化 REST 与 Socket.IO 接口向桌面端和受控 Worker 提供调度能力。
+- 通过版本化 REST 与 Socket.IO 接口向桌面端和受控 Worker 提供调度、审核与下载能力。
 
-本项目不是本机补丁执行器，不负责：
+本仓库中的 NestJS 进程不是本机工具执行器，不负责：
 
 - 访问、扫描、写入、部署或修改游戏目录，以及检查、启动或终止游戏进程。
-- 解包、改写或发布官方 NPK、IMG、ImagePacks2 和 runtime 文件。
+- 直接解包、改写或封装 NPK/IMG，以及调用 ExtractorSharp、Aseprite、DirectXTex 或其他本机工具。
 - 执行或下发任意 executable、shell、命令、脚本路径、绝对路径或未验证参数。
-- 保存官方资源、源帧、runtime 图片或其他大文件 BLOB。
+- 在 MySQL 中保存官方资源、源帧、runtime 图片或其他大文件 BLOB。
 - 提供任意 Prompt、任意模型、任意工具调用、通用模型推理或网络代理 API；受认证的用户模型配置写入端点不属于模型推理 API。
 - 根据名称猜测 NPK、IMG、技能、帧映射、全技能覆盖或客户端兼容性。
 
-`../dnf-patch` 是 DNF 领域事实源和桌面端实现仓库，不是本服务可随意读取的运行时文件系统依赖。本机固定工具和文件操作属于 Electron 主进程或仓库外受控 Worker；服务端只接收版本化声明式任务、相对引用、状态和可验证证据。
+仓库外独立 Worker 是本地后端的受控执行面：它可以从仅存在于 Worker 本机配置中的只读 ImagePacks2 根扫描官方资源，执行已登记且固定版本/哈希的 ExtractorSharp、Aseprite、DirectXTex、封包器和验证器，并在隔离工作区生成新的候选 NPK 与证据。Worker 只能消费冻结的声明式 Job、对象引用、哈希、帧选择和工具 profile；不得接收任意命令、脚本、可执行路径、用户模型密钥或部署指令，不得覆盖官方资源或控制游戏进程。
+
+`../dnf-patch` 是开发期 DNF 领域事实源和桌面端实现仓库，不是 NestJS 或 Worker 可随意读取的运行时文件系统依赖。运行时只能使用经导入、审核、冻结并带来源哈希的模板和证据。Renderer 与 Electron 只负责受认证交互和安全桌面容器，不读取游戏资源、不执行补丁工具，也不监管 Worker 业务执行。
 
 ## 3. 不可变安全条件
 

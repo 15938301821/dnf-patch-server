@@ -2,11 +2,12 @@
 
 ## 1. 服务定位与信任边界
 
-- 本服务是 DNF Patch Studio 的审计型控制面，只负责 Factory、Project、Snapshot、Run、Job、Worker 注册、租约、事件、Artifact 引用、NPK inventory 元数据、Image attempt、Guardrail 决策、模型调用记录和 outbox。
-- 本服务不是本机执行器：不得读取、写入、部署或修改游戏目录，不得检查或控制游戏进程，不得执行二进制、shell、命令或脚本。
+- DNF Patch Studio 的完整本地后端由本 NestJS 服务、MySQL、私有对象存储和仓库外独立 Windows Worker 组成。本服务负责 Factory、Project、Snapshot、Run、Job、Worker 注册、租约、事件、对象授权、Artifact 元数据、NPK inventory、Image attempt、职业生产状态、Guardrail、固定角色模型调用和 outbox。
+- NestJS 进程不是本机工具执行器：不得读取、写入、部署或修改游戏目录，不得检查或控制游戏进程，不得执行二进制、shell、命令或脚本。
 - Worker API 只传输版本化声明式 Job payload、能力、租约 token、状态和证据哈希；不得下发 executable、shell、脚本路径、绝对路径或未验证参数。
-- Electron 主进程或仓库外本地 Worker 承担固定工具与本机文件操作，但这不能扩大服务端权限。
-- `../dnf-patch` 中的根/职业/主题规则、manifest、Prompt、工具目录和验证报告仍是 DNF 领域事实源；服务端不得补猜缺失映射。
+- 仓库外独立 Worker 是本地后端的受控执行面，承担只读资源扫描以及固定 ExtractorSharp、Aseprite、DirectXTex、封包器和验证器的执行；它不得接收任意命令、用户模型密钥、部署指令或未经注册的工具路径。
+- Renderer 与 Electron 只负责受认证交互和安全桌面容器，不读取游戏资源、不执行补丁工具，也不监管 Worker 业务执行。
+- `../dnf-patch` 中的根/职业/主题规则、manifest、Prompt、工具目录和验证报告是开发期 DNF 领域事实源；运行时只能使用经导入、审核、冻结并带来源哈希的模板和证据，NestJS 不得补猜缺失映射。
 
 ## 2. 稳定目录与领域职责
 
@@ -26,7 +27,7 @@ dnf-patch-server/
 │  │  ├─ security/          # 客户端、Worker 与统一 API 鉴权
 │  │  └─ utils/             # 无领域状态的通用纯工具
 │  ├─ config/               # 环境变量与模型端点运行时校验
-│  ├─ modules/              # 11 个领域模块
+│  ├─ modules/              # 纵向领域模块
 │  │  ├─ artifact/          # 相对存储引用、长度、SHA-256 与 provenance
 │  │  ├─ factory/           # 工厂版本、冻结策略和允许的 Job contract
 │  │  ├─ guardrail/         # 声明式任务与帧不变量的追加式决策
@@ -112,7 +113,7 @@ dnf-patch-server/
 
 ## 9. Artifact、NPK、Image 与模型边界
 
-- MySQL 只保存元数据、仓库相对引用、长度、SHA-256 和 provenance；不得保存官方 NPK、源帧、runtime 图片或其他大文件 BLOB。
+- MySQL 只保存元数据、对象引用、长度、SHA-256 和 provenance；不得保存官方 NPK、源帧、runtime 图片或其他大文件 BLOB。源帧、模型输出、中间工程、验证证据和候选包只能进入私有对象存储，并通过服务端受控上传、哈希复核和短期授权访问。
 - 官方 NPK 与 ImagePacks2 保持只读。inventory 记录来源标签、长度、哈希、内部相对路径、IMG 版本、帧数和元数据哈希，不承担解包或部署。
 - 图片模型输出字节只能短暂返回给受控的服务内调用方；数据库只记录调用和 attempt 元数据，且 `directRuntimeUseAllowed` 固定为 `false`。
 - 模型角色由服务端固定映射。经过认证的用户可为固定角色配置受策略约束的 HTTPS endpoint、模型 ID 和 BYOK 密钥；业务任务调用方不得在 Run/Job payload 中临时选择任意模型、端点、密钥、工具或存储策略。

@@ -52,6 +52,18 @@ export class JobService {
         message: "重试后的任务必须提交 claim 返回的 leaseId。",
       });
     }
+    if (result.status === "shared-fx-evidence-incomplete") {
+      throw new ConflictException({
+        code: "SHARED_FX_EVIDENCE_INCOMPLETE",
+        message: "共享特效任务缺少当前租约的完整阶段证据。",
+      });
+    }
+    if (result.status === "shared-fx-review-conflict") {
+      throw new ConflictException({
+        code: "SHARED_FX_REVIEW_CONFLICT",
+        message: "共享特效任务已有不匹配的人工审核记录。",
+      });
+    }
     if (result.status !== "accepted") {
       throw new ConflictException({
         code: "JOB_COMPLETION_CONFLICT",

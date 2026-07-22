@@ -7,18 +7,23 @@
  */
 import type {
   professionSkills,
+  professionStyleSkills,
   professionStyles,
   professions,
 } from "../../common/db/studio-schema.js";
 import {
   publishStatusSchema,
+  professionPromptDefinitionSchema,
   skillExecutionStatusSchema,
   skillMappingStatusSchema,
   skillPromptStatusSchema,
+  skillThemePromptSchema,
+  themeDefinitionSchema,
   type ProfessionRecord,
   type ProfessionSkillSummary,
   type ProfessionStyle,
   type ProfessionSummary,
+  type SkillThemePrompt,
 } from "./profession.contracts.js";
 
 export function toProfessionSummary(
@@ -42,6 +47,7 @@ export function toProfessionRecord(
   return {
     ...toProfessionSummary(row, styleCount),
     canonicalName: row.canonicalName,
+    ...(row.ownerUserId ? { ownerUserId: row.ownerUserId } : {}),
     ...(row.workflowProjectId
       ? { workflowProjectId: row.workflowProjectId }
       : {}),
@@ -54,6 +60,12 @@ export function toProfessionRecord(
 export function toSkillSummary(
   row: typeof professionSkills.$inferSelect,
 ): ProfessionSkillSummary {
+  const professionPrompt = row.professionPrompt
+    ? professionPromptDefinitionSchema.parse(row.professionPrompt)
+    : undefined;
+  if (professionPrompt && !row.professionPromptSha256) {
+    throw new Error("PROFESSION_PROMPT_HASH_MISSING");
+  }
   return {
     id: row.id,
     professionId: row.professionId,
@@ -61,22 +73,52 @@ export function toSkillSummary(
     promptStatus: skillPromptStatusSchema.parse(row.promptStatus),
     mappingStatus: skillMappingStatusSchema.parse(row.mappingStatus),
     executionStatus: skillExecutionStatusSchema.parse(row.executionStatus),
+    ...(professionPrompt ? { professionPrompt } : {}),
+    ...(row.professionPromptSha256
+      ? { professionPromptSha256: row.professionPromptSha256 }
+      : {}),
   };
 }
 
 export function toStyle(
   row: typeof professionStyles.$inferSelect,
-  selectedSkillIds: string[],
+  skillPrompts: SkillThemePrompt[],
 ): ProfessionStyle {
+  const themeDefinition = row.themeDefinition
+    ? themeDefinitionSchema.parse(row.themeDefinition)
+    : themeDefinitionSchema.parse({
+        schemaVersion: 1,
+        goal: "",
+        baseStyle: row.prompt,
+        colorAnchors: [],
+        materialRules: "",
+        particleRules: "",
+        layeringRules: "",
+        constraints: row.agent,
+        acceptanceCriteria: "",
+        exclusions: "",
+      });
   return {
     id: row.id,
     professionId: row.professionId,
     name: row.name,
     description: row.description,
-    agent: row.agent,
-    prompt: row.prompt,
-    selectedSkillIds,
+    themeDefinition,
+    selectedSkillIds: skillPrompts.map((prompt) => prompt.skillId),
+    skillPrompts,
     publishStatus: publishStatusSchema.parse(row.publishStatus),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+export function toSkillThemePrompt(
+  row: typeof professionStyleSkills.$inferSelect,
+): SkillThemePrompt {
+  return skillThemePromptSchema.parse({
+    skillId: row.skillId,
+    themePrompt: row.customPrompt ?? "",
+    changes: row.changes ?? "",
+    acceptanceCriteria: row.acceptanceCriteria ?? "",
+    exclusions: row.exclusions ?? "",
+  });
 }

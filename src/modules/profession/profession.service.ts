@@ -29,6 +29,7 @@ import type {
   StyleBuildContext,
   VerifiedProfessionSkillRecord,
 } from "./profession.contracts.js";
+import { evaluateStyleContentCompleteness } from "./profession.contracts.js";
 import { ProfessionRepository } from "./profession.repository.js";
 
 @Injectable()
@@ -41,12 +42,12 @@ export class ProfessionService {
     private readonly artifacts: ArtifactService,
   ) {}
 
-  list(): Promise<ProfessionSummary[]> {
-    return this.professions.list();
+  list(ownerUserId: string): Promise<ProfessionSummary[]> {
+    return this.professions.list(ownerUserId);
   }
 
-  async get(id: string): Promise<ProfessionRecord> {
-    const profession = await this.professions.findById(id);
+  async get(id: string, ownerUserId: string): Promise<ProfessionRecord> {
+    const profession = await this.professions.findOwnedById(id, ownerUserId);
     if (!profession) {
       throw new NotFoundException({
         code: "PROFESSION_NOT_FOUND",
@@ -56,16 +57,26 @@ export class ProfessionService {
     return profession;
   }
 
-  async create(input: CreateProfessionInput): Promise<ProfessionSummary> {
+  async create(
+    input: CreateProfessionInput,
+    ownerUserId: string,
+  ): Promise<ProfessionSummary> {
     const normalizedName = canonicalName(input.name);
-    if (await this.professions.findByCanonicalName(normalizedName)) {
+    if (
+      await this.professions.findByCanonicalName(ownerUserId, normalizedName)
+    ) {
       throw new ConflictException({
         code: "PROFESSION_NAME_CONFLICT",
         message: "规范化后的职业名称已存在。",
       });
     }
     try {
-      return await this.professions.create(randomUUID(), normalizedName, input);
+      return await this.professions.create(
+        ownerUserId,
+        randomUUID(),
+        normalizedName,
+        input,
+      );
     } catch (error) {
       if (isMysqlDuplicateEntry(error)) {
         throw new ConflictException({
@@ -77,21 +88,28 @@ export class ProfessionService {
     }
   }
 
-  async listSkills(professionId: string): Promise<ProfessionSkillSummary[]> {
-    await this.get(professionId);
+  async listSkills(
+    professionId: string,
+    ownerUserId: string,
+  ): Promise<ProfessionSkillSummary[]> {
+    await this.get(professionId, ownerUserId);
     return this.professions.listSkills(professionId);
   }
 
-  async listStyles(professionId: string): Promise<ProfessionStyle[]> {
-    await this.get(professionId);
+  async listStyles(
+    professionId: string,
+    ownerUserId: string,
+  ): Promise<ProfessionStyle[]> {
+    await this.get(professionId, ownerUserId);
     return this.professions.listStyles(professionId);
   }
 
   async createStyle(
     professionId: string,
     input: SaveProfessionStyleInput,
+    ownerUserId: string,
   ): Promise<ProfessionStyle> {
-    await this.get(professionId);
+    await this.get(professionId, ownerUserId);
     await this.assertSelectedSkills(professionId, input.selectedSkillIds);
     try {
       return await this.professions.createStyle(
@@ -115,8 +133,9 @@ export class ProfessionService {
     professionId: string,
     styleId: string,
     input: SaveProfessionStyleInput,
+    ownerUserId: string,
   ): Promise<ProfessionStyle> {
-    await this.requireStyle(professionId, styleId);
+    await this.requireStyle(professionId, styleId, ownerUserId);
     if (await this.professions.hasProduction(styleId)) {
       throw new ConflictException({
         code: "STYLE_PRODUCTION_ALREADY_STARTED",
@@ -145,8 +164,10 @@ export class ProfessionService {
   async submitStyleForReview(
     professionId: string,
     styleId: string,
+    ownerUserId: string,
   ): Promise<ProfessionStyle> {
-    await this.requireStyle(professionId, styleId);
+    const current = await this.requireStyle(professionId, styleId, ownerUserId);
+    this.assertStyleContentComplete(current);
     const style = await this.professions.submitStyleForReview(
       professionId,
       styleId,
@@ -158,10 +179,12 @@ export class ProfessionService {
   async getStyleBuildContext(
     professionId: string,
     styleId: string,
+    ownerUserId: string,
   ): Promise<StyleBuildContext> {
     const context = await this.professions.getBuildContext(
       professionId,
       styleId,
+      ownerUserId,
     );
     if (!context) {
       throw new NotFoundException({
@@ -169,10 +192,18 @@ export class ProfessionService {
         message: "职业主题不存在或技能目录不完整。",
       });
     }
+    this.assertStyleContentComplete(context.style);
     if (!context.profession.workflowProjectId) {
       throw new ConflictException({
         code: "PROFESSION_WORKFLOW_PROJECT_REQUIRED",
         message: "职业尚未绑定已核验资源项目，不能创建制作任务。",
+      });
+    }
+    if (context.missingProfessionPromptSkillIds.length > 0) {
+      throw new ConflictException({
+        code: "STYLE_PROFESSION_PROMPTS_REQUIRED",
+        message: "主题技能范围缺少经哈希绑定的职业 Prompt。",
+        skillIds: context.missingProfessionPromptSkillIds,
       });
     }
     if (context.skills.length !== context.style.selectedSkillIds.length) {
@@ -191,7 +222,7 @@ export class ProfessionService {
     professionId: string,
     input: ImportProfessionSkillCatalogInput,
   ): Promise<ProfessionCatalogImportView> {
-    const profession = await this.get(professionId);
+    const profession = await this.requireCatalogTarget(professionId);
     if (
       profession.workflowProjectId &&
       profession.workflowProjectId !== input.workflowProjectId
@@ -263,8 +294,9 @@ export class ProfessionService {
   private async requireStyle(
     professionId: string,
     styleId: string,
+    ownerUserId: string,
   ): Promise<ProfessionStyle> {
-    await this.get(professionId);
+    await this.get(professionId, ownerUserId);
     const style = await this.professions.findStyle(professionId, styleId);
     if (!style) {
       throw new NotFoundException({
@@ -273,6 +305,19 @@ export class ProfessionService {
       });
     }
     return style;
+  }
+
+  private async requireCatalogTarget(
+    professionId: string,
+  ): Promise<ProfessionRecord> {
+    const profession = await this.professions.findById(professionId);
+    if (!profession) {
+      throw new NotFoundException({
+        code: "PROFESSION_NOT_FOUND",
+        message: "职业不存在。",
+      });
+    }
+    return profession;
   }
 
   private async assertSelectedSkills(
@@ -289,5 +334,16 @@ export class ProfessionService {
         message: "主题只能选择当前职业技能目录中的稳定技能 ID。",
       });
     }
+  }
+
+  private assertStyleContentComplete(style: ProfessionStyle): void {
+    const completeness = evaluateStyleContentCompleteness(style);
+    if (completeness.complete) return;
+    throw new ConflictException({
+      code: "STYLE_CONTENT_INCOMPLETE",
+      message: "主题内容尚未达到审核或制作要求。",
+      reasons: completeness.reasons,
+      incompleteSkillIds: completeness.incompleteSkillIds,
+    });
   }
 }

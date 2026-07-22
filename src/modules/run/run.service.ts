@@ -9,6 +9,7 @@ import { isMysqlDuplicateEntry } from "../../common/db/mysql-errors.js";
 import { FactoryService } from "../factory/factory.service.js";
 import { GuardrailService } from "../guardrail/guardrail.service.js";
 import { parseJobPayload } from "../job/job-payload-contracts.js";
+import { hasSharedFxPayloadBinding } from "../job/shared-fx.contracts.js";
 import { ProjectService } from "../project/project.service.js";
 import type {
   CreateRunInput,
@@ -75,7 +76,10 @@ export class RunService {
         message: "已归档项目不能创建 Run。",
       });
     }
-    await this.projects.getSnapshot(input.projectId, input.snapshotId);
+    const snapshot = await this.projects.getSnapshot(
+      input.projectId,
+      input.snapshotId,
+    );
     const factory = await this.factories.get(project.factoryId);
     if (!factory.enabled) {
       throw new ConflictException({
@@ -118,6 +122,17 @@ export class RunService {
         );
         if (payload.profileId !== factory.config.profileId) {
           throw new Error("JOB_PROFILE_MISMATCH");
+        }
+        if (
+          job.kind === "shared-fx" &&
+          !hasSharedFxPayloadBinding(payload, {
+            profileId: factory.config.profileId,
+            policyId: factory.config.policyId,
+            policySha256: factory.config.policySha256,
+            snapshot,
+          })
+        ) {
+          throw new Error("SHARED_FX_PAYLOAD_BINDING_FAILED");
         }
       } catch {
         throw new BadRequestException({

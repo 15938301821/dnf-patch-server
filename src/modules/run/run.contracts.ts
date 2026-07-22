@@ -11,6 +11,7 @@ export const createRunSchema = z
       "create-profession",
       "create-theme",
       "generate-patch",
+      "generate-shared-fx",
       "validate-only",
       "package-bpk",
       "import-resources",

@@ -5,7 +5,12 @@
     { "id": "JOB-002-BERSERKER", "kind": "profession", "tier": 2 },
     { "id": "JOB-003-SWORDMASTER", "kind": "profession", "tier": 2 },
     { "id": "JOB-004-ASURA", "kind": "profession", "tier": 2 },
-    { "id": "JOB-005-SPELLSWORD", "kind": "profession", "tier": 2 }
+    { "id": "JOB-005-SPELLSWORD", "kind": "profession", "tier": 2 },
+    {
+      "id": "JOB-006-LOCAL-OBJECT-STORAGE",
+      "kind": "infrastructure",
+      "tier": 1
+    }
   ],
   "note": "显示名和技术资源映射必须由目标仓库 manifest/inventory 核验，列表本身不构成资源事实。"
 }

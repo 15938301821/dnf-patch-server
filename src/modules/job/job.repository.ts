@@ -1,13 +1,11 @@
 import { Injectable } from "@nestjs/common";
-import { and, asc, eq, inArray, isNull, lt, max, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../../common/db/database.service.js";
 import {
   jobAttempts,
   jobs,
-  outboxEvents,
   projects,
-  runEvents,
   runs,
   workers,
   factories,
@@ -24,9 +22,16 @@ import {
   type LeaseMutationStatus,
   validateLeaseMutation,
 } from "./job-lease.js";
+import {
+  appendJobRunEvent,
+  databaseNow,
+  ensurePendingSharedFxReview,
+  type JobTransaction,
+} from "./job-run-event.repository-support.js";
 import { toJobView } from "./job.mapper.js";
 import { aggregateRunStatus } from "./run-status.js";
 import { validatePersistedJobIntegrity } from "./job-integrity.js";
+import { findSharedFxCompletionEvidenceForJob } from "./shared-fx-completion.repository-support.js";
 
 interface ClaimJobResult {
   job: JobView;
@@ -38,7 +43,10 @@ interface ClaimIntegrityFailure {
 }
 
 interface CompleteJobResult {
-  status: LeaseMutationStatus;
+  status:
+    | LeaseMutationStatus
+    | "shared-fx-evidence-incomplete"
+    | "shared-fx-review-conflict";
   runEvent?: RunEventView;
 }
 
@@ -138,7 +146,7 @@ export class JobRepository {
         const runEvents: RunEventView[] = [];
         if (run) {
           runEvents.push(
-            await appendRunEvent(
+            await appendJobRunEvent(
               transaction,
               candidate.runId,
               "warning",
@@ -253,6 +261,35 @@ export class JobRepository {
         .where(eq(runs.id, job.runId))
         .limit(1)
         .for("update");
+      const sharedFxCompletion =
+        job.kind === "shared-fx" && input.status === "passed"
+          ? await findSharedFxCompletionEvidenceForJob(
+              transaction,
+              job,
+              input.resultSha256,
+            )
+          : undefined;
+      if (
+        job.kind === "shared-fx" &&
+        input.status === "passed" &&
+        !sharedFxCompletion
+      ) {
+        return { status: "shared-fx-evidence-incomplete" };
+      }
+      if (sharedFxCompletion) {
+        const review = await ensurePendingSharedFxReview(
+          transaction,
+          job.runId,
+          sharedFxCompletion.independentValidationArtifactId,
+          now,
+        );
+        if (review !== "accepted") {
+          return { status: "shared-fx-review-conflict" };
+        }
+      }
+      const resultSha256 =
+        sharedFxCompletion?.independentValidationSha256 ??
+        input.resultSha256?.toUpperCase();
       await transaction
         .update(jobs)
         .set({
@@ -268,9 +305,7 @@ export class JobRepository {
         .set({
           status: input.status,
           finishedAt: now,
-          ...(input.resultSha256
-            ? { resultSha256: input.resultSha256.toUpperCase() }
-            : {}),
+          ...(resultSha256 ? { resultSha256 } : {}),
           ...(input.errorCode ? { errorCode: input.errorCode } : {}),
           ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
         })
@@ -280,6 +315,17 @@ export class JobRepository {
             eq(jobAttempts.attempt, job.attemptCount),
           ),
         );
+      if (sharedFxCompletion) {
+        await appendJobRunEvent(
+          transaction,
+          job.runId,
+          "info",
+          "manual-review",
+          "共享特效 Worker 阶段已通过，等待人工审核。",
+          now,
+          sharedFxCompletion.independentValidationArtifactId,
+        );
+      }
       const runEvent = await finalizeRunIfComplete(transaction, job.runId, now);
       return {
         status: "accepted",
@@ -347,7 +393,7 @@ async function markRunRunning(
     .set({ status: "running", currentStage: "worker", updatedAt: now })
     .where(and(eq(runs.id, runId), eq(runs.status, "queued")));
   if (result[0].affectedRows !== 1) return undefined;
-  return appendRunEvent(
+  return appendJobRunEvent(
     transaction,
     runId,
     "info",
@@ -382,7 +428,7 @@ async function finalizeRunIfComplete(
   if (updateResult[0].affectedRows !== 1) return undefined;
   const level =
     status === "failed" ? "error" : status === "blocked" ? "warning" : "info";
-  return appendRunEvent(
+  return appendJobRunEvent(
     transaction,
     runId,
     level,
@@ -396,57 +442,7 @@ async function finalizeRunIfComplete(
   );
 }
 
-async function appendRunEvent(
-  transaction: Transaction,
-  runId: string,
-  level: RunEventView["level"],
-  stage: string,
-  message: string,
-  now: Date,
-): Promise<RunEventView> {
-  const [sequenceRow] = await transaction
-    .select({ sequence: max(runEvents.sequence) })
-    .from(runEvents)
-    .where(eq(runEvents.runId, runId));
-  const event: RunEventView = {
-    runId,
-    sequence: (sequenceRow?.sequence ?? -1) + 1,
-    level,
-    stage,
-    message,
-    createdAtUtc: now.toISOString(),
-  };
-  await transaction.insert(runEvents).values({
-    id: randomUUID(),
-    runId,
-    sequence: event.sequence,
-    level,
-    stage,
-    message,
-    createdAt: now,
-  });
-  await transaction.insert(outboxEvents).values({
-    id: randomUUID(),
-    topic: "run.event",
-    aggregateId: runId,
-    payload: { ...event },
-    createdAt: now,
-  });
-  return event;
-}
-
-type Transaction = Parameters<
-  Parameters<DatabaseService["database"]["transaction"]>[0]
->[0];
-
-async function databaseNow(transaction: Transaction): Promise<Date> {
-  const [row] = await transaction
-    .select({ value: sql<Date>`CURRENT_TIMESTAMP(3)` })
-    .from(jobs)
-    .limit(1);
-  if (!row) throw new Error("DATABASE_TIME_UNAVAILABLE");
-  return row.value instanceof Date ? row.value : new Date(row.value);
-}
+type Transaction = JobTransaction;
 
 async function closeExpiredAttempt(
   transaction: Transaction,

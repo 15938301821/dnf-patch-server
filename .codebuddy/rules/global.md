@@ -65,7 +65,7 @@
 - 用户 BYOK 持久化只允许保存外部 Secret Manager 引用，或由环境/KMS 主密钥保护的认证加密密文；不得保存明文、可逆编码值或数据库内自包含的解密密钥。用户凭据必须绑定稳定的持久化身份，并在读取、更新、轮换、删除及使用时校验所有权。
 - 日志和错误只允许包含稳定错误码及脱敏上下文；不得输出模型原始响应、数据库驱动原始对象或完整外部载荷。
 - 不得按职业名、技能名、Prompt 标题或文件名猜测 NPK、IMG、帧映射或客户端兼容性。
-- `../dnf-patch` 中的根规则、职业/主题规则、manifest、Prompt、工具目录和验证报告是 DNF 领域事实源；本仓库只保存其相对引用、版本和哈希证据。
+- `../dnf-patch` 中的根规则、职业/主题规则、manifest、Prompt、工具目录和验证报告是开发期 DNF 领域事实源；运行时只能使用经导入、审核、冻结并带来源哈希的模板和证据，不得把相邻仓库当作运行时文件依赖。
 - 所有安全默认值必须采取 fail-closed：缺少证据、配置、能力注册或授权时应拒绝、阻断或降级，不得猜测后继续。
 - 不得绕过 Guardrail、Worker 能力白名单、幂等约束、租约 fencing、数据库事务或限制性外键。
 
@@ -83,7 +83,7 @@
 输出代码、迁移、配置或实施计划前，必须逐项核查：
 
 - [ ] 已读取 `AGENTS.md`、本规范、Server 端规范及相关任务计划，没有依赖过时摘要。
-- [ ] 需求属于本服务职责；没有把本机工具执行、游戏目录访问、部署或游戏进程控制引入服务端。
+- [ ] 需求属于本仓库的 NestJS 编排职责；没有把本机工具执行、游戏目录访问、部署或游戏进程控制引入 NestJS 进程、Renderer 或 Electron。
 - [ ] DNF 资源映射来自经验证的 manifest、inventory 或哈希证据，没有按名称猜测。
 - [ ] `deploymentAuthorized`、`deploymentPerformed`、`fullSkillCoverageProven`、`clientCompatibilityProven` 仍固定为 `false`。
 - [ ] Controller/Gateway、Service、Repository、Contracts 和数据库 schema 的职责没有混淆，也没有跨模块调用内部实现。

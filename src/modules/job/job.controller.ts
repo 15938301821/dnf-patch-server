@@ -34,6 +34,12 @@ import {
   type ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
 import { PatchTaskService } from "./patch-task.service.js";
+import {
+  recordSharedFxStageEvidenceSchema,
+  type RecordSharedFxStageEvidenceInput,
+  type SharedFxStageEvidenceView,
+} from "./shared-fx-stage-evidence.contracts.js";
+import { SharedFxStageEvidenceService } from "./shared-fx-stage-evidence.service.js";
 
 @Controller("jobs")
 export class PatchTaskController {
@@ -89,6 +95,7 @@ export class JobController {
   constructor(
     private readonly jobs: JobService,
     private readonly patchTasks: PatchTaskService,
+    private readonly sharedFxEvidence: SharedFxStageEvidenceService,
   ) {}
 
   @Post("claim")
@@ -114,6 +121,18 @@ export class JobController {
   ): Promise<{ status: "accepted" }> {
     await this.jobs.complete(jobId, input);
     return { status: "accepted" };
+  }
+
+  @Post(":id/shared-fx-stage-evidence")
+  async recordSharedFxStageEvidence(
+    @Param("id", new ZodValidationPipe(idSchema)) jobId: string,
+    @Body(new ZodValidationPipe(recordSharedFxStageEvidenceSchema))
+    input: RecordSharedFxStageEvidenceInput,
+  ): Promise<{ status: "accepted"; data: SharedFxStageEvidenceView }> {
+    return {
+      status: "accepted",
+      data: await this.sharedFxEvidence.record(jobId, input),
+    };
   }
 
   @Post(":id/skill-production")

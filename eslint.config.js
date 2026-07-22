@@ -52,7 +52,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/common/db/schema.ts", "src/common/db/studio-schema.ts"],
+    files: [
+      "src/common/db/schema.ts",
+      "src/common/db/artifact-schema.ts",
+      "src/common/db/studio-schema.ts",
+    ],
     rules: {
       "@typescript-eslint/explicit-function-return-type": "off",
     },

@@ -7,7 +7,11 @@ if (!databaseUrl) {
 
 export default defineConfig({
   dialect: "mysql",
-  schema: ["./dist/common/db/schema.js", "./dist/common/db/studio-schema.js"],
+  schema: [
+    "./dist/common/db/schema.js",
+    "./dist/common/db/artifact-schema.js",
+    "./dist/common/db/studio-schema.js",
+  ],
   out: "./drizzle",
   dbCredentials: { url: databaseUrl },
   strict: true,

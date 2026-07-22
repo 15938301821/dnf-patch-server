@@ -6,12 +6,14 @@ const requiredDirectories = [
   ".codebuddy/rules",
   "drizzle/meta",
   "plan/jobs/JOB-001-SHARED-FX",
+  "plan/jobs/JOB-006-LOCAL-OBJECT-STORAGE",
   "plan/meta",
   "scripts/runtime-test",
   "src/common/contracts",
   "src/common/db",
   "src/common/http",
   "src/common/security",
+  "src/common/storage",
   "src/common/utils",
   "src/config",
   "src/modules",
@@ -33,12 +35,15 @@ const requiredFiles = [
   "package.json",
   "plan/jobs/JOB-001-SHARED-FX/requirements.md",
   "plan/jobs/JOB-001-SHARED-FX/task.md",
+  "plan/jobs/JOB-006-LOCAL-OBJECT-STORAGE/requirements.md",
+  "plan/jobs/JOB-006-LOCAL-OBJECT-STORAGE/task.md",
   "plan/meta/job_list.json",
   "plan/meta/style_guide.md",
   "plan/meta/tier_def.json",
   "scripts/check-credentials.mjs",
   "scripts/check-dist-imports.mjs",
   "scripts/check-migrations.mjs",
+  "scripts/minio-bootstrap.sh",
   "scripts/smoke-dist.mjs",
   "scripts/test-mysql-runtime.mjs",
   "src/app.module.spec.ts",
@@ -120,6 +125,7 @@ async function validateStructure() {
     "db",
     "http",
     "security",
+    "storage",
     "utils",
   ]);
   await assertExactChildren("src/modules", Object.keys(requiredModuleFiles));
@@ -145,7 +151,13 @@ async function validateStructure() {
     packageJson.scripts?.gate?.includes("npm run validate:project") === true,
     "package.json gate must include validate:project.",
   );
-  for (const dependency of ["@nestjs/core", "drizzle-orm", "mysql2"]) {
+  for (const dependency of [
+    "@aws-sdk/client-s3",
+    "@aws-sdk/s3-request-presigner",
+    "@nestjs/core",
+    "drizzle-orm",
+    "mysql2",
+  ]) {
     assert(
       typeof packageJson.dependencies?.[dependency] === "string",
       `Required backend dependency is missing: ${dependency}`,
@@ -179,7 +191,14 @@ async function validateStructure() {
     pathFromRoot(".env.example"),
     "utf8",
   );
-  for (const variable of ["MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD"]) {
+  for (const variable of [
+    "MYSQL_PASSWORD",
+    "MYSQL_ROOT_PASSWORD",
+    "MINIO_ROOT_USER",
+    "MINIO_ROOT_PASSWORD",
+    "OBJECT_STORAGE_ACCESS_KEY",
+    "OBJECT_STORAGE_SECRET_KEY",
+  ]) {
     assert(
       new RegExp(`^${variable}=.+$`, "mu").test(environmentExample),
       `.env.example must define the Compose-required ${variable}.`,
@@ -202,6 +221,10 @@ async function validateStructure() {
   assert(
     new Set(jobIds).size === jobIds.length,
     "job_list contains duplicate job IDs.",
+  );
+  assert(
+    jobIds.includes("JOB-006-LOCAL-OBJECT-STORAGE"),
+    "job_list must register the local object storage implementation task.",
   );
 
   const tierDefinition = await readJson("plan/meta/tier_def.json");

@@ -12,6 +12,7 @@ import {
   foreignKey,
   index,
   int,
+  json,
   mysqlTable,
   primaryKey,
   text,
@@ -28,6 +29,7 @@ import {
   projectSnapshots,
   projects,
   runs,
+  users,
 } from "./schema.js";
 
 const id = (name: string) => varchar(name, { length: 64 });
@@ -38,6 +40,9 @@ export const professions = mysqlTable(
   "professions",
   {
     id: id("id").primaryKey(),
+    ownerUserId: id("owner_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     name: varchar("name", { length: 160 }).notNull(),
     slug: varchar("slug", { length: 120 }).notNull(),
     canonicalName: varchar("canonical_name", { length: 200 }).notNull(),
@@ -52,8 +57,12 @@ export const professions = mysqlTable(
     updatedAt: utc("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("professions_slug_uq").on(table.slug),
-    uniqueIndex("professions_canonical_name_uq").on(table.canonicalName),
+    index("professions_owner_user_idx").on(table.ownerUserId),
+    uniqueIndex("professions_owner_slug_uq").on(table.ownerUserId, table.slug),
+    uniqueIndex("professions_owner_canonical_name_uq").on(
+      table.ownerUserId,
+      table.canonicalName,
+    ),
     uniqueIndex("professions_workflow_project_uq").on(table.workflowProjectId),
     check(
       "professions_publish_status_ck",
@@ -96,6 +105,8 @@ export const professionSkills = mysqlTable(
     sourceInventoryEntryId: id("source_inventory_entry_id"),
     sourceFrameManifestArtifactId: id("source_frame_manifest_artifact_id"),
     sourceMetadataSha256: sha256("source_metadata_sha256"),
+    professionPrompt: json("profession_prompt").$type<unknown>(),
+    professionPromptSha256: sha256("profession_prompt_sha256"),
     createdAt: utc("created_at").notNull(),
     updatedAt: utc("updated_at").notNull(),
   },
@@ -124,6 +135,10 @@ export const professionSkills = mysqlTable(
     check(
       "profession_skills_build_ready_evidence_ck",
       sql`${table.executionStatus} <> 'build-ready' or (${table.mappingStatus} = 'verified' and ${table.sourceRunId} is not null and ${table.sourceInventoryId} is not null and ${table.sourceInventoryEntryId} is not null and ${table.sourceFrameManifestArtifactId} is not null and ${table.sourceMetadataSha256} is not null)`,
+    ),
+    check(
+      "profession_skills_prompt_binding_ck",
+      sql`(${table.professionPrompt} is null and ${table.professionPromptSha256} is null) or (${table.professionPrompt} is not null and ${table.professionPromptSha256} is not null)`,
     ),
     foreignKey({
       columns: [table.sourceRunId, table.sourceInventoryId],
@@ -155,6 +170,7 @@ export const professionStyles = mysqlTable(
     description: text("description").notNull(),
     agent: text("agent").notNull(),
     prompt: text("prompt").notNull(),
+    themeDefinition: json("theme_definition").$type<unknown>(),
     publishStatus: varchar("publish_status", { length: 32 })
       .notNull()
       .default("private"),
@@ -188,6 +204,9 @@ export const professionStyleSkills = mysqlTable(
     skillId: id("skill_id").notNull(),
     ordinal: int("ordinal", { unsigned: true }).notNull(),
     customPrompt: text("custom_prompt"),
+    changes: text("changes"),
+    acceptanceCriteria: text("acceptance_criteria"),
+    exclusions: text("exclusions"),
     createdAt: utc("created_at").notNull(),
     updatedAt: utc("updated_at").notNull(),
   },

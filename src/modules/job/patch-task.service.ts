@@ -13,7 +13,7 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { sha256Json, sha256JcsV1 } from "../../common/utils/canonical.js";
+import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import { FactoryService } from "../factory/factory.service.js";
 import { ProfessionService } from "../profession/profession.service.js";
 import { ProjectService } from "../project/project.service.js";
@@ -29,6 +29,10 @@ import type {
   ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
 import { PatchTaskRepository } from "./patch-task.repository.js";
+import {
+  createStyleSkillProductionJobPayload,
+  type StyleSkillProductionJobPayloadV2,
+} from "./style-skill-production.contracts.js";
 
 interface PatchTaskRepositoryPort {
   list(ownerUserId: string): Promise<PatchTaskView[]>;
@@ -55,6 +59,7 @@ interface ProfessionBuildContextPort {
   getStyleBuildContext(
     professionId: string,
     styleId: string,
+    ownerUserId: string,
   ): ReturnType<ProfessionService["getStyleBuildContext"]>;
 }
 
@@ -101,6 +106,7 @@ export class PatchTaskService {
     const context = await this.professions.getStyleBuildContext(
       input.professionId,
       input.styleId,
+      ownerUserId,
     );
     if (!context.profession.workflowProjectId) {
       throw new ConflictException({
@@ -118,7 +124,24 @@ export class PatchTaskService {
         message: "制作任务需要使用 Factory v2 工作流。",
       });
     }
-    const runInput = createRunInput(context, factory.config, idempotencyKey);
+    let payload: StyleSkillProductionJobPayloadV2;
+    try {
+      payload = createStyleSkillProductionJobPayload(
+        context,
+        factory.config.profileId,
+      );
+    } catch {
+      throw new ConflictException({
+        code: "STYLE_JOB_PAYLOAD_INVALID",
+        message: "主题冻结包不符合内容绑定或声明式任务预算。",
+      });
+    }
+    const runInput = createRunInput(
+      context,
+      factory.config,
+      idempotencyKey,
+      payload,
+    );
     const run = await this.runs.create(runInput, idempotencyKey, {
       deferJobDispatch: true,
       ownerUserId,
@@ -131,19 +154,16 @@ export class PatchTaskService {
           styleId: context.style.id,
           runId: run.id,
         },
-        context.skills.map(
+        payload.parameters.promptPackage.skills.map(
           (skill): PlannedPatchTaskSkill => ({
             professionId: context.profession.id,
             styleId: context.style.id,
-            skillId: skill.id,
-            sourceRunId: skill.sourceRunId,
-            sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
-            sourceMetadataSha256: skill.sourceMetadataSha256,
-            promptSha256: sha256Json({
-              stylePrompt: context.style.prompt,
-              skillId: skill.id,
-              sourceMetadataSha256: skill.sourceMetadataSha256,
-            }),
+            skillId: skill.skillId,
+            sourceRunId: skill.sourceEvidence.sourceRunId,
+            sourceFrameManifestArtifactId:
+              skill.sourceEvidence.sourceFrameManifestArtifactId,
+            sourceMetadataSha256: skill.sourceEvidence.sourceMetadataSha256,
+            promptSha256: skill.promptSha256,
           }),
         ),
         run.status === "blocked" ? "blocked" : "dispatch",
@@ -317,6 +337,7 @@ function createRunInput(
   context: Awaited<ReturnType<ProfessionService["getStyleBuildContext"]>>,
   factoryConfig: FactoryV2Config,
   idempotencyKey: string,
+  payload: StyleSkillProductionJobPayloadV2,
 ): CreateRunInput {
   if (
     !context.profession.workflowProjectId ||
@@ -324,25 +345,6 @@ function createRunInput(
   ) {
     throw new Error("PROFESSION_WORKFLOW_CONTEXT_MISSING");
   }
-  const payload = {
-    schemaVersion: 1 as const,
-    profileId: factoryConfig.profileId,
-    parameters: {
-      workflow: "style-skill-production-v1",
-      professionId: context.profession.id,
-      styleId: context.style.id,
-      selectedSkillIds: context.style.selectedSkillIds,
-      stylePromptSha256: sha256Json({ prompt: context.style.prompt }),
-      skills: context.skills.map((skill) => ({
-        skillId: skill.id,
-        sourceRunId: skill.sourceRunId,
-        sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
-        sourceMetadataSha256: skill.sourceMetadataSha256,
-      })),
-      toolProfiles: ["aseprite-cli"],
-      deploymentAuthorized: false,
-    },
-  };
   const requestBody = {
     action: "generate-patch",
     professionId: context.profession.id,

@@ -9,6 +9,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Put,
@@ -17,6 +18,7 @@ import {
 import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import { WorkerTokenGuard } from "../../common/security/worker-token.guard.js";
+import { AuthService } from "../auth/auth.service.js";
 import {
   createProfessionSchema,
   importProfessionSkillCatalogSchema,
@@ -33,68 +35,101 @@ import { ProfessionService } from "./profession.service.js";
 
 @Controller("professions")
 export class ProfessionController {
-  constructor(private readonly professions: ProfessionService) {}
+  constructor(
+    private readonly professions: ProfessionService,
+    private readonly auth: AuthService,
+  ) {}
 
   @Get()
-  async list(): Promise<{ data: ProfessionSummary[] }> {
-    return { data: await this.professions.list() };
+  async list(
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: ProfessionSummary[] }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return { data: await this.professions.list(user.id) };
   }
 
   @Post()
   async create(
+    @Headers("authorization") authorization: string | undefined,
     @Body(new ZodValidationPipe(createProfessionSchema))
     input: CreateProfessionInput,
   ): Promise<{ data: ProfessionSummary }> {
-    return { data: await this.professions.create(input) };
+    const user = await this.auth.requireBrowserUser(authorization);
+    return { data: await this.professions.create(input, user.id) };
   }
 
   @Get(":professionId/skills")
   async listSkills(
+    @Headers("authorization") authorization: string | undefined,
     @Param("professionId", new ZodValidationPipe(idSchema))
     professionId: string,
   ): Promise<{ data: ProfessionSkillSummary[] }> {
-    return { data: await this.professions.listSkills(professionId) };
+    const user = await this.auth.requireBrowserUser(authorization);
+    return {
+      data: await this.professions.listSkills(professionId, user.id),
+    };
   }
 
   @Get(":professionId/styles")
   async listStyles(
+    @Headers("authorization") authorization: string | undefined,
     @Param("professionId", new ZodValidationPipe(idSchema))
     professionId: string,
   ): Promise<{ data: ProfessionStyle[] }> {
-    return { data: await this.professions.listStyles(professionId) };
+    const user = await this.auth.requireBrowserUser(authorization);
+    return {
+      data: await this.professions.listStyles(professionId, user.id),
+    };
   }
 
   @Post(":professionId/styles")
   async createStyle(
+    @Headers("authorization") authorization: string | undefined,
     @Param("professionId", new ZodValidationPipe(idSchema))
     professionId: string,
     @Body(new ZodValidationPipe(saveProfessionStyleSchema))
     input: SaveProfessionStyleInput,
   ): Promise<{ data: ProfessionStyle }> {
-    return { data: await this.professions.createStyle(professionId, input) };
+    const user = await this.auth.requireBrowserUser(authorization);
+    return {
+      data: await this.professions.createStyle(professionId, input, user.id),
+    };
   }
 
   @Put(":professionId/styles/:styleId")
   async updateStyle(
+    @Headers("authorization") authorization: string | undefined,
     @Param("professionId", new ZodValidationPipe(idSchema))
     professionId: string,
     @Param("styleId", new ZodValidationPipe(idSchema)) styleId: string,
     @Body(new ZodValidationPipe(saveProfessionStyleSchema))
     input: SaveProfessionStyleInput,
   ): Promise<{ data: ProfessionStyle }> {
+    const user = await this.auth.requireBrowserUser(authorization);
     return {
-      data: await this.professions.updateStyle(professionId, styleId, input),
+      data: await this.professions.updateStyle(
+        professionId,
+        styleId,
+        input,
+        user.id,
+      ),
     };
   }
 
   @Post(":professionId/styles/:styleId/review")
   async submitStyleForReview(
+    @Headers("authorization") authorization: string | undefined,
     @Param("professionId", new ZodValidationPipe(idSchema))
     professionId: string,
     @Param("styleId", new ZodValidationPipe(idSchema)) styleId: string,
   ): Promise<{ data: ProfessionStyle }> {
+    const user = await this.auth.requireBrowserUser(authorization);
     return {
-      data: await this.professions.submitStyleForReview(professionId, styleId),
+      data: await this.professions.submitStyleForReview(
+        professionId,
+        styleId,
+        user.id,
+      ),
     };
   }
 }

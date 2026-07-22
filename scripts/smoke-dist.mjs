@@ -22,12 +22,22 @@ const environment = {
   CLIENT_SHARED_TOKEN: clientToken,
   WORKER_SHARED_TOKEN: workerToken,
   BROWSER_SESSION_SECRET: browserSessionSecret,
+  OBJECT_STORAGE_ENABLED: "false",
+  OBJECT_STORAGE_ENDPOINT: "http://127.0.0.1:9000",
+  OBJECT_STORAGE_REGION: "us-east-1",
+  OBJECT_STORAGE_BUCKET: "dnf-patch-artifacts",
+  OBJECT_STORAGE_FORCE_PATH_STYLE: "true",
+  OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: "300",
+  OBJECT_STORAGE_MAX_OBJECT_BYTES: "2147483648",
+  OBJECT_STORAGE_MAX_RUN_BYTES: "10737418240",
   OPENAI_BASE_URL: "https://kldai.cc/v1",
   OPENAI_ORCHESTRATOR_MODEL: "gpt-5.6-sol",
   OPENAI_ENGINEER_MODEL: "gpt-5.5",
   OPENAI_IMAGE_MODEL: "gpt-image-2",
   WORKER_LEASE_SECONDS: "60",
 };
+delete environment.OBJECT_STORAGE_ACCESS_KEY;
+delete environment.OBJECT_STORAGE_SECRET_KEY;
 
 const child = spawn(process.execPath, [resolve("dist/main.js")], {
   cwd: process.cwd(),

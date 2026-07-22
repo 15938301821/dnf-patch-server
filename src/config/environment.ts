@@ -35,6 +35,40 @@ const credentialMasterKeySchema = z.string().superRefine((value, context) => {
   }
 });
 
+const objectStorageEndpointSchema = z.string().superRefine((value, context) => {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    context.addIssue({
+      code: "custom",
+      message: "对象存储端点必须是有效 URL。",
+    });
+    return;
+  }
+  if (
+    !["http:", "https:"].includes(endpoint.protocol) ||
+    !["127.0.0.1", "localhost", "[::1]", "::1"].includes(endpoint.hostname) ||
+    endpoint.username !== "" ||
+    endpoint.password !== "" ||
+    (endpoint.pathname !== "" && endpoint.pathname !== "/") ||
+    endpoint.search !== "" ||
+    endpoint.hash !== ""
+  ) {
+    context.addIssue({
+      code: "custom",
+      message:
+        "对象存储端点只能使用不含凭据、路径或查询的本机回环 HTTP(S) URL。",
+    });
+  }
+});
+
+const objectStorageAccessKeySchema = z
+  .string()
+  .min(3)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
+
 export const environmentSchema = z
   .object({
     NODE_ENV: z
@@ -52,6 +86,57 @@ export const environmentSchema = z
       .transform((value) => value === "true"),
     RESOURCE_IMPORT_PROJECT_ID: z.uuid().optional(),
     RESOURCE_IMPORT_SNAPSHOT_ID: z.uuid().optional(),
+    OBJECT_STORAGE_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    OBJECT_STORAGE_ENDPOINT: objectStorageEndpointSchema.default(
+      "http://127.0.0.1:9000",
+    ),
+    OBJECT_STORAGE_REGION: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/u)
+      .default("us-east-1"),
+    OBJECT_STORAGE_BUCKET: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u)
+      .default("dnf-patch-artifacts"),
+    OBJECT_STORAGE_ACCESS_KEY: objectStorageAccessKeySchema.optional(),
+    OBJECT_STORAGE_SECRET_KEY: z.string().min(32).max(256).optional(),
+    OBJECT_STORAGE_FORCE_PATH_STYLE: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((value) => value === "true"),
+    OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(30)
+      .max(900)
+      .default(300),
+    OBJECT_STORAGE_MAX_OBJECT_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1_048_576)
+      .max(4_294_967_295)
+      .default(2_147_483_648),
+    OBJECT_STORAGE_MAX_RUN_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1_048_576)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(10_737_418_240),
+    ARTIFACT_ORPHAN_REAPER_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(300_000)
+      .default(30_000),
+    ARTIFACT_ORPHAN_REAPER_BATCH_SIZE: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(25),
     CLIENT_SHARED_TOKEN: z.string().min(32),
     BROWSER_SESSION_SECRET: z.string().min(32),
     USER_REGISTRATION_TOKEN: z.string().min(32).optional(),
@@ -133,6 +218,50 @@ export const environmentSchema = z
         code: "custom",
         path: ["RESOURCE_IMPORT_PROJECT_ID"],
         message: "启用资源镜像导入时必须配置 Project 与 Snapshot UUID。",
+      });
+    }
+    if (
+      (value.OBJECT_STORAGE_ACCESS_KEY === undefined) !==
+      (value.OBJECT_STORAGE_SECRET_KEY === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["OBJECT_STORAGE_ACCESS_KEY"],
+        message: "对象存储 Access Key 与 Secret Key 必须同时配置。",
+      });
+    }
+    if (
+      value.OBJECT_STORAGE_ENABLED &&
+      (!value.OBJECT_STORAGE_ACCESS_KEY || !value.OBJECT_STORAGE_SECRET_KEY)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["OBJECT_STORAGE_ACCESS_KEY"],
+        message: "启用对象存储时必须配置独立的应用访问凭据。",
+      });
+    }
+    if (
+      value.OBJECT_STORAGE_SECRET_KEY !== undefined &&
+      [
+        value.CLIENT_SHARED_TOKEN,
+        value.WORKER_SHARED_TOKEN,
+        value.BROWSER_SESSION_SECRET,
+        value.USER_REGISTRATION_TOKEN,
+      ].includes(value.OBJECT_STORAGE_SECRET_KEY)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["OBJECT_STORAGE_SECRET_KEY"],
+        message: "对象存储 Secret Key 必须与其他服务凭据不同。",
+      });
+    }
+    if (
+      value.OBJECT_STORAGE_MAX_RUN_BYTES < value.OBJECT_STORAGE_MAX_OBJECT_BYTES
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["OBJECT_STORAGE_MAX_RUN_BYTES"],
+        message: "单 Run 对象配额不能小于单对象上限。",
       });
     }
   });
