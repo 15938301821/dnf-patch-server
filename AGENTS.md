@@ -7,7 +7,7 @@
 开始工作前，按以下顺序读取并应用规则：
 
 1. `AGENTS.md`：仓库定位、信任边界、安全不变量和交付要求。
-2. `.codebuddy/rules/global.md`：文件规模、注释、命名、类型、安全和 AI 自检清单。
+2. `.codebuddy/rules/global.md`：文件规模、中文维护备注、命名、类型、安全和 AI 自检清单。
 3. `.codebuddy/rules/server.md`：NestJS 分层、Drizzle、Run/Job/租约、模型及验证细则。
 4. 与任务有关的 `plan/jobs/<JOB-ID>/requirements.md`、`task.md`、相邻源码、公开契约和测试。
 5. 涉及 DNF 资源语义时，读取 `../dnf-patch` 中对应的规则、manifest、Prompt、工具目录和验证报告。
@@ -63,6 +63,7 @@ DNF Patch Studio 的本地后端是部署在最终用户电脑上的完整业务
 - Run、Job、Attempt、Guardrail、事件和 outbox 的关联状态变更必须保持事务一致；事务提交后才能广播。
 - 项目使用严格 TypeScript 和 ESM；禁止 `any`、`@ts-ignore` 和关闭严格检查，外部输入从 `unknown` 开始，类型导入使用 `import type`，相对源码导入沿用 `.js` 后缀。
 - `.ts`、`.tsx`、`.js`、`.mjs` 单文件不得超过 500 行；接近 400 行时按领域职责评估拆分。新增或实质性重写的源码必须满足全局规范的文件头元数据与注释要求。
+- 代码必须以只熟悉前端 TypeScript、但不了解 NestJS、Drizzle、事务、租约和 outbox 的工程师也能安全维护为标准。新增或实质性重写的源码必须提供中文文件头、导出 API JSDoc、关键步骤备注和首次出现的服务端术语解释；行为变化时同步更新相关备注，过时备注按代码缺陷处理。
 - 不得新增与现有纵向模块并行的兼容目录、第二套 API、服务端本机执行框架或虚构的 CLI 工具层；公开契约演进必须显式版本化。
 - 不得修改生成产物代替源码修复，也不得回滚、覆盖或格式化与当前任务无关的用户改动。
 

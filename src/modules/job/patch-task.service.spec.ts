@@ -37,6 +37,7 @@ describe("PatchTaskService", () => {
   const factories = { get: vi.fn() };
   const projects = { get: vi.fn() };
   const runs = { create: vi.fn(), blockDeferredDispatch: vi.fn() };
+  const workers = { hasEnabledCapability: vi.fn() };
   let service: PatchTaskService;
 
   beforeEach(() => {
@@ -47,6 +48,7 @@ describe("PatchTaskService", () => {
       factories,
       projects,
       runs,
+      workers,
     );
     professions.getStyleBuildContext.mockResolvedValue(buildContext());
     projects.get.mockResolvedValue({
@@ -66,6 +68,7 @@ describe("PatchTaskService", () => {
       createdAtUtc: "2026-07-21T00:00:00.000Z",
     });
     runs.blockDeferredDispatch.mockResolvedValue(undefined);
+    workers.hasEnabledCapability.mockResolvedValue(true);
   });
 
   it("creates one guarded profession job and planned skill productions", async () => {
@@ -182,6 +185,22 @@ describe("PatchTaskService", () => {
     await expect(
       service.create({ professionId, styleId }, idempotencyKey, ownerUserId),
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(runs.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when no enabled Worker has profession capability", async () => {
+    workers.hasEnabledCapability.mockResolvedValue(false);
+
+    const error: unknown = await service
+      .create({ professionId, styleId }, idempotencyKey, ownerUserId)
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    if (!(error instanceof ConflictException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "PROFESSION_WORKER_REQUIRED",
+    });
+    expect(workers.hasEnabledCapability).toHaveBeenCalledWith("profession");
     expect(runs.create).not.toHaveBeenCalled();
   });
 

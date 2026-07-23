@@ -1,7 +1,26 @@
+/**
+ * @fileoverview 验证 Run 幂等指纹对 JSON 键顺序/哈希大小写稳定，并隔离不同请求语义和稳定 owner；
+ * 不查询数据库、不处理唯一键竞争、不创建 Run、Job 或 outbox。
+ * @module modules/run/fingerprint.spec
+ * @author AI生成
+ * @created 2026-07-23
+ * @relatedPlan N/A - 用户直接需求
+ *
+ * 调用关系：Vitest 直接通过 createRunSchema 创建最小合法 DTO，再调用 createRunRequestFingerprint；没有
+ * Controller、RunService、Repository、认证或 MySQL mock。
+ * 输入输出：输入是内存 DTO fixture，输出是哈希字符串相等/不等断言；不证明实际 Idempotency-Key 行锁、
+ * 数据库唯一键、Service 重放错误或跨进程竞争处理。
+ * 副作用：无网络、数据库、对象存储、Worker、模型或进程副作用。
+ * 安全边界：测试阻止未来忽略完整请求语义或 owner，使不同用户/不同 Job 以同一个 key 错误重放。
+ */
 import { describe, expect, it } from "vitest";
 import { createRunSchema, type CreateRunInput } from "./run.contracts.js";
 import { createRunRequestFingerprint } from "./run-fingerprint.js";
 
+/**
+ * 构造最小合法 Run DTO fixture。
+ * @returns 已经 schema 解析的内存输入；仅测试指纹规范化，不证明 Factory/Project/Job contract 可真实使用。
+ */
 function runInput(): CreateRunInput {
   return createRunSchema.parse({
     projectId: "11111111-1111-4111-8111-111111111111",

@@ -1,3 +1,14 @@
+/**
+ * @fileoverview 在单一事务中领取、续租、完成和回收 Worker Job，并同步维护 attempt、Run 状态与权威事件/outbox；
+ * 不处理 HTTP DTO、认证 token、本机执行、资源解析或 WebSocket 广播。
+ * @module modules/job/repository
+ * @author AI生成
+ * @created 2026-07-23
+ * @relatedPlan N/A - 用户直接需求
+ * 调用链：JobService 调用本类，所有事件经事务 outbox 在提交后由 Run dispatcher 广播；JobController 不直接访问它。
+ * 副作用与边界：数据库时间、`FOR UPDATE SKIP LOCKED`、lease fencing、attempt 与 Run 聚合必须同事务完成；
+ * 缺少 Worker/capability/Factory payload/lease/共享特效证据时 fail-closed，且本类不证明 Worker 工具或资源真实可用。
+ */
 import { Injectable } from "@nestjs/common";
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -50,10 +61,12 @@ interface CompleteJobResult {
   runEvent?: RunEventView;
 }
 
+/** Job 生命周期的持久化边界；每个 mutation 方法都在自身事务内建立锁、时间和事件一致性。 */
 @Injectable()
 export class JobRepository {
   constructor(private readonly connection: DatabaseService) {}
 
+  /** 原子选择兼容 Worker 的最早可派发 Job，验证持久化 Factory 契约后签发新 attempt/lease 并写入 Run 事件。 */
   async claim(
     input: ClaimJobInput,
     leaseSeconds: number,
@@ -211,6 +224,7 @@ export class JobRepository {
     });
   }
 
+  /** 仅在锁定 Job 的 owner、当前 fencing token 和数据库时钟仍完全匹配时延长 lease 并刷新 Worker 心跳。 */
   async heartbeat(
     jobId: string,
     input: HeartbeatJobInput,
@@ -240,6 +254,7 @@ export class JobRepository {
     });
   }
 
+  /** 以精确 lease 完成当前 attempt，必要时验证共享特效证据/审核并在全部 Job 终态后原子终结 Run。 */
   async complete(
     jobId: string,
     input: CompleteJobInput,
@@ -334,7 +349,7 @@ export class JobRepository {
     });
   }
 
-  /** 回收过期租约；未耗尽任务重新排队，耗尽任务失败并尝试终结 Run。 */
+  /** 批量锁定并回收过期 lease；未耗尽 Job 重排，耗尽 Job 失败并尝试安全聚合 Run。 */
   async reapExpired(batchSize: number): Promise<RunEventView[]> {
     return this.connection.database.transaction(async (transaction) => {
       const expired = await transaction
@@ -383,6 +398,7 @@ export class JobRepository {
   }
 }
 
+/** 仅把仍 queued 的 Run 迁移为 running，并在同一事务追加首个 Worker 领取事件。 */
 async function markRunRunning(
   transaction: Transaction,
   runId: string,
@@ -403,6 +419,7 @@ async function markRunRunning(
   );
 }
 
+/** 读取同一 Run 的全部 Job；只有全终态时按 failed > blocked > passed 优先级更新 Run 并追加事件。 */
 async function finalizeRunIfComplete(
   transaction: Transaction,
   runId: string,
@@ -444,6 +461,7 @@ async function finalizeRunIfComplete(
 
 type Transaction = JobTransaction;
 
+/** 将仍 running 的当前 attempt 以 LEASE_EXPIRED 关闭；不会创建新 attempt 或直接重排 Job。 */
 async function closeExpiredAttempt(
   transaction: Transaction,
   job: typeof jobs.$inferSelect,
@@ -466,6 +484,7 @@ async function closeExpiredAttempt(
     );
 }
 
+/** 将仍 running 的损坏持久化 payload attempt 标记为 blocked，保留可审计失败原因。 */
 async function closeIntegrityFailedAttempt(
   transaction: Transaction,
   job: typeof jobs.$inferSelect,

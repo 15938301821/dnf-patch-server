@@ -1,3 +1,12 @@
+/**
+ * @fileoverview 在隔离 MySQL 服务上执行 REST、Worker lease、事件、证据与完整性主场景；不调用真实 Worker 工具、对象存储、模型或部署流程。
+ * @module scripts/runtime-test
+ * @author AI生成
+ * @created 2026-07-23
+ * @relatedPlan N/A - 用户直接需求
+ * 调用关系：test-mysql-runtime 调用 exerciseApi，下游复用 api-support、evidence 与 integrity scenario；输入是临时端口/token/数据库连接，输出为后续重启核验使用的 ID 与证明摘要。
+ * 副作用与边界：经回环 API 和测试数据库创建/篡改记录、建立短期 Socket；所有资源由上层 finally 清理。通过不证明外部模型、真实 Worker、MinIO、客户端兼容或部署，租约/归属缺证据必须 fail-closed。
+ */
 import { randomUUID } from "node:crypto";
 import {
   requestJson,
@@ -10,7 +19,7 @@ import { exerciseEvidenceApi } from "./evidence-scenario.mjs";
 import { assert } from "./process.mjs";
 
 const host = "127.0.0.1";
-
+/** @param apiPort 隔离服务端口；@param clientToken/workerToken 上层随机临时凭据；@param database 隔离 MySQL 连接。@returns 创建的 Project/Run/Job/Artifact 等 ID 与场景结果。@throws 任一认证、幂等、租约、事件或证据不变量失败时抛出。 */
 export async function exerciseApi({
   apiPort,
   clientToken,
@@ -18,6 +27,7 @@ export async function exerciseApi({
   database,
 }) {
   const baseUrl = `http://${host}:${String(apiPort)}/v1`;
+  // 步骤 1：先证明普通与内部入口匿名请求均在 Controller 前被拒绝。
   await requestJson(baseUrl, "/projects", {}, 401);
   await requestJson(
     baseUrl,
@@ -25,7 +35,7 @@ export async function exerciseApi({
     { method: "POST", body: { workerId: randomUUID() } },
     401,
   );
-
+  // 步骤 2：创建冻结 Factory、Project、Snapshot 与 Run，并验证并发幂等和冲突语义。
   const policySha256 = "6".repeat(64);
   const config = {
     schemaVersion: 2,
@@ -170,7 +180,7 @@ export async function exerciseApi({
     "Run event was not persisted.",
   );
   const liveSocket = await subscribeRun(apiPort, clientToken, run.id, 1);
-
+  // 步骤 3：注册 Worker 后依次验证 claim、心跳、完成及事务提交后的实时事件。
   const workerId = randomUUID();
   let job;
   let retryRun;
@@ -193,6 +203,7 @@ export async function exerciseApi({
       },
       201,
     );
+    // 步骤 4：人为延迟/过期隔离 Job，验证 dispatch 门禁、重领 fencing 与旧协议拒绝。
     const runningEventPromise = socketEventMatching(
       liveSocket,
       "run:event",
@@ -360,6 +371,7 @@ export async function exerciseApi({
     integrityJobId = integrity.jobId;
     await expireLease(database, retryJob.id);
   } finally {
+    // Socket 不是权威状态源，成功失败都关闭；后续重启从数据库事件恢复。
     liveSocket.close();
   }
   assert(job !== undefined, "Runtime job scenario did not create a job.");
@@ -407,7 +419,7 @@ export async function exerciseApi({
     liveEventsReceived: true,
   };
 }
-
+/** @param database 隔离 MySQL 连接；@param runId 场景 Run。@returns 被置为不可调度的唯一 Job ID。@throws 找不到唯一 queued Job 或更新失败时抛出。 */
 async function deferQueuedJob(database, runId) {
   const [result] = await database.query(
     "UPDATE jobs SET dispatch_ready_at = NULL WHERE run_id = ? AND status = 'queued'",
@@ -421,7 +433,7 @@ async function deferQueuedJob(database, runId) {
   assert(rows.length === 1, "Deferred test Job was not persisted.");
   return rows[0].id;
 }
-
+/** @param database 隔离 MySQL 连接；@param jobId 已延迟 Job。@returns 更新完成后无值返回。@throws Job 未处于可激活状态时抛出。 */
 async function activateDeferredJob(database, jobId) {
   const [result] = await database.query(
     "UPDATE jobs SET dispatch_ready_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND dispatch_ready_at IS NULL",
@@ -432,7 +444,7 @@ async function activateDeferredJob(database, jobId) {
     "Could not activate the deferred test Job.",
   );
 }
-
+/** @param projectId/snapshotId 已创建且同属的测试事实源；@param overrides 场景内固定 clientRunId/hash/scope。@returns 四项安全状态固定 false 的版本化创建 Run DTO。 */
 function createRunBody(projectId, snapshotId, overrides = {}) {
   return {
     projectId,
@@ -463,7 +475,7 @@ function createRunBody(projectId, snapshotId, overrides = {}) {
     policySha256: "6".repeat(64),
   };
 }
-
+/** @param database 隔离 MySQL 连接；@param jobId 当前 leased Job。@returns 数据库时间过期写入完成后无值返回。@throws 未精确更新一个租约时抛出。 */
 async function expireLease(database, jobId) {
   const [result] = await database.query(
     "UPDATE jobs SET lease_expires_at = CURRENT_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE id = ? AND status = 'leased'",
@@ -471,7 +483,7 @@ async function expireLease(database, jobId) {
   );
   assert(result.affectedRows === 1, "Could not expire the active test lease.");
 }
-
+/** @param database 隔离 MySQL 连接；@param jobId 已重领 Job。@returns 旧 attempt timed_out 且新 attempt running 时完成。@throws attempt 顺序、错误码或状态不符时抛出。 */
 async function assertReclaimedAttemptState(database, jobId) {
   const [attempts] = await database.query(
     "SELECT attempt, status, error_code AS errorCode FROM job_attempts WHERE job_id = ? ORDER BY attempt",

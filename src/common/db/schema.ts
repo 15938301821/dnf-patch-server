@@ -1,3 +1,13 @@
+/**
+ * @fileoverview 定义调度控制面的 Drizzle 表、CHECK 与限制性外键；不执行查询、migration、本机工具或保存对象正文。
+ * @module common/db/control-schema
+ * @author AI生成
+ * @created 2026-07-23
+ * @relatedPlan N/A - 用户直接需求
+ * 调用关系：各领域 Repository 读写这些表，DatabaseService 合并关系 schema，drizzle-kit 据此生成 migration。
+ * 输入输出：输入是 Service 已校验的 DTO/领域状态，输出是内部数据库行；副作用仅由调用方 transaction 执行。
+ * 安全边界：JSON 必须写前读后校验；Run/Job/attempt/Artifact/outbox 归属、租约 fencing 与四项 false 状态由事务、复合外键和 CHECK 共同保护。
+ */
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -13,13 +23,13 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { users } from "./identity-schema.js";
-
+/** 重导出身份表供统一 schema 消费；凭据持久化行不等于可返回客户端的脱敏 ViewModel。 */
 export { userModelConfigurations, users } from "./identity-schema.js";
 
 const id = (name: string) => varchar(name, { length: 64 });
 const sha256 = (name: string) => varchar(name, { length: 64 });
 const utc = (name: string) => datetime(name, { mode: "date", fsp: 3 });
-
+/** Factory 冻结版本、配置 JSON 与摘要；Factory Service 生产、Run 编排消费，config 读写都需 schema 校验且 enabled 不绕过版本化 jobContracts。 */
 export const factories = mysqlTable(
   "factories",
   {
@@ -33,7 +43,7 @@ export const factories = mysqlTable(
   },
   (table) => [uniqueIndex("factories_version_uq").on(table.id, table.version)],
 );
-
+/** Project 绑定唯一 Factory 与规范化名称；Project Repository 生产、Snapshot/Run 消费，archived 项目不得由后续业务隐式恢复。 */
 export const projects = mysqlTable(
   "projects",
   {
@@ -54,7 +64,7 @@ export const projects = mysqlTable(
     uniqueIndex("projects_canonical_uq").on(table.canonicalName),
   ],
 );
-
+/** ProjectSnapshot 冻结规则、manifest、Prompt 与工具目录摘要；导入流程生产、Run 消费，fullSkillCoverageProven 由 CHECK 固定 false 且不因哈希存在而提升。 */
 export const projectSnapshots = mysqlTable(
   "project_snapshots",
   {
@@ -89,7 +99,7 @@ export const projectSnapshots = mysqlTable(
     ),
   ],
 );
-
+/** Run 是用户请求的权威执行聚合；Run Service 在 transaction 中生产、Job/Event/Artifact 消费，ownerUserId、Project/Snapshot、幂等键和指纹须一致，四项安全证明固定 false。 */
 export const runs = mysqlTable(
   "runs",
   {
@@ -156,7 +166,7 @@ export const runs = mysqlTable(
     uniqueIndex("runs_client_uq").on(table.projectId, table.clientRunId),
   ],
 );
-
+/** RunEvent 是按 Run 单调 sequence 保存的权威事件；事务内业务流程生产、客户端恢复消费，evidenceArtifactId 必须属于同一 Run，Socket.IO 不是其替代事实源。 */
 export const runEvents = mysqlTable(
   "run_events",
   {
@@ -180,7 +190,7 @@ export const runEvents = mysqlTable(
     }).onDelete("restrict"),
   ],
 );
-
+/** Worker 注册身份、能力与心跳状态；Worker Service 生产、Job claim 消费，capabilities JSON 必须运行时解析，disabled Worker 不得领取任务。 */
 export const workers = mysqlTable(
   "workers",
   {
@@ -193,7 +203,7 @@ export const workers = mysqlTable(
   },
   (table) => [index("workers_disabled_idx").on(table.disabled)],
 );
-
+/** Job 保存版本化声明式 payload 与当前 lease；Run Service 生产、Worker/Job Repository 消费，leased 状态必须同时具 owner、leaseId、期限且 attemptCount 不超过 maxAttempts。 */
 export const jobs = mysqlTable(
   "jobs",
   {
@@ -241,7 +251,7 @@ export const jobs = mysqlTable(
     ),
   ],
 );
-
+/** JobAttempt 记录每次领取的 Worker、leaseId 与终态证据；claim/complete 流程生产、Artifact 等证据链消费，同一 jobId+attempt 唯一且旧 fencing 编号不得写入新轮次。 */
 export const jobAttempts = mysqlTable(
   "job_attempts",
   {
@@ -275,7 +285,7 @@ export const jobAttempts = mysqlTable(
     ),
   ],
 );
-
+/** Artifact 仅保存同 Run 私有对象引用、长度、摘要与有界 provenance；finalize transaction 生产、下载/证据流程消费，不保存正文且不证明兼容或部署。 */
 export const artifacts = mysqlTable(
   "artifacts",
   {
@@ -296,7 +306,7 @@ export const artifacts = mysqlTable(
     uniqueIndex("artifacts_run_id_uq").on(table.runId, table.id),
   ],
 );
-
+/** NPK Inventory 保存只读官方来源的长度、摘要、条目数与 producing Run；受租约 Worker 流程生产、技能映射消费，Project/Run/Artifact 必须同属且不按名称猜测。 */
 export const npkInventories = mysqlTable(
   "npk_inventories",
   {
@@ -328,7 +338,7 @@ export const npkInventories = mysqlTable(
     }).onDelete("restrict"),
   ],
 );
-
+/** InventoryEntry 保存某 inventory 内 IMG 相对路径、版本、帧数与元数据摘要；inventory Worker 生产、技能来源绑定消费，internalPath 唯一但不承载文件正文。 */
 export const npkInventoryEntries = mysqlTable(
   "npk_inventory_entries",
   {
@@ -349,7 +359,7 @@ export const npkInventoryEntries = mysqlTable(
     ),
   ],
 );
-
+/** ModelCall 保存固定角色、脱敏 endpoint 身份、配置版本和请求/响应摘要；模型 Service 生产、审计消费，performed 只能在 authorized 时为 true，原始响应与密钥禁止入库。 */
 export const modelCalls = mysqlTable(
   "model_calls",
   {
@@ -392,7 +402,7 @@ export const modelCalls = mysqlTable(
     ),
   ],
 );
-
+/** ImageAttempt 记录模型调用后的图像生成/适配证据；Image Service 生产、职业生产消费，关联 ModelCall/Artifact 必须同 Run，directRuntimeUseAllowed 永久为 false。 */
 export const imageAttempts = mysqlTable(
   "image_attempts",
   {
@@ -428,7 +438,7 @@ export const imageAttempts = mysqlTable(
     }).onDelete("restrict"),
   ],
 );
-
+/** GuardrailDecision 保存冻结策略对 Run 输入的追加式 fail-closed 决策；Guardrail Service 在创建 Job 前生产、审计消费，details JSON 需双向校验且不能夹带任意执行字段。 */
 export const guardrailDecisions = mysqlTable(
   "guardrail_decisions",
   {
@@ -446,7 +456,7 @@ export const guardrailDecisions = mysqlTable(
   },
   (table) => [index("guardrail_run_idx").on(table.runId)],
 );
-
+/** ManualReview 保存 Run 的人工审核状态与可选同 Run 证据；审核 Service 生产、发布流程消费，approved 不等于 deploymentAuthorized 或 clientCompatibilityProven。 */
 export const manualReviews = mysqlTable(
   "manual_reviews",
   {
@@ -473,7 +483,7 @@ export const manualReviews = mysqlTable(
     ),
   ],
 );
-
+/** OutboxEvent 与业务状态在同一 transaction 写入，提交后 dispatcher 消费并设置 publishedAt；payload 需运行时校验，未发布记录可重试且不能提前广播成功。 */
 export const outboxEvents = mysqlTable(
   "outbox_events",
   {

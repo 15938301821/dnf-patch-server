@@ -1,9 +1,15 @@
 /**
- * @fileoverview DNF Patch Studio 的职业、技能、主题及逐技能生产元数据表；不保存官方资源正文，也不执行本机工具。
+ * @fileoverview 定义职业、技能、风格及逐技能生产证据表；不保存官方资源正文、不执行本机工具，
+ * 也不把候选产物状态当作部署或客户端兼容证明。
  * @module common/db/studio-schema
  * @author AI生成
  * @created 2026-07-21
- * @relatedPlan N/A（对应当前前端业务与后端工作流直接需求）
+ * @relatedPlan N/A - 用户直接需求
+ *
+ * 调用关系：Profession 纵向模块的 Repository 在 transaction 中读写，Drizzle migration 消费
+ * 定义；跨表外键引用 control schema 的 Project/Run/Job/Artifact/ModelCall/ImageAttempt。输入是已
+ * 校验 DTO 与冻结证据 ID，输出是内部数据库行。安全边界：所有生产状态必须由同 Run/职业/风格/
+ * 技能证据支持；官方 NPK 只读，JSON 读写都需运行时解析，限制性外键和 passed CHECK 不得放宽。
  */
 import { sql } from "drizzle-orm";
 import {
@@ -36,19 +42,27 @@ const id = (name: string) => varchar(name, { length: 64 });
 const sha256 = (name: string) => varchar(name, { length: 64 });
 const utc = (name: string) => datetime(name, { mode: "date", fsp: 3 });
 
+/**
+ * 用户拥有的职业目录根；生产方是 Profession Repository，消费方是技能/风格与 PatchTask 流程。
+ * ownerUserId 是稳定租户边界，name/slug 仅展示或路由；workflowProjectId 与 catalogSnapshotId 必须
+ * 同时为空或同时存在，并由复合外键证明 Snapshot 属于该 Project。
+ */
 export const professions = mysqlTable(
   "professions",
   {
     id: id("id").primaryKey(),
+    /** 持久化用户所有者；null 仅保留历史/系统记录语义，不能由 displayName 补猜。 */
     ownerUserId: id("owner_user_id").references(() => users.id, {
       onDelete: "restrict",
     }),
     name: varchar("name", { length: 160 }).notNull(),
     slug: varchar("slug", { length: 120 }).notNull(),
     canonicalName: varchar("canonical_name", { length: 200 }).notNull(),
+    /** 生产工作流绑定的 Project；创建 PatchTask 前必须与 catalogSnapshotId 成对存在。 */
     workflowProjectId: id("workflow_project_id").references(() => projects.id, {
       onDelete: "restrict",
     }),
+    /** 已审核职业目录所依据的 Snapshot，必须属于 workflowProjectId。 */
     catalogSnapshotId: id("catalog_snapshot_id"),
     publishStatus: varchar("publish_status", { length: 32 })
       .notNull()
@@ -80,6 +94,11 @@ export const professions = mysqlTable(
   ],
 );
 
+/**
+ * 职业技能事实与可执行证据状态；生产方是目录导入/审核 Service，消费方是风格选择和生产编排。
+ * `build-ready` 必须同时具备 verified 映射、producing Run、inventory/entry、帧 manifest Artifact
+ * 与元数据哈希；Prompt JSON 与其 SHA-256 必须同时为空或同时存在，不能按技能名猜测映射。
+ */
 export const professionSkills = mysqlTable(
   "profession_skills",
   {
@@ -98,13 +117,17 @@ export const professionSkills = mysqlTable(
     executionStatus: varchar("execution_status", { length: 32 })
       .notNull()
       .default("draft-only"),
+    /** 产生 inventory 与帧 manifest 的 Run，必须与后续两个来源引用保持一致。 */
     sourceRunId: id("source_run_id").references(() => runs.id, {
       onDelete: "restrict",
     }),
     sourceInventoryId: id("source_inventory_id"),
+    /** 必须属于 sourceInventoryId 的具体 IMG entry，不能按 internalPath 猜测。 */
     sourceInventoryEntryId: id("source_inventory_entry_id"),
+    /** 必须属于 sourceRunId 的已复核帧 manifest Artifact。 */
     sourceFrameManifestArtifactId: id("source_frame_manifest_artifact_id"),
     sourceMetadataSha256: sha256("source_metadata_sha256"),
+    /** 经领域 schema 验证的冻结 Prompt JSON；数据库读取后仍按 unknown 重新解析。 */
     professionPrompt: json("profession_prompt").$type<unknown>(),
     professionPromptSha256: sha256("profession_prompt_sha256"),
     createdAt: utc("created_at").notNull(),
@@ -158,6 +181,11 @@ export const professionSkills = mysqlTable(
   ],
 );
 
+/**
+ * 某职业下的视觉风格定义；生产方是受认证编辑/审核 Service，消费方是逐技能 Prompt 与生产 Run。
+ * canonicalName 在同职业内唯一，publishStatus 只表示目录审核状态；themeDefinition 从数据库读取后
+ * 仍是不可信 JSON，必须经版本化 schema 解析，不能直接成为任意模型/工具输入。
+ */
 export const professionStyles = mysqlTable(
   "profession_styles",
   {
@@ -170,6 +198,7 @@ export const professionStyles = mysqlTable(
     description: text("description").notNull(),
     agent: text("agent").notNull(),
     prompt: text("prompt").notNull(),
+    /** 版本化主题结构；生产方写前、消费方读后都需 Zod 校验。 */
     themeDefinition: json("theme_definition").$type<unknown>(),
     publishStatus: varchar("publish_status", { length: 32 })
       .notNull()
@@ -194,6 +223,11 @@ export const professionStyles = mysqlTable(
   ],
 );
 
+/**
+ * 风格选中的技能及其有序覆盖配置；生产方是风格保存 Service，消费方是生产任务编排。
+ * 复合外键保证 styleId 与 skillId 同属 professionId；同一风格 ordinal 唯一，文本仅是声明式
+ * Prompt/验收输入，不能承载 executable、shell、脚本路径或部署指令。
+ */
 export const professionStyleSkills = mysqlTable(
   "profession_style_skills",
   {
@@ -202,6 +236,7 @@ export const professionStyleSkills = mysqlTable(
       .references(() => professions.id, { onDelete: "restrict" }),
     styleId: id("style_id").notNull(),
     skillId: id("skill_id").notNull(),
+    /** 风格内稳定排序位置；由保存 DTO 生产并受唯一索引约束。 */
     ordinal: int("ordinal", { unsigned: true }).notNull(),
     customPrompt: text("custom_prompt"),
     changes: text("changes"),
@@ -232,6 +267,11 @@ export const professionStyleSkills = mysqlTable(
   ],
 );
 
+/**
+ * 单个风格技能在一个 Run 中的生产状态与证据链；生产方是 Profession 工作流 Service，消费方是
+ * 状态查询与最终打包。`passed` 必须同时绑定同 Run ModelCall、ImageAttempt、固定 Aseprite profile/
+ * 二进制哈希、适配 Artifact 和验证 Artifact；这些证据仍不证明客户端兼容或部署。
+ */
 export const styleSkillProductions = mysqlTable(
   "style_skill_productions",
   {
@@ -243,6 +283,7 @@ export const styleSkillProductions = mysqlTable(
       .notNull()
       .references(() => runs.id, { onDelete: "restrict" }),
     jobId: id("job_id"),
+    /** 提供只读源帧 manifest 的 producing Run，与当前生产 Run 分离且必须有来源证据。 */
     sourceRunId: id("source_run_id")
       .notNull()
       .references(() => runs.id, { onDelete: "restrict" }),
@@ -252,6 +293,7 @@ export const styleSkillProductions = mysqlTable(
     promptSha256: sha256("prompt_sha256").notNull(),
     modelCallId: id("model_call_id"),
     imageAttemptId: id("image_attempt_id"),
+    /** Worker 已登记的固定工具 profile；不能来自任意可执行路径。 */
     asepriteProfileId: varchar("aseprite_profile_id", { length: 128 }),
     asepriteBinarySha256: sha256("aseprite_binary_sha256"),
     asepriteArtifactId: id("aseprite_artifact_id"),
@@ -331,6 +373,11 @@ export const styleSkillProductions = mysqlTable(
   ],
 );
 
+/**
+ * 风格 Run 的候选包聚合状态；生产方是打包 Job 完成流程，消费方是审核与下载授权。
+ * `passed` 必须同时具备同 Run package Artifact、manifest SHA-256 和 finishedAt；它只证明候选对象
+ * 与清单已记录，不表示部署获准、部署已执行或真实客户端验证通过。
+ */
 export const stylePackages = mysqlTable(
   "style_packages",
   {
@@ -340,6 +387,7 @@ export const stylePackages = mysqlTable(
     runId: id("run_id")
       .notNull()
       .references(() => runs.id, { onDelete: "restrict" }),
+    /** 同一 runId 下的候选包 Artifact，只有 passed 时要求非空。 */
     packageArtifactId: id("package_artifact_id"),
     manifestSha256: sha256("manifest_sha256"),
     status: varchar("status", { length: 32 }).notNull().default("queued"),

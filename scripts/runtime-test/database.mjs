@@ -1,3 +1,12 @@
+/**
+ * @fileoverview 管理隔离 MySQL runtime 实例并核验真实 migration、约束与持久化状态；不连接系统 3306、不修改生产数据库，也不证明外部服务集成。
+ * @module scripts/runtime-test
+ * @author AI生成
+ * @created 2026-07-23
+ * @relatedPlan N/A - 用户直接需求
+ * 调用关系：test-mysql-runtime 调用初始化/启动/检查函数，下游仅使用 process.mjs 与 mysql2；输入是已校验 mysqld 身份、临时目录/端口和 scenario ID，输出为连接、schema/行数摘要。
+ * 副作用与边界：创建临时无密码 root 实例仅绑定回环、执行真实 SQL/migration 并由上层清理；固定 SQL 不接收 HTTP 输入。通过只证明当前 MySQL 版本和场景，不证明生产备份、升级或多副本并发。
+ */
 import { createConnection } from "mysql2/promise";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -11,6 +20,7 @@ import {
 } from "./process.mjs";
 
 const host = "127.0.0.1";
+/** 隔离实例固定数据库名，仅存在于 runtime 临时 data directory。 */
 export const databaseName = "dnf_patch_runtime";
 const requiredTables = [
   "artifacts",
@@ -30,7 +40,7 @@ const requiredTables = [
   "runs",
   "workers",
 ];
-
+/** @param identity 已校验 mysqld 身份；@param dataPath 新建临时数据目录。@returns `--initialize-insecure` 成功后完成。@throws 初始化超时或非零退出时抛出；该无密码实例只允许回环测试。 */
 export async function initializeMysql(identity, dataPath) {
   await runProcess(
     identity.path,
@@ -44,7 +54,7 @@ export async function initializeMysql(identity, dataPath) {
     { timeoutMs: 120_000 },
   );
 }
-
+/** @param identity 已校验 mysqld；@param dataPath 临时数据目录；@param port 回环空闲端口；@param workingPath 临时工作目录。@returns 关闭网络扩展/本地导入/文件导出的 mysqld 句柄。 */
 export function startMysql(identity, dataPath, port, workingPath) {
   return startProcess(
     identity.path,
@@ -64,7 +74,7 @@ export function startMysql(identity, dataPath, port, workingPath) {
     { cwd: workingPath },
   );
 }
-
+/** @param processHandle 隔离 mysqld；@param port 回环端口。@returns 30 秒内可建立 root 连接时完成。@throws 进程提前退出或截止时仍不可用时抛出脱敏错误。 */
 export async function waitForMysql(processHandle, port) {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -87,7 +97,7 @@ export async function waitForMysql(processHandle, port) {
     "Isolated MySQL did not start in 30 seconds.",
   );
 }
-
+/** @param port 隔离 MySQL 端口。@returns 新建 utf8mb4 数据库的无密码回环 URL，仅传给测试子进程。@throws CREATE DATABASE 失败时传播并始终关闭 admin 连接。 */
 export async function createDatabase(port) {
   const admin = await createConnection({ host, port, user: "root" });
   try {
@@ -99,7 +109,7 @@ export async function createDatabase(port) {
   }
   return `mysql://root@${host}:${String(port)}/${databaseName}`;
 }
-
+/** @param port 隔离 MySQL 端口。@returns 指向 runtime 数据库的 mysql2 连接 Promise；调用方负责 end。 */
 export function connectDatabase(port) {
   return createConnection({
     host,
@@ -108,8 +118,9 @@ export function connectDatabase(port) {
     database: databaseName,
   });
 }
-
+/** @param connection 已执行 migration 的隔离数据库连接。@returns migration/表/外键/列/CHECK 统计。@throws 任一必需结构缺失、journal 数不符或删除规则非 RESTRICT 时抛出。 */
 export async function inspectSchema(connection) {
+  // 步骤 1：核对领域表与 Drizzle journal 实际应用数量，不以 SQL 文件存在代替执行证明。
   const [tableRows] = await connection.query(
     "SELECT table_name AS tableName FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'",
     [databaseName],
@@ -140,6 +151,7 @@ export async function inspectSchema(connection) {
     foreignKeys.every((row) => row.deleteRule === "RESTRICT"),
     "Every migrated foreign key must use ON DELETE RESTRICT.",
   );
+  // 步骤 2：核对租约、审计归属和请求指纹的关键列，再核对数据库实际 CHECK 元数据。
   const requiredColumns = [
     "job_attempts.lease_id",
     "jobs.dispatch_ready_at",
@@ -187,8 +199,9 @@ export async function inspectSchema(connection) {
     allDeletesRestricted: true,
   };
 }
-
+/** @param connection 场景完成后的隔离连接；@param scenario exerciseApi 返回的权威 ID。@returns Run 安全状态与各表精确行数。@throws 状态聚合、租约清理、证据归属或数据库约束任一不符时抛出。 */
 export async function inspectDatabaseState(connection, scenario) {
+  // 步骤 1：先锁定预期持久化集合，避免场景静默多写/少写权威事件或 attempt。
   const tableNames = [
     "artifacts",
     "factories",
@@ -310,12 +323,13 @@ export async function inspectDatabaseState(connection, scenario) {
       integrityRows[0].leaseExpiresAt === null,
     "Tampered Job did not remain quarantined after restart.",
   );
+  // 步骤 2：主动提交非法 SQL，证明复合外键、CHECK 与 RESTRICT 在真实 MySQL 生效。
   await assertEvidenceOwnership(connection, scenario);
   await assertCheckConstraints(connection, scenario);
   await assertRestrictDelete(connection);
   return { ...runRows[0], rows };
 }
-
+/** @param connection 隔离连接；@param scenario 场景 ID。@returns 同 Run Artifact/Inventory 归属与跨 Run 外键拒绝均成立时完成。@throws 证据链漂移或非法插入被接受时抛出。 */
 async function assertEvidenceOwnership(connection, scenario) {
   const [artifactRows] = await connection.query(
     "SELECT run_id AS runId FROM artifacts WHERE id = ?",
@@ -343,7 +357,7 @@ async function assertEvidenceOwnership(connection, scenario) {
     [scenario.retryRunId, scenario.artifactId],
   );
 }
-
+/** @param connection 隔离连接。@returns 被引用 Factory 删除收到 ER_ROW_IS_REFERENCED_2 时完成。@throws 删除成功或返回其他错误时抛出。 */
 async function assertRestrictDelete(connection) {
   try {
     await connection.query("DELETE FROM factories WHERE id = ?", [
@@ -361,7 +375,7 @@ async function assertRestrictDelete(connection) {
   }
   throw new Error("ON DELETE RESTRICT did not protect the referenced factory.");
 }
-
+/** @param connection 隔离连接；@param scenario 当前 Run/Job/Snapshot ID。@returns 所有非法状态更新均被 CHECK 拒绝时完成。@throws 任一 CHECK 缺失或返回非预期驱动错误时抛出。 */
 async function assertCheckConstraints(connection, scenario) {
   await assertCheckRejects(
     connection,
@@ -395,7 +409,7 @@ async function assertCheckConstraints(connection, scenario) {
   );
   await assertModelCallChecks(connection, scenario.runId);
 }
-
+/** @param connection 隔离连接；@param runId 当前 Run。@returns ModelCall 状态、egress 与 finishedAt CHECK 均生效后完成；插入的测试行保留供行数核验。 */
 async function assertModelCallChecks(connection, runId) {
   const id = "runtime-model-call-check";
   await connection.query(
@@ -422,7 +436,7 @@ async function assertModelCallChecks(connection, runId) {
     [id],
   );
 }
-
+/** @param connection 隔离连接；@param statement 本文件固定非法 SQL；@param parameters 场景 ID。@returns 收到 MySQL CHECK 违反码时完成。@throws SQL 被接受或错误类型不匹配时抛出。 */
 async function assertCheckRejects(connection, statement, parameters) {
   try {
     await connection.query(statement, parameters);
@@ -438,7 +452,7 @@ async function assertCheckRejects(connection, statement, parameters) {
   }
   throw new Error("A database CHECK constraint accepted invalid state.");
 }
-
+/** @param connection 隔离连接；@param statement 本文件固定跨 Run SQL；@param parameters 场景 ID。@returns 收到外键违反码时完成。@throws SQL 被接受或错误类型不匹配时抛出。 */
 async function assertForeignKeyRejects(connection, statement, parameters) {
   try {
     await connection.query(statement, parameters);

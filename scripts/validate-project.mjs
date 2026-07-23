@@ -1,7 +1,22 @@
+/**
+ * @fileoverview 校验服务端仓库的稳定目录、必需文件、模块角色、依赖和安全配置锚点；不解析全部
+ * TypeScript 语义、不修改项目，也不证明业务测试或外部集成通过。
+ * @module scripts/gates
+ * @author AI生成
+ * @created 2026-07-23
+ * @relatedPlan N/A - 用户直接需求
+ *
+ * 调用关系：`npm run validate:project` 和 gate 执行本脚本。输入是当前工作区文件树与若干 JSON/
+ * TypeScript 文本，输出为结构摘要或首个不变量错误。副作用仅读取文件和写 stdout。
+ * 安全边界：pathFromRoot 防止动态相对路径逃逸仓库；禁止兼容双轨目录、任意执行策略和缺失固定
+ * 模块入口。通过只证明声明式项目骨架，不证明源码注释、类型、测试、migration 或服务运行正确。
+ */
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 
+/** 调用脚本时的仓库根，所有动态路径都必须由 pathFromRoot 约束在其下。 */
 const projectRoot = process.cwd();
+/** 架构要求存在的目录快照；新增稳定层级时必须显式审查并更新。 */
 const requiredDirectories = [
   ".codebuddy/rules",
   "drizzle/meta",
@@ -18,6 +33,7 @@ const requiredDirectories = [
   "src/config",
   "src/modules",
 ];
+/** 构建、规则、计划、门禁与应用入口的必需文件快照。 */
 const requiredFiles = [
   ".codebuddy/rules/global.md",
   ".codebuddy/rules/server.md",
@@ -53,6 +69,7 @@ const requiredFiles = [
   "tsconfig.json",
   "vitest.config.ts",
 ];
+/** 每个纵向模块必须提供的基础文件角色；值是 `<module>.<role>.ts` 的 role。 */
 const requiredModuleFiles = {
   artifact: ["contracts", "controller", "module", "repository", "service"],
   auth: ["contracts", "controller", "module", "service"],
@@ -76,6 +93,7 @@ const requiredModuleFiles = {
   ],
   worker: ["contracts", "controller", "module", "service"],
 };
+/** AppModule 中必须导入并注册的 Nest Module 类名映射。 */
 const moduleClassNames = {
   artifact: "ArtifactModule",
   auth: "AuthModule",
@@ -92,6 +110,7 @@ const moduleClassNames = {
   run: "RunModule",
   worker: "WorkerModule",
 };
+/** 禁止出现的旧式横向兼容目录，避免 Controller/Service/Repository 双轨架构。 */
 const forbiddenCompatibilityPaths = [
   "src/controllers",
   "src/repositories",
@@ -102,7 +121,13 @@ const forbiddenCompatibilityPaths = [
 
 await validateStructure();
 
+/**
+ * 执行完整项目结构门禁，按“路径 -> 模块 -> package -> 配置/计划 -> migration”顺序检查。
+ * @returns 全部静态不变量满足后输出通过摘要并 resolve。
+ * @throws Error 任一目录、文件、模块注册、依赖或安全配置锚点不匹配时立即失败。
+ */
 async function validateStructure() {
+  // 步骤 1：先验证必需/禁止路径和顶层精确子目录，防止后续读取错误位置。
   for (const path of requiredDirectories) await assertPath(path, "directory");
   for (const path of requiredFiles) await assertPath(path, "file");
   for (const path of forbiddenCompatibilityPaths) {
@@ -130,6 +155,7 @@ async function validateStructure() {
   ]);
   await assertExactChildren("src/modules", Object.keys(requiredModuleFiles));
 
+  // 步骤 2：逐模块验证纵向角色文件，避免回退为并行 controllers/services 目录。
   for (const [moduleName, fileRoles] of Object.entries(requiredModuleFiles)) {
     await assertPath(`src/modules/${moduleName}`, "directory");
     for (const role of fileRoles) {
@@ -140,6 +166,7 @@ async function validateStructure() {
     }
   }
 
+  // 步骤 3：核对 ESM、门禁入口与基础设施依赖的声明存在性，不执行依赖代码。
   const packageJson = await readJson("package.json");
   assert(packageJson.type === "module", "package.json must use ESM.");
   assert(
@@ -164,6 +191,7 @@ async function validateStructure() {
     );
   }
 
+  // 步骤 4：文本检查根模块注册与固定模型 ID；此处不替代 TypeScript AST 或外部模型探测。
   const appModule = await readFile(pathFromRoot("src/app.module.ts"), "utf8");
   for (const [moduleName, className] of Object.entries(moduleClassNames)) {
     assert(
@@ -187,6 +215,7 @@ async function validateStructure() {
     );
   }
 
+  // 步骤 5：验证部署示例只声明必需键、MCP 默认拒绝任意网络/执行以及计划元数据有版本。
   const environmentExample = await readFile(
     pathFromRoot(".env.example"),
     "utf8",
@@ -235,6 +264,7 @@ async function validateStructure() {
     "tier_def must contain at least one versioned tier.",
   );
 
+  // 步骤 6：最后确认至少存在一份版本化 migration，再输出静态结构证明范围。
   const migrationFiles = (await readdir(pathFromRoot("drizzle")))
     .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/u.test(name))
     .sort();
@@ -259,6 +289,13 @@ async function validateStructure() {
   );
 }
 
+/**
+ * 比较目录的精确直接子项集合。
+ * @param relativePath 已知仓库内目录的相对路径。
+ * @param expectedChildren 规则固定的直接子项名称，不递归。
+ * @returns 集合完全一致时 resolve。
+ * @throws Error 出现缺失或额外子项时抛出，避免悄然创建兼容双轨目录。
+ */
 async function assertExactChildren(relativePath, expectedChildren) {
   const actual = (await readdir(pathFromRoot(relativePath))).sort();
   const expected = [...expectedChildren].sort();
@@ -268,6 +305,12 @@ async function assertExactChildren(relativePath, expectedChildren) {
   );
 }
 
+/**
+ * @param relativePath 规则声明的仓库相对路径。
+ * @param expectedKind 预期为 `file` 或 `directory`。
+ * @returns 路径存在且类型匹配时 resolve。
+ * @throws Error 路径缺失、类型错误或 stat 失败时抛出脱敏结构错误。
+ */
 async function assertPath(relativePath, expectedKind) {
   let item;
   try {
@@ -281,6 +324,10 @@ async function assertPath(relativePath, expectedKind) {
   );
 }
 
+/**
+ * @param relativePath 仓库内候选相对路径。
+ * @returns 路径可 stat 时为 true；任何 stat 失败按不存在处理。
+ */
 async function pathExists(relativePath) {
   try {
     await stat(pathFromRoot(relativePath));
@@ -290,10 +337,21 @@ async function pathExists(relativePath) {
   }
 }
 
+/**
+ * @param relativePath 规则固定的仓库内 JSON 路径。
+ * @returns JSON.parse 后的值；调用点仍需逐字段校验。
+ * @throws SyntaxError 文件不是合法 JSON 时传播并使门禁失败。
+ */
 async function readJson(relativePath) {
   return JSON.parse(await readFile(pathFromRoot(relativePath), "utf8"));
 }
 
+/**
+ * 将动态相对路径解析到仓库根并阻止 `..` 等逃逸。
+ * @param relativePath 由本脚本常量或受控循环组合的相对路径。
+ * @returns 位于 projectRoot 子树内的绝对路径。
+ * @throws Error 解析结果不是仓库根的后代时抛出。
+ */
 function pathFromRoot(relativePath) {
   const path = resolve(projectRoot, relativePath);
   const prefix = projectRoot.endsWith(sep)
@@ -303,6 +361,11 @@ function pathFromRoot(relativePath) {
   return path;
 }
 
+/**
+ * @param condition 当前结构不变量判定。
+ * @param message 不含凭据的稳定门禁错误说明。
+ * @throws Error condition 为假时抛出；为真时无返回副作用。
+ */
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }

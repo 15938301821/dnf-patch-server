@@ -18,6 +18,7 @@ import { FactoryService } from "../factory/factory.service.js";
 import { ProfessionService } from "../profession/profession.service.js";
 import { ProjectService } from "../project/project.service.js";
 import { RunService } from "../run/run.service.js";
+import { WorkerService } from "../worker/worker.service.js";
 import type { CreateRunInput, RunCreateOptions } from "../run/run.contracts.js";
 import type {
   CreatePatchTaskInput,
@@ -82,6 +83,12 @@ interface RunCreatePort {
   ): ReturnType<RunService["blockDeferredDispatch"]>;
 }
 
+interface ProfessionWorkerCapabilityPort {
+  hasEnabledCapability(
+    capability: "profession",
+  ): ReturnType<WorkerService["hasEnabledCapability"]>;
+}
+
 @Injectable()
 export class PatchTaskService {
   constructor(
@@ -92,6 +99,8 @@ export class PatchTaskService {
     @Inject(FactoryService) private readonly factories: FactoryLookupPort,
     @Inject(ProjectService) private readonly projects: ProjectLookupPort,
     @Inject(RunService) private readonly runs: RunCreatePort,
+    @Inject(WorkerService)
+    private readonly workers: ProfessionWorkerCapabilityPort,
   ) {}
 
   list(ownerUserId: string): Promise<PatchTaskView[]> {
@@ -122,6 +131,12 @@ export class PatchTaskService {
       throw new ConflictException({
         code: "FACTORY_POLICY_VERSION_REQUIRED",
         message: "制作任务需要使用 Factory v2 工作流。",
+      });
+    }
+    if (!(await this.workers.hasEnabledCapability("profession"))) {
+      throw new ConflictException({
+        code: "PROFESSION_WORKER_REQUIRED",
+        message: "尚无启用的 Worker 声明职业制作能力。",
       });
     }
     let payload: StyleSkillProductionJobPayloadV2;

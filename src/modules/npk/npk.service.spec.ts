@@ -10,12 +10,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   normalizeNpkInternalPath,
   type CreateInventoryInput,
+  type CreateWorkerInventoryInput,
 } from "./npk.contracts.js";
 import { NpkService } from "./npk.service.js";
 
 describe("NpkService evidence ownership", () => {
   const inventories = {
     create: vi.fn(),
+    createFromWorker: vi.fn(),
     list: vi.fn(),
     findLatest: vi.fn(),
     findByRun: vi.fn(),
@@ -70,6 +72,34 @@ describe("NpkService evidence ownership", () => {
       expect.any(Object),
     );
   });
+
+  it("使用精确 Worker 租约回填 inventory", async () => {
+    inventories.createFromWorker.mockResolvedValue({
+      status: "accepted",
+      inventory: { id: "inventory-worker" },
+    });
+
+    await expect(
+      service.createFromWorker("job-id", workerInventoryInput()),
+    ).resolves.toEqual({ id: "inventory-worker" });
+    expect(inventories.createFromWorker).toHaveBeenCalledWith(
+      "job-id",
+      expect.any(String),
+      workerInventoryInput(),
+    );
+  });
+
+  it.each([
+    ["lease-mismatch", "JOB_LEASE_MISMATCH"],
+    ["job-kind-mismatch", "INVENTORY_JOB_REQUIRED"],
+    ["artifact-not-finalized", "INVENTORY_ARTIFACT_REQUIRED"],
+  ] as const)("将 Worker 仓储状态 %s 映射为 %s", async (status, code) => {
+    inventories.createFromWorker.mockResolvedValue({ status });
+
+    await expect(
+      service.createFromWorker("job-id", workerInventoryInput()),
+    ).rejects.toMatchObject({ response: { code } });
+  });
 });
 
 function inventoryInput(): CreateInventoryInput {
@@ -87,5 +117,19 @@ function inventoryInput(): CreateInventoryInput {
         metadataSha256: "B".repeat(64),
       },
     ],
+  };
+}
+
+function workerInventoryInput(): CreateWorkerInventoryInput {
+  const input = inventoryInput();
+  return {
+    inventoryArtifactId: "33333333-3333-4333-8333-333333333333",
+    workerId: "11111111-1111-4111-8111-111111111111",
+    leaseId: "22222222-2222-4222-8222-222222222222",
+    attempt: 1,
+    sourceLabel: input.sourceLabel,
+    sourceLength: input.sourceLength,
+    sourceSha256: input.sourceSha256,
+    entries: input.entries,
   };
 }
