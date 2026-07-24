@@ -144,6 +144,17 @@ const importSkillSchema = z
   })
   .strict();
 
+/**
+ * Worker 内部目录上下文绑定 DTO；只接受已登记的 Project/Snapshot 标识，不允许顺带声明技能映射。
+ * Service 校验复合归属后会把职业现有技能降级为未核验，后续仍须经 skill-catalog 端点导入证据。
+ */
+export const bindProfessionCatalogContextSchema = z
+  .object({
+    workflowProjectId: z.uuid(),
+    catalogSnapshotId: z.uuid(),
+  })
+  .strict();
+
 export const importProfessionSkillCatalogSchema = z
   .object({
     workflowProjectId: z.uuid(),
@@ -168,6 +179,9 @@ export const importProfessionSkillCatalogSchema = z
 export type CreateProfessionInput = z.infer<typeof createProfessionSchema>;
 export type SaveProfessionStyleInput = z.infer<
   typeof saveProfessionStyleSchema
+>;
+export type BindProfessionCatalogContextInput = z.infer<
+  typeof bindProfessionCatalogContextSchema
 >;
 export type ImportProfessionSkillCatalogInput = z.infer<
   typeof importProfessionSkillCatalogSchema
@@ -243,6 +257,16 @@ export interface ProfessionCatalogImportView {
   catalogSnapshotId: string;
   sourceRunId: string;
   importedSkillCount: number;
+  skills: ProfessionSkillSummary[];
+}
+
+/**
+ * 目录上下文绑定后的公开结果；skills 仅反映降级后的目录状态，不包含资源、Artifact 或路径细节。
+ */
+export interface ProfessionCatalogContextView {
+  professionId: string;
+  workflowProjectId: string;
+  catalogSnapshotId: string;
   skills: ProfessionSkillSummary[];
 }
 

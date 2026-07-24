@@ -18,8 +18,10 @@ import { NpkService } from "../npk/npk.service.js";
 import { ProjectService } from "../project/project.service.js";
 import { RunService } from "../run/run.service.js";
 import type {
+  BindProfessionCatalogContextInput,
   CreateProfessionInput,
   ImportProfessionSkillCatalogInput,
+  ProfessionCatalogContextView,
   ProfessionCatalogImportView,
   ProfessionRecord,
   ProfessionSkillSummary,
@@ -213,6 +215,42 @@ export class ProfessionService {
       });
     }
     return context;
+  }
+
+  /**
+   * 将职业绑定到已登记的 Project/Snapshot，并撤销全部旧技能执行证据。
+   *
+   * @param professionId 内部路由中已校验的职业 UUID；目录导入身份，不代表浏览器所有权。
+   * @param input Worker 提交的 Project/Snapshot UUID；两者必须通过 Project Service 复合归属校验。
+   * @returns 绑定后的上下文与已降级技能摘要；不证明任何技能映射、帧范围或生成能力。
+   * @throws PROFESSION_PROJECT_BINDING_CONFLICT 当职业已经绑定到另一个 Project 时拒绝改绑。
+   */
+  async bindCatalogContext(
+    professionId: string,
+    input: BindProfessionCatalogContextInput,
+  ): Promise<ProfessionCatalogContextView> {
+    const profession = await this.requireCatalogTarget(professionId);
+    if (
+      profession.workflowProjectId &&
+      profession.workflowProjectId !== input.workflowProjectId
+    ) {
+      throw new ConflictException({
+        code: "PROFESSION_PROJECT_BINDING_CONFLICT",
+        message: "职业已绑定到其他工作流项目。",
+      });
+    }
+    await this.projects.get(input.workflowProjectId);
+    await this.projects.getSnapshot(
+      input.workflowProjectId,
+      input.catalogSnapshotId,
+    );
+    const skills = await this.professions.replaceSkillCatalog(
+      professionId,
+      input.workflowProjectId,
+      input.catalogSnapshotId,
+      [],
+    );
+    return { professionId, ...input, skills };
   }
 
   /**

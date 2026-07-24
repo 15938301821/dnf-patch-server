@@ -144,7 +144,13 @@ export class JobRepository {
       ) {
         const now = await databaseNow(transaction);
         if (candidate.status === "leased") {
-          await closeIntegrityFailedAttempt(transaction, candidate, now);
+          await closeAttempt(
+            transaction,
+            candidate,
+            now,
+            "blocked",
+            "JOB_INTEGRITY_FAILED",
+          );
         }
         await transaction
           .update(jobs)
@@ -180,7 +186,13 @@ export class JobRepository {
       const now = await databaseNow(transaction);
       const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1_000);
       if (candidate.status === "leased") {
-        await closeExpiredAttempt(transaction, candidate, now);
+        await closeAttempt(
+          transaction,
+          candidate,
+          now,
+          "timed_out",
+          "LEASE_EXPIRED",
+        );
       }
       const attempt = candidate.attemptCount + 1;
       const leaseId = randomUUID();
@@ -371,7 +383,7 @@ export class JobRepository {
       const now = await databaseNow(transaction);
       const events: RunEventView[] = [];
       for (const job of expired) {
-        await closeExpiredAttempt(transaction, job, now);
+        await closeAttempt(transaction, job, now, "timed_out", "LEASE_EXPIRED");
         const exhausted = job.attemptCount >= job.maxAttempts;
         await transaction
           .update(jobs)
@@ -400,7 +412,7 @@ export class JobRepository {
 
 /** 仅把仍 queued 的 Run 迁移为 running，并在同一事务追加首个 Worker 领取事件。 */
 async function markRunRunning(
-  transaction: Transaction,
+  transaction: JobTransaction,
   runId: string,
   now: Date,
 ): Promise<RunEventView | undefined> {
@@ -421,7 +433,7 @@ async function markRunRunning(
 
 /** 读取同一 Run 的全部 Job；只有全终态时按 failed > blocked > passed 优先级更新 Run 并追加事件。 */
 async function finalizeRunIfComplete(
-  transaction: Transaction,
+  transaction: JobTransaction,
   runId: string,
   now: Date,
 ): Promise<RunEventView | undefined> {
@@ -459,43 +471,20 @@ async function finalizeRunIfComplete(
   );
 }
 
-type Transaction = JobTransaction;
-
-/** 将仍 running 的当前 attempt 以 LEASE_EXPIRED 关闭；不会创建新 attempt 或直接重排 Job。 */
-async function closeExpiredAttempt(
-  transaction: Transaction,
+/** 以受限终态关闭仍 running 的当前 attempt；不会创建新 attempt 或直接重排 Job。 */
+async function closeAttempt(
+  transaction: JobTransaction,
   job: typeof jobs.$inferSelect,
   now: Date,
+  status: "blocked" | "timed_out",
+  errorCode: "JOB_INTEGRITY_FAILED" | "LEASE_EXPIRED",
 ): Promise<void> {
   if (job.attemptCount === 0) return;
   await transaction
     .update(jobAttempts)
     .set({
-      status: "timed_out",
-      errorCode: "LEASE_EXPIRED",
-      finishedAt: now,
-    })
-    .where(
-      and(
-        eq(jobAttempts.jobId, job.id),
-        eq(jobAttempts.attempt, job.attemptCount),
-        eq(jobAttempts.status, "running"),
-      ),
-    );
-}
-
-/** 将仍 running 的损坏持久化 payload attempt 标记为 blocked，保留可审计失败原因。 */
-async function closeIntegrityFailedAttempt(
-  transaction: Transaction,
-  job: typeof jobs.$inferSelect,
-  now: Date,
-): Promise<void> {
-  if (job.attemptCount === 0) return;
-  await transaction
-    .update(jobAttempts)
-    .set({
-      status: "blocked",
-      errorCode: "JOB_INTEGRITY_FAILED",
+      status,
+      errorCode,
       finishedAt: now,
     })
     .where(

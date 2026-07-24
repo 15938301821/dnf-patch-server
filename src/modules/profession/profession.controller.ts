@@ -20,11 +20,14 @@ import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import { WorkerTokenGuard } from "../../common/security/worker-token.guard.js";
 import { AuthService } from "../auth/auth.service.js";
 import {
+  bindProfessionCatalogContextSchema,
   createProfessionSchema,
   importProfessionSkillCatalogSchema,
   saveProfessionStyleSchema,
+  type BindProfessionCatalogContextInput,
   type CreateProfessionInput,
   type ImportProfessionSkillCatalogInput,
+  type ProfessionCatalogContextView,
   type ProfessionCatalogImportView,
   type ProfessionSkillSummary,
   type ProfessionStyle,
@@ -138,6 +141,20 @@ export class ProfessionController {
 @UseGuards(WorkerTokenGuard)
 export class ProfessionCatalogController {
   constructor(private readonly professions: ProfessionService) {}
+
+  /**
+   * 绑定职业目录的已登记 Project/Snapshot 上下文，同时把技能证据降级为未核验。
+   * Worker token 只完成调用身份认证；Project/Snapshot 归属与改绑冲突仍由 Service 校验。
+   */
+  @Put(":professionId/catalog-context")
+  bindCatalogContext(
+    @Param("professionId", new ZodValidationPipe(idSchema))
+    professionId: string,
+    @Body(new ZodValidationPipe(bindProfessionCatalogContextSchema))
+    input: BindProfessionCatalogContextInput,
+  ): Promise<ProfessionCatalogContextView> {
+    return this.professions.bindCatalogContext(professionId, input);
+  }
 
   @Put(":professionId/skill-catalog")
   importSkillCatalog(

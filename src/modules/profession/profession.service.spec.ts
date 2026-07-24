@@ -1,5 +1,5 @@
 /**
- * @fileoverview 验证职业主题审核与制作门禁；不访问数据库、对象存储或本机工具。
+ * @fileoverview 验证职业主题审核、制作门禁与目录上下文绑定；不访问数据库、对象存储或本机工具。
  * @module profession
  * @author AI生成
  * @created 2026-07-23
@@ -17,6 +17,8 @@ import { ProfessionService } from "./profession.service.js";
 const professionId = "11111111-1111-4111-8111-111111111111";
 const styleId = "22222222-2222-4222-8222-222222222222";
 const skillId = "33333333-3333-4333-8333-333333333333";
+const projectId = "44444444-4444-4444-8444-444444444444";
+const snapshotId = "55555555-5555-4555-8555-555555555555";
 const ownerUserId = "88888888-8888-4888-8888-888888888888";
 
 describe("ProfessionService style gates", () => {
@@ -27,6 +29,11 @@ describe("ProfessionService style gates", () => {
     findStyle: vi.fn(),
     submitStyleForReview: vi.fn(),
     getBuildContext: vi.fn(),
+    replaceSkillCatalog: vi.fn(),
+  };
+  const projects = {
+    get: vi.fn(),
+    getSnapshot: vi.fn(),
   };
   let service: ProfessionService;
 
@@ -41,9 +48,12 @@ describe("ProfessionService style gates", () => {
       publishStatus: "pending",
     });
     professions.getBuildContext.mockResolvedValue(buildContext());
+    professions.replaceSkillCatalog.mockResolvedValue([]);
+    projects.get.mockResolvedValue({});
+    projects.getSnapshot.mockResolvedValue({});
     service = new ProfessionService(
       professions as never,
-      {} as never,
+      projects as never,
       {} as never,
       {} as never,
       {} as never,
@@ -133,6 +143,72 @@ describe("ProfessionService style gates", () => {
       code: "STYLE_PROFESSION_PROMPTS_REQUIRED",
       skillIds: [skillId],
     });
+  });
+
+  it("binds a profession to a verified Project/Snapshot and downgrades all skills", async () => {
+    professions.replaceSkillCatalog.mockResolvedValue([
+      { id: skillId, executionStatus: "draft-only" },
+    ]);
+
+    await expect(
+      service.bindCatalogContext(professionId, {
+        workflowProjectId: projectId,
+        catalogSnapshotId: snapshotId,
+      }),
+    ).resolves.toMatchObject({
+      professionId,
+      workflowProjectId: projectId,
+      catalogSnapshotId: snapshotId,
+      skills: [{ id: skillId, executionStatus: "draft-only" }],
+    });
+
+    expect(projects.get).toHaveBeenCalledWith(projectId);
+    expect(projects.getSnapshot).toHaveBeenCalledWith(projectId, snapshotId);
+    expect(professions.replaceSkillCatalog).toHaveBeenCalledWith(
+      professionId,
+      projectId,
+      snapshotId,
+      [],
+    );
+  });
+
+  it("rejects cross-project rebinding before querying the snapshot", async () => {
+    const otherProjectId = "99999999-9999-4999-8999-999999999999";
+    professions.findById.mockResolvedValue({
+      ...profession(),
+      workflowProjectId: otherProjectId,
+    });
+
+    const error = await service
+      .bindCatalogContext(professionId, {
+        workflowProjectId: projectId,
+        catalogSnapshotId: snapshotId,
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    if (!(error instanceof ConflictException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "PROFESSION_PROJECT_BINDING_CONFLICT",
+    });
+    expect(projects.getSnapshot).not.toHaveBeenCalled();
+    expect(professions.replaceSkillCatalog).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the target project does not exist", async () => {
+    // Service 把 ProjectService 异常原样上抛；禁止在 Project 不存在时执行技能目录替换。
+    projects.get.mockRejectedValue(
+      new NotFoundException({ code: "PROJECT_NOT_FOUND" }),
+    );
+
+    await expect(
+      service.bindCatalogContext(professionId, {
+        workflowProjectId: projectId,
+        catalogSnapshotId: snapshotId,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(professions.replaceSkillCatalog).not.toHaveBeenCalled();
   });
 });
 
