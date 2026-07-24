@@ -131,15 +131,34 @@ export const saveProfessionStyleSchema =
     }
   });
 
+const importSkillSourceEntrySchema = z
+  .object({
+    sourceInventoryEntryId: z.uuid(),
+    sourceMetadataSha256: sha256Schema,
+  })
+  .strict();
+
 const importSkillSchema = z
   .object({
     stableKey: clientIdSchema,
     displayName: safeDisplayNameSchema,
     promptStatus: skillPromptStatusSchema.default("candidate"),
+    sourceScope: z.literal("entire-inventory"),
     sourceInventoryId: z.uuid(),
-    sourceInventoryEntryId: z.uuid(),
+    sourceEntries: z
+      .array(importSkillSourceEntrySchema)
+      .min(1)
+      .max(500)
+      .superRefine((entries, context) => {
+        const entryIds = entries.map((entry) => entry.sourceInventoryEntryId);
+        if (new Set(entryIds).size !== entryIds.length) {
+          context.addIssue({
+            code: "custom",
+            message: "技能来源不能包含重复 Inventory Entry。",
+          });
+        }
+      }),
     sourceFrameManifestArtifactId: z.uuid(),
-    sourceMetadataSha256: sha256Schema,
     professionPrompt: professionPromptDefinitionSchema.optional(),
   })
   .strict();
@@ -238,8 +257,9 @@ export interface VerifiedProfessionSkillRecord extends ImportProfessionSkillInpu
 
 export interface BuildReadySkill extends ProfessionSkillSummary {
   sourceRunId: string;
+  sourceInventoryId: string;
   sourceFrameManifestArtifactId: string;
-  sourceMetadataSha256: string;
+  sourceEntries: ImportProfessionSkillInput["sourceEntries"];
   professionPrompt: ProfessionPromptDefinition;
   professionPromptSha256: string;
 }

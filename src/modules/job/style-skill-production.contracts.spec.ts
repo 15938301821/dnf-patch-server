@@ -81,8 +81,14 @@ function validPayload(): StyleSkillProductionJobPayloadV2 {
     promptSha256: "",
     sourceEvidence: {
       sourceRunId: "22222222-2222-4222-8222-222222222222",
+      sourceInventoryId: "66666666-6666-4666-8666-666666666666",
       sourceFrameManifestArtifactId: "33333333-3333-4333-8333-333333333333",
-      sourceMetadataSha256: "B".repeat(64),
+      sourceEntries: [
+        {
+          sourceInventoryEntryId: "77777777-7777-4777-8777-777777777777",
+          sourceMetadataSha256: "B".repeat(64),
+        },
+      ],
     },
   };
   skill.professionPromptSha256 = sha256JcsV1(skill.professionPrompt);

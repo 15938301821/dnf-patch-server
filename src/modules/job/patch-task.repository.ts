@@ -7,20 +7,15 @@
  */
 import { Injectable } from "@nestjs/common";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { hasExactJobLease } from "../../common/contracts/index.js";
 import { DatabaseService } from "../../common/db/database.service.js";
-import {
-  artifacts,
-  imageAttempts,
-  jobs,
-  modelCalls,
-  runs,
-} from "../../common/db/schema.js";
+import { artifacts, jobs, runs } from "../../common/db/schema.js";
 import {
   professions,
   professionStyles,
-  stylePackages,
   styleSkillProductions,
 } from "../../common/db/studio-schema.js";
+import { stylePackages } from "../../common/db/style-package-schema.js";
 import type {
   PatchTaskArtifactView,
   PatchTaskReportResult,
@@ -30,8 +25,20 @@ import type {
   ReportPatchTaskPackageInput,
   ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
-import { validateLeaseMutation } from "./job-lease.js";
-import { mapPatchTaskStatus } from "./patch-task-status.js";
+import {
+  mapPatchTaskProgress,
+  mapPatchTaskStatus,
+} from "./patch-task-status.js";
+import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type { ResolveProfessionExecutionContextResult } from "./profession-execution-context.js";
+import { databaseNow } from "./job-run-event.repository-support.js";
+import { reportProfessionSkillProduction } from "./patch-task-skill-production.repository-support.js";
+import { resolveProfessionSkillExecution as resolveProfessionExecution } from "./profession-model-execution.repository-support.js";
+import { resolveProfessionCompletionInTransaction } from "./profession-completion.repository-support.js";
+import type {
+  ProfessionProductionProgressInput,
+  ProfessionProductionProgressView,
+} from "./profession-production-progress.contracts.js";
 
 @Injectable()
 export class PatchTaskRepository {
@@ -162,7 +169,12 @@ export class PatchTaskRepository {
       professionName: row.professionName,
       styleName: row.styleName,
       status: mapPatchTaskStatus(row.runStatus, row.packageStatus),
-      progress: progress(row.totalSkills, row.passedSkills, row.runStatus),
+      progress: mapPatchTaskProgress(
+        row.totalSkills,
+        row.passedSkills,
+        row.runStatus,
+        row.packageStatus,
+      ),
       createdAt: row.createdAt.toISOString(),
       ...(row.artifactName ? { artifactName: row.artifactName } : {}),
       artifactAvailable: row.packageArtifactId !== null,
@@ -176,7 +188,6 @@ export class PatchTaskRepository {
     const [row] = await this.connection.database
       .select({
         artifactName: artifacts.logicalName,
-        storageKey: artifacts.storageKey,
         mediaType: artifacts.mediaType,
         byteLength: artifacts.byteLength,
         sha256: artifacts.sha256,
@@ -201,59 +212,57 @@ export class PatchTaskRepository {
     return row;
   }
 
+  async resolveProfessionSkillExecution(
+    jobId: string,
+    input: RequestProfessionSkillExecutionInput,
+  ): Promise<ResolveProfessionExecutionContextResult> {
+    return resolveProfessionExecution(this.connection, jobId, input);
+  }
+
+  /** 在当前精确 lease 下读取冻结顺序的多技能进度，供重领 attempt 跳过既有 passed 技能。 */
+  async resolveProfessionProductionProgress(
+    jobId: string,
+    input: ProfessionProductionProgressInput,
+  ): Promise<
+    | { status: "accepted"; progress: ProfessionProductionProgressView }
+    | {
+        status:
+          | "lease-mismatch"
+          | "job-kind-mismatch"
+          | "job-integrity-failed"
+          | "production-integrity-failed";
+      }
+  > {
+    return this.connection.database.transaction(async (transaction) => {
+      const [job] = await transaction
+        .select()
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1)
+        .for("update");
+      if (!job) return { status: "lease-mismatch" };
+      const now = await databaseNow(transaction);
+      if (!hasExactJobLease(job, input, now)) {
+        return { status: "lease-mismatch" };
+      }
+      if (job.kind !== "profession") {
+        return { status: "job-kind-mismatch" };
+      }
+      const result = await resolveProfessionCompletionInTransaction(
+        transaction,
+        job,
+      );
+      return result.status === "accepted"
+        ? { status: "accepted", progress: result.progress }
+        : result;
+    });
+  }
+
   async reportSkillProduction(
     jobId: string,
     input: ReportPatchTaskSkillProductionInput,
   ): Promise<PatchTaskReportResult> {
-    return this.connection.database.transaction(async (transaction) => {
-      const lease = await leasedProfessionJob(transaction, jobId, input);
-      if (lease.kind !== "accepted") return { status: lease.status };
-      const [production] = await transaction
-        .select()
-        .from(styleSkillProductions)
-        .where(
-          and(
-            eq(styleSkillProductions.runId, lease.job.runId),
-            eq(styleSkillProductions.skillId, input.skillId),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!production) return { status: "skill-production-not-found" };
-      if (isTerminalProduction(production.status)) {
-        return { status: "skill-production-terminal" };
-      }
-      if (input.status === "passed") {
-        const evidence = await validateSkillEvidence(
-          transaction,
-          lease.job.runId,
-          input,
-        );
-        if (evidence) return evidence;
-      }
-      await transaction
-        .update(styleSkillProductions)
-        .set({
-          jobId,
-          status: input.status,
-          updatedAt: lease.now,
-          ...(isTerminalProduction(input.status)
-            ? { finishedAt: lease.now }
-            : { finishedAt: null }),
-          ...(input.status === "passed"
-            ? {
-                modelCallId: input.modelCallId,
-                imageAttemptId: input.imageAttemptId,
-                asepriteProfileId: input.asepriteProfileId,
-                asepriteBinarySha256: input.asepriteBinarySha256?.toUpperCase(),
-                asepriteArtifactId: input.asepriteArtifactId,
-                validationArtifactId: input.validationArtifactId,
-              }
-            : {}),
-        })
-        .where(eq(styleSkillProductions.id, production.id));
-      return { status: "accepted" };
-    });
+    return reportProfessionSkillProduction(this.connection, jobId, input);
   }
 
   async reportPackage(
@@ -271,43 +280,8 @@ export class PatchTaskRepository {
         .for("update");
       if (!pack) return { status: "package-not-found" };
       if (isTerminalPackage(pack.status)) return { status: "package-terminal" };
-      if (input.status === "passed") {
-        const packageArtifact = await validateArtifactRun(
-          transaction,
-          lease.job.runId,
-          input.packageArtifactId,
-        );
-        if (packageArtifact) return packageArtifact;
-        const [summary] = await transaction
-          .select({
-            total: sql<number>`count(${styleSkillProductions.id})`,
-            passed: sql<number>`sum(case when ${styleSkillProductions.status} = 'passed' then 1 else 0 end)`,
-          })
-          .from(styleSkillProductions)
-          .where(eq(styleSkillProductions.runId, lease.job.runId));
-        const total = summary?.total ?? 0;
-        const passed = summary?.passed ?? 0;
-        if (total <= 0 || passed !== total) {
-          return { status: "package-skills-incomplete" };
-        }
-      }
-      await transaction
-        .update(stylePackages)
-        .set({
-          status: input.status,
-          updatedAt: lease.now,
-          ...(isTerminalPackage(input.status)
-            ? { finishedAt: lease.now }
-            : { finishedAt: null }),
-          ...(input.status === "passed"
-            ? {
-                packageArtifactId: input.packageArtifactId,
-                manifestSha256: input.manifestSha256?.toUpperCase(),
-              }
-            : {}),
-        })
-        .where(eq(stylePackages.id, pack.id));
-      return { status: "accepted" };
+      // V2 只冻结 aseprite-cli；没有封包器、验证器或 package provenance 契约，任何角色自报都不可信。
+      return { status: "package-capability-not-frozen" };
     });
   }
 }
@@ -319,7 +293,7 @@ type Transaction = Parameters<
 async function leasedProfessionJob(
   transaction: Transaction,
   jobId: string,
-  input: { workerId: string; leaseId?: string | undefined },
+  input: { workerId: string; leaseId: string; attempt: number },
 ): Promise<
   | { kind: "accepted"; job: typeof jobs.$inferSelect; now: Date }
   | { kind: "rejected"; status: PatchTaskReportResult["status"] }
@@ -332,90 +306,14 @@ async function leasedProfessionJob(
     .for("update");
   if (!job) return { kind: "rejected", status: "lease-mismatch" };
   const now = await databaseNow(transaction);
-  const leaseStatus = validateLeaseMutation(job, input, now);
-  if (leaseStatus !== "accepted") {
-    return { kind: "rejected", status: leaseStatus };
+  if (!hasExactJobLease(job, input, now)) {
+    return { kind: "rejected", status: "lease-mismatch" };
   }
   return job.kind === "profession"
     ? { kind: "accepted", job, now }
     : { kind: "rejected", status: "job-kind-mismatch" };
 }
 
-async function validateSkillEvidence(
-  transaction: Transaction,
-  runId: string,
-  input: ReportPatchTaskSkillProductionInput,
-): Promise<PatchTaskReportResult | undefined> {
-  const [modelCall] = await transaction
-    .select({ runId: modelCalls.runId, status: modelCalls.status })
-    .from(modelCalls)
-    .where(eq(modelCalls.id, input.modelCallId ?? ""))
-    .limit(1);
-  if (!modelCall) return { status: "model-call-not-found" };
-  if (modelCall.runId !== runId) return { status: "model-call-run-mismatch" };
-  if (modelCall.status !== "passed") return { status: "model-call-not-passed" };
-
-  const [imageAttempt] = await transaction
-    .select({ runId: imageAttempts.runId, status: imageAttempts.status })
-    .from(imageAttempts)
-    .where(eq(imageAttempts.id, input.imageAttemptId ?? ""))
-    .limit(1);
-  if (!imageAttempt) return { status: "image-attempt-not-found" };
-  if (imageAttempt.runId !== runId) {
-    return { status: "image-attempt-run-mismatch" };
-  }
-  if (
-    imageAttempt.status !== "generated" &&
-    imageAttempt.status !== "adapted"
-  ) {
-    return { status: "image-attempt-not-ready" };
-  }
-
-  return (
-    (await validateArtifactRun(transaction, runId, input.asepriteArtifactId)) ??
-    (await validateArtifactRun(transaction, runId, input.validationArtifactId))
-  );
-}
-
-async function validateArtifactRun(
-  transaction: Transaction,
-  runId: string,
-  artifactId: string | undefined,
-): Promise<PatchTaskReportResult | undefined> {
-  const [artifact] = await transaction
-    .select({ runId: artifacts.runId })
-    .from(artifacts)
-    .where(eq(artifacts.id, artifactId ?? ""))
-    .limit(1);
-  if (!artifact) return { status: "artifact-not-found" };
-  return artifact.runId === runId
-    ? undefined
-    : { status: "artifact-run-mismatch" };
-}
-
-async function databaseNow(transaction: Transaction): Promise<Date> {
-  const [row] = await transaction
-    .select({ value: sql<Date>`CURRENT_TIMESTAMP(3)` })
-    .from(jobs)
-    .limit(1);
-  if (!row) throw new Error("DATABASE_TIME_UNAVAILABLE");
-  return row.value instanceof Date ? row.value : new Date(row.value);
-}
-
-function isTerminalProduction(status: string): boolean {
-  return status === "passed" || status === "failed" || status === "blocked";
-}
-
 function isTerminalPackage(status: string): boolean {
   return status === "passed" || status === "failed" || status === "blocked";
-}
-
-function progress(
-  totalSkills: number,
-  passedSkills: number,
-  status: string,
-): number {
-  if (status === "passed") return 100;
-  if (status === "failed" || totalSkills <= 0) return 0;
-  return Math.max(5, Math.floor((passedSkills / totalSkills) * 90));
 }

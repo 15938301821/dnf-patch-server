@@ -21,6 +21,7 @@ describe("NpkService evidence ownership", () => {
     list: vi.fn(),
     findLatest: vi.fn(),
     findByRun: vi.fn(),
+    findById: vi.fn(),
     findEntryEvidence: vi.fn(),
   };
   const runs = { get: vi.fn() };
@@ -93,6 +94,7 @@ describe("NpkService evidence ownership", () => {
     ["lease-mismatch", "JOB_LEASE_MISMATCH"],
     ["job-kind-mismatch", "INVENTORY_JOB_REQUIRED"],
     ["artifact-not-finalized", "INVENTORY_ARTIFACT_REQUIRED"],
+    ["artifact-evidence-mismatch", "INVENTORY_ARTIFACT_EVIDENCE_MISMATCH"],
   ] as const)("将 Worker 仓储状态 %s 映射为 %s", async (status, code) => {
     inventories.createFromWorker.mockResolvedValue({ status });
 
@@ -124,6 +126,7 @@ function workerInventoryInput(): CreateWorkerInventoryInput {
   const input = inventoryInput();
   return {
     inventoryArtifactId: "33333333-3333-4333-8333-333333333333",
+    sourceFrameManifestArtifactId: "44444444-4444-4444-8444-444444444444",
     workerId: "11111111-1111-4111-8111-111111111111",
     leaseId: "22222222-2222-4222-8222-222222222222",
     attempt: 1,

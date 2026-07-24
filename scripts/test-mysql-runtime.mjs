@@ -155,6 +155,7 @@ try {
     },
     worker: scenario.worker,
     evidence: scenario.evidence,
+    professionSkillProduction: scenario.professionSkillProduction,
     reaper: persistence.reaper,
     integrity: persistence.integrity,
     webSocket: {

@@ -19,6 +19,10 @@ describe("createWorkerInventorySchema", () => {
   it.each([
     { leaseId: undefined },
     { inventoryArtifactId: undefined },
+    { sourceFrameManifestArtifactId: undefined },
+    {
+      sourceFrameManifestArtifactId: "33333333-3333-4333-8333-333333333333",
+    },
     { runId: "44444444-4444-4444-8444-444444444444" },
     { projectId: "55555555-5555-4555-8555-555555555555" },
   ])("rejects missing evidence or caller-owned scope %#", (override) => {
@@ -35,6 +39,7 @@ function input(): CreateWorkerInventoryInput {
     leaseId: "22222222-2222-4222-8222-222222222222",
     attempt: 1,
     inventoryArtifactId: "33333333-3333-4333-8333-333333333333",
+    sourceFrameManifestArtifactId: "66666666-6666-4666-8666-666666666666",
     sourceLabel: "verified-source",
     sourceLength: 1,
     sourceSha256: "A".repeat(64),

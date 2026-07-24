@@ -38,6 +38,7 @@ const requiredTables = [
   "projects",
   "run_events",
   "runs",
+  "style_skill_productions",
   "workers",
 ];
 /** @param identity 已校验 mysqld 身份；@param dataPath 新建临时数据目录。@returns `--initialize-insecure` 成功后完成。@throws 初始化超时或非零退出时抛出；该无密码实例只允许回环测试。 */
@@ -151,6 +152,19 @@ export async function inspectSchema(connection) {
     foreignKeys.every((row) => row.deleteRule === "RESTRICT"),
     "Every migrated foreign key must use ON DELETE RESTRICT.",
   );
+  const foreignKeyNames = new Set(foreignKeys.map((row) => row.constraintName));
+  const requiredForeignKeys = [
+    "style_skill_productions_worker_id_workers_id_fk",
+    "style_skill_productions_attempt_lease_fk",
+    "style_skill_productions_aseprite_upload_fk",
+    "style_skill_productions_validation_upload_fk",
+  ];
+  for (const foreignKey of requiredForeignKeys) {
+    assert(
+      foreignKeyNames.has(foreignKey),
+      `Migrated schema is missing foreign key ${foreignKey}.`,
+    );
+  }
   // 步骤 2：核对租约、审计归属和请求指纹的关键列，再核对数据库实际 CHECK 元数据。
   const requiredColumns = [
     "job_attempts.lease_id",
@@ -159,6 +173,13 @@ export async function inspectSchema(connection) {
     "model_calls.model_egress_performed",
     "npk_inventories.run_id",
     "runs.request_fingerprint_sha256",
+    "style_skill_productions.worker_id",
+    "style_skill_productions.lease_id",
+    "style_skill_productions.attempt",
+    "style_skill_productions.aseprite_adapter_sha256",
+    "style_skill_productions.aseprite_upload_id",
+    "style_skill_productions.validation_upload_id",
+    "style_skill_productions.error_code",
   ];
   const [columnRows] = await connection.query(
     "SELECT table_name AS tableName, column_name AS columnName FROM information_schema.columns WHERE table_schema = ?",
@@ -181,6 +202,8 @@ export async function inspectSchema(connection) {
     "project_snapshots_safety_state_ck",
     "runs_safety_state_ck",
     "runs_status_ck",
+    "style_skill_productions_error_evidence_ck",
+    "style_skill_productions_passed_evidence_ck",
   ];
   const [checkRows] = await connection.query(
     "SELECT constraint_name AS constraintName FROM information_schema.check_constraints WHERE constraint_schema = ?",
@@ -194,6 +217,7 @@ export async function inspectSchema(connection) {
     migrationCount: Number(migrationRows[0].count),
     domainTableCount: requiredTables.length,
     foreignKeyCount: foreignKeys.length,
+    requiredForeignKeyCount: requiredForeignKeys.length,
     requiredColumnCount: requiredColumns.length,
     requiredCheckCount: requiredChecks.length,
     allDeletesRestricted: true,

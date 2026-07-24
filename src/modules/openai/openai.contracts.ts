@@ -68,6 +68,14 @@ export interface ImageModelRequest {
 }
 
 /**
+ * 服务内模型出站前门禁；ModelCall running 行已持久化，但 performed 尚未置位且 Provider 尚未调用。
+ * 调用方只能返回接受/拒绝，不能取得 API Key、endpoint 或 Provider 配置；本类型不是 HTTP DTO。
+ */
+export type ModelEgressGuard = (
+  record: ModelCallView,
+) => Promise<"accepted" | "rejected">;
+
+/**
  * 对调用方公开的脱敏模型调用审计视图。
  * 由 OpenAiService 创建并由 OpenAiRepository 持久化；仅描述一次调用的授权、出站和终态事实，
  * 不包含用户凭据、原始 Prompt/响应、图片字节、Worker token 或 lease。

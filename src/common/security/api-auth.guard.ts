@@ -15,6 +15,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -25,14 +26,24 @@ import {
   type HttpRequestLike,
 } from "../http/http-request.js";
 import type { Environment } from "../../config/environment.js";
-import { verifyBrowserSessionToken } from "./browser-session.js";
+import { AuthService } from "../../modules/auth/auth.service.js";
 import { secureEqual } from "./client-token.guard.js";
+
+/** Guard 只依赖浏览器会话活动查询，不获得登录、注册、刷新或用户数据写入能力。 */
+interface BrowserAccessSessionPort {
+  isBrowserAccessTokenActive(
+    token: string,
+  ): ReturnType<AuthService["isBrowserAccessTokenActive"]>;
+}
 
 /** REST 统一认证门禁；Guard 指 Controller 执行前的认证检查，不替代领域所有权判断。 */
 @Injectable()
 export class ApiAuthGuard implements CanActivate {
   /** @param config 只提供 environmentSchema 已校验的三类认证秘密，Guard 不记录这些值。 */
-  constructor(private readonly config: ConfigService<Environment, true>) {}
+  constructor(
+    private readonly config: ConfigService<Environment, true>,
+    @Inject(AuthService) private readonly auth: BrowserAccessSessionPort,
+  ) {}
 
   /**
    * 按请求类型选择公开规则、Worker token 或普通客户端/浏览器 token。
@@ -40,7 +51,7 @@ export class ApiAuthGuard implements CanActivate {
    * @returns 公开入口或匹配当前认证域的请求返回 true。
    * @throws UnauthorizedException 内部路由缺少 Worker token，或普通路由缺少有效 Bearer token 时抛出。
    */
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== "http") {
       return true;
     }
@@ -77,14 +88,7 @@ export class ApiAuthGuard implements CanActivate {
       infer: true,
     });
     if (secureEqual(bearer ?? "", expected)) return true;
-    if (
-      bearer &&
-      verifyBrowserSessionToken(
-        this.config.getOrThrow("BROWSER_SESSION_SECRET", { infer: true }),
-        bearer,
-        "access",
-      ) !== undefined
-    ) {
+    if (bearer && (await this.auth.isBrowserAccessTokenActive(bearer))) {
       return true;
     }
     // 步骤 4：所有候选认证都失败后只返回稳定错误码，不泄露哪段 token 或签名不匹配。

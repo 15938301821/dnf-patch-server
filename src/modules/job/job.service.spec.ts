@@ -19,7 +19,7 @@ const completeInput: CompleteJobInput = {
   resultSha256: "A".repeat(64),
 };
 
-describe("JobService shared-fx completion", () => {
+describe("JobService evidence-gated completion", () => {
   const complete = vi.fn();
   let service: JobService;
 
@@ -32,6 +32,7 @@ describe("JobService shared-fx completion", () => {
   });
 
   it.each([
+    ["profession-evidence-incomplete", "PROFESSION_EVIDENCE_INCOMPLETE"],
     ["shared-fx-evidence-incomplete", "SHARED_FX_EVIDENCE_INCOMPLETE"],
     ["shared-fx-review-conflict", "SHARED_FX_REVIEW_CONFLICT"],
   ] as const)("maps %s to %s", async (status, code) => {

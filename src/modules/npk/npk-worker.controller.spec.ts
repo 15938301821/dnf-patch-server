@@ -30,6 +30,7 @@ describe("NpkWorkerController", () => {
       leaseId: "22222222-2222-4222-8222-222222222222",
       attempt: 1,
       inventoryArtifactId: "33333333-3333-4333-8333-333333333333",
+      sourceFrameManifestArtifactId: "44444444-4444-4444-8444-444444444444",
       sourceLabel: "verified-source",
       sourceLength: 1,
       sourceSha256: "A".repeat(64),

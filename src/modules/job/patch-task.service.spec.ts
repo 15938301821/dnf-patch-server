@@ -32,6 +32,8 @@ describe("PatchTaskService", () => {
     findArtifact: vi.fn(),
     reportSkillProduction: vi.fn(),
     reportPackage: vi.fn(),
+    resolveProfessionSkillExecution: vi.fn(),
+    resolveProfessionProductionProgress: vi.fn(),
   };
   const professions = { getStyleBuildContext: vi.fn() };
   const factories = { get: vi.fn() };
@@ -211,6 +213,8 @@ describe("PatchTaskService", () => {
     await expect(
       service.reportSkillProduction("job-id", {
         workerId: crypto.randomUUID(),
+        leaseId: crypto.randomUUID(),
+        attempt: 2,
         skillId: crypto.randomUUID(),
         status: "generating",
       }),
@@ -218,6 +222,8 @@ describe("PatchTaskService", () => {
     await expect(
       service.reportPackage("job-id", {
         workerId: crypto.randomUUID(),
+        leaseId: crypto.randomUUID(),
+        attempt: 2,
         status: "building",
       }),
     ).resolves.toBeUndefined();
@@ -225,17 +231,17 @@ describe("PatchTaskService", () => {
 
   it("maps worker report conflicts and missing records to stable HTTP errors", async () => {
     patchTasks.reportSkillProduction.mockResolvedValue({
-      status: "model-call-not-passed",
+      status: "model-execution-evidence-mismatch",
     });
     await expect(
       service.reportSkillProduction("job-id", {
         workerId: crypto.randomUUID(),
+        leaseId: crypto.randomUUID(),
+        attempt: 2,
         skillId: crypto.randomUUID(),
         status: "passed",
-        modelCallId: crypto.randomUUID(),
-        imageAttemptId: crypto.randomUUID(),
-        asepriteProfileId: "aseprite-cli",
         asepriteBinarySha256: "A".repeat(64),
+        asepriteAdapterSha256: "B".repeat(64),
         asepriteArtifactId: crypto.randomUUID(),
         validationArtifactId: crypto.randomUUID(),
       }),
@@ -245,9 +251,119 @@ describe("PatchTaskService", () => {
     await expect(
       service.reportPackage("job-id", {
         workerId: crypto.randomUUID(),
+        leaseId: crypto.randomUUID(),
+        attempt: 2,
         status: "building",
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("returns only the lease-gated frozen Profession context", async () => {
+    const context = {
+      runId: sourceRunId,
+      profileId: "profile-v2",
+      professionId,
+      styleId,
+      themeDefinition: buildContext().style.themeDefinition,
+      skill: { skillId: crypto.randomUUID() },
+    };
+    patchTasks.resolveProfessionSkillExecution.mockResolvedValue({
+      status: "accepted",
+      context,
+    });
+    const input = {
+      workerId: crypto.randomUUID(),
+      leaseId: crypto.randomUUID(),
+      attempt: 2,
+      skillId: context.skill.skillId,
+    };
+
+    await expect(
+      service.resolveProfessionSkillExecution("job-id", input),
+    ).resolves.toBe(context);
+    expect(patchTasks.resolveProfessionSkillExecution).toHaveBeenCalledWith(
+      "job-id",
+      input,
+    );
+  });
+
+  it.each([
+    ["lease-mismatch", ConflictException, "JOB_LEASE_MISMATCH"],
+    ["job-kind-mismatch", ConflictException, "PATCH_TASK_JOB_KIND_REQUIRED"],
+    [
+      "job-integrity-failed",
+      ConflictException,
+      "PROFESSION_JOB_INTEGRITY_FAILED",
+    ],
+    ["skill-not-found", NotFoundException, "PROFESSION_JOB_SKILL_NOT_FOUND"],
+  ] as const)(
+    "maps Profession execution %s to a stable internal error",
+    async (status, exceptionType, code) => {
+      patchTasks.resolveProfessionSkillExecution.mockResolvedValue({ status });
+
+      const error: unknown = await service
+        .resolveProfessionSkillExecution("job-id", {
+          workerId: crypto.randomUUID(),
+          leaseId: crypto.randomUUID(),
+          attempt: 2,
+          skillId: crypto.randomUUID(),
+        })
+        .catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(exceptionType);
+      if (
+        !(
+          error instanceof ConflictException ||
+          error instanceof NotFoundException
+        )
+      ) {
+        throw error;
+      }
+      expect(error.getResponse()).toMatchObject({ code });
+    },
+  );
+
+  it("returns Server-derived Profession production progress", async () => {
+    const input = {
+      workerId: crypto.randomUUID(),
+      leaseId: crypto.randomUUID(),
+      attempt: 2,
+    };
+    const progress = {
+      schemaVersion: 1 as const,
+      skills: [{ skillId: crypto.randomUUID(), status: "pending" as const }],
+    };
+    patchTasks.resolveProfessionProductionProgress.mockResolvedValue({
+      status: "accepted",
+      progress,
+    });
+
+    await expect(
+      service.resolveProfessionProductionProgress("job-id", input),
+    ).resolves.toEqual(progress);
+    expect(patchTasks.resolveProfessionProductionProgress).toHaveBeenCalledWith(
+      "job-id",
+      input,
+    );
+  });
+
+  it("maps Profession progress integrity failure to a stable conflict", async () => {
+    patchTasks.resolveProfessionProductionProgress.mockResolvedValue({
+      status: "production-integrity-failed",
+    });
+
+    const error: unknown = await service
+      .resolveProfessionProductionProgress("job-id", {
+        workerId: crypto.randomUUID(),
+        leaseId: crypto.randomUUID(),
+        attempt: 2,
+      })
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ConflictException);
+    if (!(error instanceof ConflictException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "PROFESSION_PRODUCTION_EVIDENCE_MISMATCH",
+    });
   });
 });
 
@@ -312,8 +428,14 @@ function buildContext(): StyleBuildContext {
         professionPrompt,
         professionPromptSha256: sha256JcsV1(professionPrompt),
         sourceRunId,
+        sourceInventoryId: "99999999-9999-4999-8999-999999999999",
         sourceFrameManifestArtifactId: "88888888-8888-4888-8888-888888888888",
-        sourceMetadataSha256: "B".repeat(64),
+        sourceEntries: [
+          {
+            sourceInventoryEntryId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            sourceMetadataSha256: "B".repeat(64),
+          },
+        ],
       },
     ],
     missingProfessionPromptSkillIds: [],

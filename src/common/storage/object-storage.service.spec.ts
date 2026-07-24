@@ -28,6 +28,8 @@ const enabledOptions: ObjectStorageOptions = {
 interface ObjectStorageClientFixture {
   /** 替代 Provider 预签名调用的 Vitest spy。 */
   authorizeUpload: ReturnType<typeof vi.fn>;
+  /** 替代服务端 S3 PUT 的 Vitest spy。 */
+  write: ReturnType<typeof vi.fn>;
   /** 注入 ObjectStorageService 的完整内存端口。 */
   client: ObjectStorageClientPort;
 }
@@ -60,11 +62,13 @@ function clientStub(
     url: "http://127.0.0.1:9000/upload",
     requiredHeaders: { "content-type": "application/octet-stream" },
   });
+  const write = vi.fn().mockResolvedValue(undefined);
   const client: ObjectStorageClientPort = {
     authorizeUpload,
     authorizeDownload: vi
       .fn()
       .mockResolvedValue("http://127.0.0.1:9000/download"),
+    write,
     read: vi.fn().mockResolvedValue({
       body: byteStream(Buffer.from("artifact")),
       contentLength: 8,
@@ -73,7 +77,7 @@ function clientStub(
     delete: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  return { authorizeUpload, client };
+  return { authorizeUpload, write, client };
 }
 
 describe("ObjectStorageService", () => {
@@ -144,6 +148,110 @@ describe("ObjectStorageService", () => {
       sha256:
         "C7C5C1D70C5DEC4416AB6158AFD0B223EF40C29B1DC1F97ED9428B94D4CADB1C",
     });
+  });
+
+  it("returns small verified bytes only after complete evidence matches", async () => {
+    const { client } = clientStub({
+      read: vi.fn().mockResolvedValue({
+        body: byteStream(Buffer.from("arti"), Buffer.from("fact")),
+        contentLength: 8,
+        contentType: "application/json",
+      }),
+    });
+    const service = new ObjectStorageService(enabledOptions, client);
+
+    await expect(
+      service.readVerifiedBytes({
+        objectKey: "artifacts/model-plan.json",
+        expectedMediaType: "application/json",
+        expectedByteLength: 8,
+        expectedSha256:
+          "C7C5C1D70C5DEC4416AB6158AFD0B223EF40C29B1DC1F97ED9428B94D4CADB1C",
+        maxByteLength: 16,
+      }),
+    ).resolves.toMatchObject({ bytes: Buffer.from("artifact") });
+  });
+
+  it("rejects a declared object above the caller read budget before S3", async () => {
+    const read = vi.fn();
+    const service = new ObjectStorageService(
+      enabledOptions,
+      clientStub({ read }).client,
+    );
+
+    await expect(
+      service.readVerifiedBytes({
+        objectKey: "artifacts/model-plan.json",
+        expectedMediaType: "application/json",
+        expectedByteLength: 32,
+        expectedSha256: "A".repeat(64),
+        maxByteLength: 16,
+      }),
+    ).rejects.toMatchObject({ code: "OBJECT_STORAGE_OBJECT_TOO_LARGE" });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("writes server bytes without overwrite and returns verified evidence", async () => {
+    const { client, write } = clientStub();
+    const service = new ObjectStorageService(enabledOptions, client);
+    const bytes = Buffer.from("artifact");
+    const sha256 =
+      "C7C5C1D70C5DEC4416AB6158AFD0B223EF40C29B1DC1F97ED9428B94D4CADB1C";
+
+    await expect(
+      service.write({
+        objectKey: "artifacts/model-output",
+        mediaType: "application/octet-stream",
+        bytes,
+        sha256,
+      }),
+    ).resolves.toEqual({
+      objectKey: "artifacts/model-output",
+      mediaType: "application/octet-stream",
+      byteLength: 8,
+      sha256,
+    });
+    expect(write).toHaveBeenCalledWith(
+      {
+        objectKey: "artifacts/model-output",
+        mediaType: "application/octet-stream",
+        byteLength: 8,
+        sha256,
+      },
+      bytes,
+    );
+  });
+
+  it("recovers a lost PUT response only when the stored bytes verify", async () => {
+    const { client } = clientStub({
+      write: vi.fn().mockRejectedValue(new Error("response lost")),
+    });
+    const service = new ObjectStorageService(enabledOptions, client);
+
+    await expect(
+      service.write({
+        objectKey: "artifacts/model-output",
+        mediaType: "application/octet-stream",
+        bytes: Buffer.from("artifact"),
+        sha256:
+          "C7C5C1D70C5DEC4416AB6158AFD0B223EF40C29B1DC1F97ED9428B94D4CADB1C",
+      }),
+    ).resolves.toMatchObject({ byteLength: 8 });
+  });
+
+  it("rejects server byte hash drift before writing", async () => {
+    const { client, write } = clientStub();
+    const service = new ObjectStorageService(enabledOptions, client);
+
+    await expect(
+      service.write({
+        objectKey: "artifacts/model-output",
+        mediaType: "application/octet-stream",
+        bytes: Buffer.from("artifact"),
+        sha256: "F".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "OBJECT_STORAGE_SHA256_MISMATCH" });
+    expect(write).not.toHaveBeenCalled();
   });
 
   // 上传方声明的长度或摘要任一漂移，都不得形成可供 Artifact finalize 的证据。

@@ -18,6 +18,7 @@ import {
   S3Client,
   type DeleteObjectCommandOutput,
   type GetObjectCommandOutput,
+  type PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Buffer } from "node:buffer";
@@ -45,10 +46,12 @@ export interface S3ObjectStorageClientConfig {
   forcePathStyle: boolean;
 }
 
-/** 可替换的 S3 GET/DELETE 命令边界，生产实现委托 AWS SDK，测试实现记录命令。 */
+/** 可替换的 S3 GET/PUT/DELETE 命令边界，生产实现委托 AWS SDK，测试实现记录命令。 */
 export interface S3StorageCommandClient {
   /** @returns GET 响应，正文仍须由 ObjectStorageService 完整复核。 */
   send(command: GetObjectCommand): Promise<GetObjectCommandOutput>;
+  /** @returns PUT 响应；对象完整性仍由后续 GET 回读证明。 */
+  send(command: PutObjectCommand): Promise<PutObjectCommandOutput>;
   /** @returns DELETE 响应；调用前业务层必须确认对象生命周期。 */
   send(command: DeleteObjectCommand): Promise<DeleteObjectCommandOutput>;
 }
@@ -114,6 +117,24 @@ export class S3ObjectStorageClient implements ObjectStorageClientPort {
     return this.presigner.signGet(
       new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
       ttlSeconds,
+    );
+  }
+
+  /** 将服务端字节以不可覆盖方式写入固定私有 bucket；不把 PUT 响应当作完整性证据。 */
+  async write(
+    input: NormalizedObjectStorageUploadRequest,
+    bytes: Uint8Array,
+  ): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: input.objectKey,
+        Body: bytes,
+        ContentType: input.mediaType,
+        ContentLength: input.byteLength,
+        IfNoneMatch: "*",
+        Metadata: { "dnf-sha256": input.sha256 },
+      }),
     );
   }
 
@@ -186,6 +207,8 @@ class AwsS3CommandClient implements S3StorageCommandClient {
 
   /** @returns AWS SDK GET 响应。 */
   send(command: GetObjectCommand): Promise<GetObjectCommandOutput>;
+  /** @returns AWS SDK PUT 响应。 */
+  send(command: PutObjectCommand): Promise<PutObjectCommandOutput>;
   /** @returns AWS SDK DELETE 响应。 */
   send(command: DeleteObjectCommand): Promise<DeleteObjectCommandOutput>;
   /**
@@ -193,8 +216,10 @@ class AwsS3CommandClient implements S3StorageCommandClient {
    * @returns SDK 对应响应；原始异常留在内部边界，由上层统一脱敏映射。
    */
   send(
-    command: GetObjectCommand | DeleteObjectCommand,
-  ): Promise<GetObjectCommandOutput | DeleteObjectCommandOutput> {
+    command: GetObjectCommand | PutObjectCommand | DeleteObjectCommand,
+  ): Promise<
+    GetObjectCommandOutput | PutObjectCommandOutput | DeleteObjectCommandOutput
+  > {
     return this.client.send(command);
   }
 }

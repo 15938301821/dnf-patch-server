@@ -15,9 +15,11 @@
  * Artifact 信任或部署权限，实际不变量必须保留在各 Service/Repository 的事务中。
  */
 import { Module } from "@nestjs/common";
+import { ArtifactModule } from "../artifact/artifact.module.js";
 import { AuthModule } from "../auth/auth.module.js";
 import { FactoryModule } from "../factory/factory.module.js";
 import { ProfessionModule } from "../profession/profession.module.js";
+import { OpenAiModule } from "../openai/openai.module.js";
 import { ProjectModule } from "../project/project.module.js";
 import { RunModule } from "../run/run.module.js";
 import { WorkerModule } from "../worker/worker.module.js";
@@ -25,6 +27,13 @@ import { JobController, PatchTaskController } from "./job.controller.js";
 import { JobReaperService } from "./job-reaper.service.js";
 import { JobRepository } from "./job.repository.js";
 import { JobService } from "./job.service.js";
+import { ProfessionEngineerExecutionService } from "./profession-engineer-execution.service.js";
+import { ProfessionExecutionController } from "./profession-execution.controller.js";
+import { ProfessionExecutionService } from "./profession-execution.service.js";
+import { ProfessionModelExecutionRepository } from "./profession-model-execution.repository.js";
+import { ProfessionSourceContextController } from "./profession-source-context.controller.js";
+import { ProfessionSourceContextRepository } from "./profession-source-context.repository.js";
+import { ProfessionSourceContextService } from "./profession-source-context.service.js";
 import { PatchTaskRepository } from "./patch-task.repository.js";
 import { PatchTaskService } from "./patch-task.service.js";
 import { SharedFxTaskController } from "./shared-fx-task.controller.js";
@@ -34,20 +43,33 @@ import { SharedFxStageEvidenceService } from "./shared-fx-stage-evidence.service
 
 @Module({
   imports: [
+    ArtifactModule,
     AuthModule,
     FactoryModule,
     ProfessionModule,
+    OpenAiModule,
     ProjectModule,
     RunModule,
     WorkerModule,
   ],
-  controllers: [PatchTaskController, JobController, SharedFxTaskController],
+  controllers: [
+    PatchTaskController,
+    JobController,
+    ProfessionExecutionController,
+    ProfessionSourceContextController,
+    SharedFxTaskController,
+  ],
   providers: [
     JobRepository,
     JobService,
     JobReaperService,
     PatchTaskRepository,
     PatchTaskService,
+    ProfessionEngineerExecutionService,
+    ProfessionExecutionService,
+    ProfessionModelExecutionRepository,
+    ProfessionSourceContextRepository,
+    ProfessionSourceContextService,
     SharedFxStageEvidenceRepository,
     SharedFxStageEvidenceService,
     SharedFxTaskService,

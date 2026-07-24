@@ -24,15 +24,23 @@ const user = {
   username: "studio",
   displayName: "Studio",
 };
+const sessionId = "22222222-2222-4222-8222-222222222222";
 
 describe("browser session tokens", () => {
   // 保护签发到认证上下文的主体映射，避免 displayName 被误用作用户 ID。
   it("verifies a matching token kind and returns a stable API user", () => {
-    const token = createBrowserSessionToken(secret, user, "access", 60);
+    const token = createBrowserSessionToken(
+      secret,
+      user,
+      sessionId,
+      "access",
+      60,
+    );
     const payload = verifyBrowserSessionToken(secret, token, "access");
 
     expect(payload).toBeDefined();
     if (!payload) return;
+    expect(payload.sessionId).toBe(sessionId);
     expect(payload.subject).toBe(user.id);
     const sessionUser = userFromSession(payload);
     expect(sessionUser.id).toBe(user.id);
@@ -46,8 +54,20 @@ describe("browser session tokens", () => {
   it("rejects tampered, wrong-kind, and expired tokens", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-21T00:00:00Z"));
-    const access = createBrowserSessionToken(secret, user, "access", 1);
-    const refresh = createBrowserSessionToken(secret, user, "refresh", 60);
+    const access = createBrowserSessionToken(
+      secret,
+      user,
+      sessionId,
+      "access",
+      1,
+    );
+    const refresh = createBrowserSessionToken(
+      secret,
+      user,
+      sessionId,
+      "refresh",
+      60,
+    );
 
     expect(
       verifyBrowserSessionToken(secret, `${access}x`, "access"),

@@ -1,0 +1,2 @@
+ALTER TABLE `npk_inventories` ADD `source_frame_manifest_artifact_id` varchar(64);--> statement-breakpoint
+ALTER TABLE `npk_inventories` ADD CONSTRAINT `npk_inventories_frame_manifest_artifact_run_fk` FOREIGN KEY (`run_id`,`source_frame_manifest_artifact_id`) REFERENCES `artifacts`(`run_id`,`id`) ON DELETE restrict ON UPDATE no action;

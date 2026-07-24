@@ -7,7 +7,7 @@
  * @relatedPlan N/A - 用户直接需求
  *
  * 调用关系：AppModule 导入本 Module；两个 Controller 委托 ProfessionService；Service 经 AuthModule
- * 获取稳定用户身份，使用 Project/Run/Npk/Artifact 的公开 Service 复核归属、冻结条目证据和生产 Run，
+ * 获取稳定用户身份，使用 Project/Run/Npk 的公开 Service 复核归属、冻结条目证据和生产 Run，
  * 再通过 ProfessionRepository 持久化职业领域数据。
  * 输入输出：本文件只注册依赖图，不解析职业 DTO、读取资源字节、创建 Worker 进程或返回数据库行。
  * 副作用：应用启动时注册 provider/controller；没有立即写入职业记录、Artifact、Run 或对象存储。
@@ -15,7 +15,6 @@
  * 用户所有权、Run/Project、Artifact/NPK evidence 与 Worker capability，Module 装配本身不授予这些权限。
  */
 import { Module } from "@nestjs/common";
-import { ArtifactModule } from "../artifact/artifact.module.js";
 import { AuthModule } from "../auth/auth.module.js";
 import { NpkModule } from "../npk/npk.module.js";
 import { ProjectModule } from "../project/project.module.js";
@@ -28,7 +27,7 @@ import { ProfessionRepository } from "./profession.repository.js";
 import { ProfessionService } from "./profession.service.js";
 
 @Module({
-  imports: [ArtifactModule, AuthModule, NpkModule, ProjectModule, RunModule],
+  imports: [AuthModule, NpkModule, ProjectModule, RunModule],
   controllers: [ProfessionController, ProfessionCatalogController],
   providers: [ProfessionRepository, ProfessionService],
   exports: [ProfessionService],

@@ -30,6 +30,11 @@ export class DisabledObjectStorageClient implements ObjectStorageClientPort {
     return Promise.reject(disabledError());
   }
 
+  /** @returns 始终以 `OBJECT_STORAGE_DISABLED` 拒绝，不写入对象。 */
+  write(): Promise<void> {
+    return Promise.reject(disabledError());
+  }
+
   /** @returns 始终以 `OBJECT_STORAGE_DISABLED` 拒绝，不读取对象流。 */
   read(): Promise<ObjectStorageReadResult> {
     return Promise.reject(disabledError());

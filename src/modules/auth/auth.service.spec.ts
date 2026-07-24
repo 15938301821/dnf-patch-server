@@ -8,6 +8,10 @@
 import { UnauthorizedException } from "@nestjs/common";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AuthService } from "./auth.service.js";
+import type {
+  CreateAuthSessionInput,
+  RotateAuthSessionInput,
+} from "./auth-session.repository.js";
 import type { AuthUserRecord } from "./auth.repository.js";
 import { hashPassword } from "./password.js";
 
@@ -17,6 +21,7 @@ const userId = "11111111-1111-4111-8111-111111111111";
 
 describe("AuthService browser sessions", () => {
   let records: AuthUserRecord[];
+  let sessionState: SessionState;
   let service: AuthService;
 
   beforeEach(async () => {
@@ -28,7 +33,12 @@ describe("AuthService browser sessions", () => {
         password: await hashPassword("correct-password"),
       },
     ];
-    service = new AuthService(configService(), repository(records));
+    sessionState = {};
+    service = new AuthService(
+      configService(),
+      repository(records),
+      sessionRepository(sessionState),
+    );
   });
 
   it("verifies the persisted password before issuing a stable user session", async () => {
@@ -49,7 +59,7 @@ describe("AuthService browser sessions", () => {
     });
   });
 
-  it("rotates a valid refresh token and rejects deleted users", async () => {
+  it("rotates a valid refresh token once and rejects replay", async () => {
     const first = await service.login({
       username: "studio",
       password: "correct-password",
@@ -58,6 +68,9 @@ describe("AuthService browser sessions", () => {
 
     expect(refreshed.session.accessToken).toMatch(/^session\./u);
     expect(refreshed.refreshToken).not.toBe(first.refreshToken);
+    await expect(service.refresh(first.refreshToken)).rejects.toMatchObject({
+      response: { code: "REFRESH_TOKEN_INVALID" },
+    });
 
     records.splice(0, records.length);
     await expect(service.refresh(refreshed.refreshToken)).rejects.toMatchObject(
@@ -65,6 +78,25 @@ describe("AuthService browser sessions", () => {
         response: { code: "REFRESH_TOKEN_INVALID" },
       },
     );
+  });
+
+  it("revokes both access and refresh tokens on logout", async () => {
+    const issued = await service.login({
+      username: "studio",
+      password: "correct-password",
+    });
+    await expect(
+      service.isBrowserAccessTokenActive(issued.session.accessToken),
+    ).resolves.toBe(true);
+
+    await service.logout(`Bearer ${issued.session.accessToken}`);
+
+    await expect(
+      service.isBrowserAccessTokenActive(issued.session.accessToken),
+    ).resolves.toBe(false);
+    await expect(service.refresh(issued.refreshToken)).rejects.toMatchObject({
+      response: { code: "REFRESH_TOKEN_INVALID" },
+    });
   });
 
   it("uses the deployment registration token only to create a user", async () => {
@@ -136,4 +168,55 @@ function repository(
       return Promise.resolve(record);
     },
   } as ConstructorParameters<typeof AuthService>[1];
+}
+
+interface SessionState {
+  sessionId?: string;
+  userId?: string;
+  refreshTokenSha256?: string;
+  active?: boolean;
+}
+
+/** 内存替代会话表及行锁语义；不证明真实 MySQL transaction 或并发行为。 */
+function sessionRepository(
+  state: SessionState,
+): ConstructorParameters<typeof AuthService>[2] {
+  return {
+    replace(input: CreateAuthSessionInput) {
+      Object.assign(state, {
+        sessionId: input.sessionId,
+        userId: input.userId,
+        refreshTokenSha256: input.refreshTokenSha256,
+        active: true,
+      });
+      return Promise.resolve();
+    },
+    rotate(input: RotateAuthSessionInput) {
+      if (
+        state.active !== true ||
+        state.sessionId !== input.sessionId ||
+        state.userId !== input.userId ||
+        state.refreshTokenSha256 !== input.currentRefreshTokenSha256
+      ) {
+        return Promise.resolve(false);
+      }
+      state.refreshTokenSha256 = input.refreshTokenSha256;
+      return Promise.resolve(true);
+    },
+    isActive(sessionId: string, userId: string) {
+      return Promise.resolve(
+        state.active === true &&
+          state.sessionId === sessionId &&
+          state.userId === userId,
+      );
+    },
+    revoke(sessionId: string, userId: string) {
+      const matched =
+        state.active === true &&
+        state.sessionId === sessionId &&
+        state.userId === userId;
+      if (matched) state.active = false;
+      return Promise.resolve(matched);
+    },
+  } as ConstructorParameters<typeof AuthService>[2];
 }

@@ -28,6 +28,7 @@ import {
 import {
   artifacts,
   imageAttempts,
+  jobAttempts,
   jobs,
   modelCalls,
   npkInventories,
@@ -36,7 +37,9 @@ import {
   projects,
   runs,
   users,
+  workers,
 } from "./schema.js";
+import { artifactUploadSessions } from "./artifact-schema.js";
 
 const id = (name: string) => varchar(name, { length: 64 });
 const sha256 = (name: string) => varchar(name, { length: 64 });
@@ -142,6 +145,11 @@ export const professionSkills = mysqlTable(
     uniqueIndex("profession_skills_profession_id_uq").on(
       table.professionId,
       table.id,
+    ),
+    uniqueIndex("profession_skills_source_inventory_uq").on(
+      table.professionId,
+      table.id,
+      table.sourceInventoryId,
     ),
     check(
       "profession_skills_prompt_status_ck",
@@ -283,6 +291,12 @@ export const styleSkillProductions = mysqlTable(
       .notNull()
       .references(() => runs.id, { onDelete: "restrict" }),
     jobId: id("job_id"),
+    /** 终态接收方必须绑定当前 JobAttempt；派发前 planned/blocked 记录保持为空。 */
+    workerId: id("worker_id").references(() => workers.id, {
+      onDelete: "restrict",
+    }),
+    leaseId: id("lease_id"),
+    attempt: int("attempt", { unsigned: true }),
     /** 提供只读源帧 manifest 的 producing Run，与当前生产 Run 分离且必须有来源证据。 */
     sourceRunId: id("source_run_id")
       .notNull()
@@ -296,9 +310,13 @@ export const styleSkillProductions = mysqlTable(
     /** Worker 已登记的固定工具 profile；不能来自任意可执行路径。 */
     asepriteProfileId: varchar("aseprite_profile_id", { length: 128 }),
     asepriteBinarySha256: sha256("aseprite_binary_sha256"),
+    asepriteAdapterSha256: sha256("aseprite_adapter_sha256"),
     asepriteArtifactId: id("aseprite_artifact_id"),
+    asepriteUploadId: id("aseprite_upload_id"),
     validationArtifactId: id("validation_artifact_id"),
+    validationUploadId: id("validation_upload_id"),
     status: varchar("status", { length: 32 }).notNull().default("planned"),
+    errorCode: varchar("error_code", { length: 80 }),
     createdAt: utc("created_at").notNull(),
     updatedAt: utc("updated_at").notNull(),
     finishedAt: utc("finished_at"),
@@ -320,7 +338,11 @@ export const styleSkillProductions = mysqlTable(
     ),
     check(
       "style_skill_productions_passed_evidence_ck",
-      sql`${table.status} <> 'passed' or (${table.modelCallId} is not null and ${table.imageAttemptId} is not null and ${table.asepriteProfileId} is not null and ${table.asepriteBinarySha256} is not null and ${table.asepriteArtifactId} is not null and ${table.validationArtifactId} is not null)`,
+      sql`${table.status} <> 'passed' or (${table.jobId} is not null and ${table.workerId} is not null and ${table.leaseId} is not null and ${table.attempt} is not null and ${table.modelCallId} is not null and ${table.imageAttemptId} is not null and ${table.asepriteProfileId} is not null and ${table.asepriteBinarySha256} is not null and ${table.asepriteAdapterSha256} is not null and ${table.asepriteArtifactId} is not null and ${table.asepriteUploadId} is not null and ${table.validationArtifactId} is not null and ${table.validationUploadId} is not null and ${table.errorCode} is null)`,
+    ),
+    check(
+      "style_skill_productions_error_evidence_ck",
+      sql`${table.status} not in ('failed', 'blocked') or ((${table.jobId} is null and ${table.workerId} is null and ${table.leaseId} is null and ${table.attempt} is null and ${table.errorCode} is null) or (${table.jobId} is not null and ${table.workerId} is not null and ${table.leaseId} is not null and ${table.attempt} is not null and ${table.errorCode} is not null))`,
     ),
     foreignKey({
       columns: [table.professionId, table.styleId],
@@ -344,6 +366,16 @@ export const styleSkillProductions = mysqlTable(
       columns: [table.runId, table.jobId],
       foreignColumns: [jobs.runId, jobs.id],
       name: "style_skill_productions_job_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.jobId, table.attempt, table.workerId, table.leaseId],
+      foreignColumns: [
+        jobAttempts.jobId,
+        jobAttempts.attempt,
+        jobAttempts.workerId,
+        jobAttempts.leaseId,
+      ],
+      name: "style_skill_productions_attempt_lease_fk",
     }).onDelete("restrict"),
     foreignKey({
       columns: [table.runId, table.modelCallId],
@@ -370,51 +402,47 @@ export const styleSkillProductions = mysqlTable(
       foreignColumns: [artifacts.runId, artifacts.id],
       name: "style_skill_productions_validation_artifact_run_fk",
     }).onDelete("restrict"),
-  ],
-);
-
-/**
- * 风格 Run 的候选包聚合状态；生产方是打包 Job 完成流程，消费方是审核与下载授权。
- * `passed` 必须同时具备同 Run package Artifact、manifest SHA-256 和 finishedAt；它只证明候选对象
- * 与清单已记录，不表示部署获准、部署已执行或真实客户端验证通过。
- */
-export const stylePackages = mysqlTable(
-  "style_packages",
-  {
-    id: id("id").primaryKey(),
-    professionId: id("profession_id").notNull(),
-    styleId: id("style_id").notNull(),
-    runId: id("run_id")
-      .notNull()
-      .references(() => runs.id, { onDelete: "restrict" }),
-    /** 同一 runId 下的候选包 Artifact，只有 passed 时要求非空。 */
-    packageArtifactId: id("package_artifact_id"),
-    manifestSha256: sha256("manifest_sha256"),
-    status: varchar("status", { length: 32 }).notNull().default("queued"),
-    createdAt: utc("created_at").notNull(),
-    updatedAt: utc("updated_at").notNull(),
-    finishedAt: utc("finished_at"),
-  },
-  (table) => [
-    index("style_packages_style_idx").on(table.styleId),
-    uniqueIndex("style_packages_run_uq").on(table.runId),
-    check(
-      "style_packages_status_ck",
-      sql`${table.status} in ('queued', 'building', 'passed', 'failed', 'blocked')`,
-    ),
-    check(
-      "style_packages_passed_evidence_ck",
-      sql`${table.status} <> 'passed' or (${table.packageArtifactId} is not null and ${table.manifestSha256} is not null and ${table.finishedAt} is not null)`,
-    ),
     foreignKey({
-      columns: [table.professionId, table.styleId],
-      foreignColumns: [professionStyles.professionId, professionStyles.id],
-      name: "style_packages_style_profession_fk",
+      columns: [
+        table.asepriteUploadId,
+        table.runId,
+        table.jobId,
+        table.workerId,
+        table.leaseId,
+        table.attempt,
+        table.asepriteArtifactId,
+      ],
+      foreignColumns: [
+        artifactUploadSessions.id,
+        artifactUploadSessions.runId,
+        artifactUploadSessions.jobId,
+        artifactUploadSessions.workerId,
+        artifactUploadSessions.leaseId,
+        artifactUploadSessions.attempt,
+        artifactUploadSessions.artifactId,
+      ],
+      name: "style_skill_productions_aseprite_upload_fk",
     }).onDelete("restrict"),
     foreignKey({
-      columns: [table.runId, table.packageArtifactId],
-      foreignColumns: [artifacts.runId, artifacts.id],
-      name: "style_packages_artifact_run_fk",
+      columns: [
+        table.validationUploadId,
+        table.runId,
+        table.jobId,
+        table.workerId,
+        table.leaseId,
+        table.attempt,
+        table.validationArtifactId,
+      ],
+      foreignColumns: [
+        artifactUploadSessions.id,
+        artifactUploadSessions.runId,
+        artifactUploadSessions.jobId,
+        artifactUploadSessions.workerId,
+        artifactUploadSessions.leaseId,
+        artifactUploadSessions.attempt,
+        artifactUploadSessions.artifactId,
+      ],
+      name: "style_skill_productions_validation_upload_fk",
     }).onDelete("restrict"),
   ],
 );

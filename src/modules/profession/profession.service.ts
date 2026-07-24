@@ -13,7 +13,6 @@ import {
 import { randomUUID } from "node:crypto";
 import { isMysqlDuplicateEntry } from "../../common/db/mysql-errors.js";
 import { canonicalName } from "../../common/utils/canonical.js";
-import { ArtifactService } from "../artifact/artifact.service.js";
 import { NpkService } from "../npk/npk.service.js";
 import { ProjectService } from "../project/project.service.js";
 import { RunService } from "../run/run.service.js";
@@ -41,7 +40,6 @@ export class ProfessionService {
     private readonly projects: ProjectService,
     private readonly runs: RunService,
     private readonly inventories: NpkService,
-    private readonly artifacts: ArtifactService,
   ) {}
 
   list(ownerUserId: string): Promise<ProfessionSummary[]> {
@@ -287,29 +285,51 @@ export class ProfessionService {
     }
     const verified: VerifiedProfessionSkillRecord[] = [];
     for (const skill of input.skills) {
-      const entry = await this.inventories.getEntryEvidence(
-        skill.sourceInventoryId,
-        skill.sourceInventoryEntryId,
-      );
+      const inventory = await this.inventories.getById(skill.sourceInventoryId);
       if (
-        entry.projectId !== input.workflowProjectId ||
-        entry.runId !== input.sourceRunId ||
-        entry.metadataSha256.toUpperCase() !==
-          skill.sourceMetadataSha256.toUpperCase()
+        inventory.projectId !== input.workflowProjectId ||
+        inventory.runId !== input.sourceRunId ||
+        inventory.entryCount !== skill.sourceEntries.length
       ) {
         throw new ConflictException({
-          code: "SKILL_RESOURCE_EVIDENCE_MISMATCH",
-          message: "技能资源证据与目标项目、Run 或元数据哈希不一致。",
+          code: "SKILL_INVENTORY_SCOPE_MISMATCH",
+          message: "技能源必须精确覆盖该 Run 冻结 Inventory 的全部条目。",
         });
       }
-      const artifactRunId = await this.artifacts.findRunId(
-        skill.sourceFrameManifestArtifactId,
-      );
-      if (artifactRunId !== input.sourceRunId) {
+      if (
+        inventory.sourceFrameManifestArtifactId !==
+        skill.sourceFrameManifestArtifactId
+      ) {
         throw new ConflictException({
-          code: "SKILL_FRAME_MANIFEST_RUN_MISMATCH",
-          message: "技能源帧清单不存在或不属于目录 Run。",
+          code: "SKILL_FRAME_MANIFEST_EVIDENCE_MISMATCH",
+          message: "技能源帧清单不是该 Inventory 冻结的逐帧证据。",
         });
+      }
+      for (const sourceEntry of skill.sourceEntries) {
+        const entry = await this.inventories.getEntryEvidence(
+          skill.sourceInventoryId,
+          sourceEntry.sourceInventoryEntryId,
+        );
+        if (
+          entry.projectId !== input.workflowProjectId ||
+          entry.runId !== input.sourceRunId ||
+          entry.metadataSha256.toUpperCase() !==
+            sourceEntry.sourceMetadataSha256.toUpperCase()
+        ) {
+          throw new ConflictException({
+            code: "SKILL_RESOURCE_EVIDENCE_MISMATCH",
+            message: "技能资源证据与目标项目、Run 或元数据哈希不一致。",
+          });
+        }
+        if (
+          entry.sourceFrameManifestArtifactId !==
+          skill.sourceFrameManifestArtifactId
+        ) {
+          throw new ConflictException({
+            code: "SKILL_FRAME_MANIFEST_EVIDENCE_MISMATCH",
+            message: "技能源帧清单不是该 Inventory 冻结的逐帧证据。",
+          });
+        }
       }
       verified.push({ ...skill, sourceRunId: input.sourceRunId });
     }

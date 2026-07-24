@@ -21,17 +21,23 @@ const workerToken = "w".repeat(32);
 const sessionSecret = "s".repeat(32);
 
 describe("ApiAuthGuard browser compatibility", () => {
-  const guard = new ApiAuthGuard(configService());
+  const guard = new ApiAuthGuard(configService(), authService());
 
   // 登录、注册和刷新必须能在尚无 access token 时进入各自 Controller 门禁。
-  it("allows public login, registration, and refresh endpoints", () => {
-    expect(guard.canActivate(context("POST", "/v1/auth/login"))).toBe(true);
-    expect(guard.canActivate(context("POST", "/v1/auth/register"))).toBe(true);
-    expect(guard.canActivate(context("POST", "/v1/auth/refresh"))).toBe(true);
+  it("allows public login, registration, and refresh endpoints", async () => {
+    await expect(
+      guard.canActivate(context("POST", "/v1/auth/login")),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(context("POST", "/v1/auth/register")),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(context("POST", "/v1/auth/refresh")),
+    ).resolves.toBe(true);
   });
 
   // 浏览器 token 泄露不能被用于领取或完成内部 Worker Job。
-  it("allows browser access tokens without accepting them for internal routes", () => {
+  it("allows active browser access tokens without accepting them for internal routes", async () => {
     const browserToken = createBrowserSessionToken(
       sessionSecret,
       {
@@ -39,51 +45,59 @@ describe("ApiAuthGuard browser compatibility", () => {
         username: "studio",
         displayName: "Studio",
       },
+      "22222222-2222-4222-8222-222222222222",
       "access",
       60,
     );
 
-    expect(
+    await expect(
       guard.canActivate(
         context("GET", "/v1/auth/me", {
           authorization: `Bearer ${browserToken}`,
         }),
       ),
-    ).toBe(true);
-    expect(() =>
+    ).resolves.toBe(true);
+    await expect(
       guard.canActivate(
         context("POST", "/v1/internal/jobs/claim", {
           authorization: `Bearer ${browserToken}`,
         }),
       ),
-    ).toThrow(UnauthorizedException);
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   // 保留现有 Client Bearer 与 Worker 专用 header 契约，同时确认二者使用不同入口。
-  it("still accepts service and worker shared tokens through their original headers", () => {
-    expect(
+  it("still accepts service and worker shared tokens through their original headers", async () => {
+    await expect(
       guard.canActivate(
         context("GET", "/v1/professions", {
           authorization: `Bearer ${clientToken}`,
         }),
       ),
-    ).toBe(true);
-    expect(
+    ).resolves.toBe(true);
+    await expect(
       guard.canActivate(
         context("POST", "/v1/internal/jobs/claim", {
           "x-worker-token": workerToken,
         }),
       ),
-    ).toBe(true);
+    ).resolves.toBe(true);
   });
 
   // 受保护业务路由没有任何凭据时必须在 Controller 前停止。
-  it("rejects anonymous protected routes", () => {
-    expect(() => guard.canActivate(context("GET", "/v1/professions"))).toThrow(
-      UnauthorizedException,
-    );
+  it("rejects anonymous protected routes", async () => {
+    await expect(
+      guard.canActivate(context("GET", "/v1/professions")),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });
+
+/** @returns 只模拟数据库会话活动检查；不证明真实会话撤销或 MySQL 状态。 */
+function authService(): ConstructorParameters<typeof ApiAuthGuard>[1] {
+  return {
+    isBrowserAccessTokenActive: () => Promise.resolve(true),
+  };
+}
 
 /** @returns 只替代配置读取的 stub；不证明环境解析或秘密管理正确。 */
 function configService(): ConstructorParameters<typeof ApiAuthGuard>[0] {

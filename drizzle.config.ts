@@ -10,7 +10,11 @@ export default defineConfig({
   schema: [
     "./dist/common/db/schema.js",
     "./dist/common/db/artifact-schema.js",
+    "./dist/common/db/browser-session-schema.js",
     "./dist/common/db/studio-schema.js",
+    "./dist/common/db/profession-model-execution-schema.js",
+    "./dist/common/db/profession-source-schema.js",
+    "./dist/common/db/style-package-schema.js",
   ],
   out: "./drizzle",
   dbCredentials: { url: databaseUrl },

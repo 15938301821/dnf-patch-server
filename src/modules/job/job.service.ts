@@ -107,6 +107,12 @@ export class JobService {
         message: "共享特效任务已有不匹配的人工审核记录。",
       });
     }
+    if (result.status === "profession-evidence-incomplete") {
+      throw new ConflictException({
+        code: "PROFESSION_EVIDENCE_INCOMPLETE",
+        message: "职业任务尚未形成全部冻结技能的完整生产证据。",
+      });
+    }
     if (result.status !== "accepted") {
       throw new ConflictException({
         code: "JOB_COMPLETION_CONFLICT",

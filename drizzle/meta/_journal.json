@@ -99,6 +99,48 @@
       "when": 1784705142866,
       "tag": "0013_cute_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1784864202246,
+      "tag": "0014_white_gwen_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1784867473644,
+      "tag": "0015_colossal_sue_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1784872516914,
+      "tag": "0016_normal_rattler",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1784881679297,
+      "tag": "0017_cold_ultimatum",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1784891310116,
+      "tag": "0018_cheerful_morg",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1784899112216,
+      "tag": "0019_flawless_skrulls",
+      "breakpoints": true
     }
   ]
 }

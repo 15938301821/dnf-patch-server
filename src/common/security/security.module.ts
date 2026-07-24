@@ -16,10 +16,12 @@ import { APP_GUARD } from "@nestjs/core";
 import { ApiAuthGuard } from "./api-auth.guard.js";
 import { ClientTokenGuard } from "./client-token.guard.js";
 import { WorkerTokenGuard } from "./worker-token.guard.js";
+import { AuthModule } from "../../modules/auth/auth.module.js";
 
 /** 全局认证依赖装配单元；自身不承载认证算法或请求状态。 */
 @Global()
 @Module({
+  imports: [AuthModule],
   providers: [
     ClientTokenGuard,
     WorkerTokenGuard,

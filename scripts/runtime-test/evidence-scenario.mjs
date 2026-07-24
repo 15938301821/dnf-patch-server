@@ -1,37 +1,34 @@
 /**
- * @fileoverview 通过 REST 验证 Artifact/NPK producing Run 归属，不读取或保存官方资源正文。
+ * @fileoverview 通过数据库前置 Artifact 和真实 REST 验证 NPK producing Run 归属，不读取或保存资源正文。
  * @module runtime-test
  * @author AI生成
  * @created 2026-07-20
  * @relatedPlan /memories/session/plan.md Phase 3 evidence ownership
  */
+import { randomUUID } from "node:crypto";
 import { requestJson } from "./api-support.mjs";
 import { assert } from "./process.mjs";
 
-/** 创建同 Run 的 Artifact 与 NPK inventory，并拒绝跨 Run Artifact 引用。 */
+/** 预置同 Run Artifact 元数据，再经只读 Artifact 与 NPK API 验证归属并拒绝跨 Run 引用。 */
 export async function exerciseEvidenceApi({
   baseUrl,
   clientToken,
+  database,
   projectId,
   runId,
   otherRunId,
 }) {
-  const artifact = await requestJson(
+  const artifactId = await insertArtifactFixture(database, runId);
+  const artifacts = await requestJson(
     baseUrl,
     `/runs/${runId}/artifacts`,
-    {
-      method: "POST",
-      clientToken,
-      body: {
-        logicalName: "Runtime inventory evidence",
-        storageKey: "runtime/inventories/runtime-inventory.json",
-        mediaType: "application/json",
-        byteLength: 128,
-        sha256: "B".repeat(64),
-        provenance: { source: "runtime-test" },
-      },
-    },
-    201,
+    { clientToken },
+    200,
+  );
+  const artifact = artifacts.find((candidate) => candidate.id === artifactId);
+  assert(
+    artifact?.runId === runId && artifact.sha256 === "B".repeat(64),
+    "Run Artifact listing did not expose the bounded metadata fixture.",
   );
   const inventoryBody = {
     runId,
@@ -84,4 +81,23 @@ export async function exerciseEvidenceApi({
     inventoryId: inventory.id,
     httpOwnershipEnforced: true,
   };
+}
+
+/**
+ * 在隔离数据库中建立已知 Run 的 Artifact 元数据前置条件。
+ * 该 fixture 不代表对象已上传或由对象存储复核，只为 NPK 归属 API 提供受外键约束的引用对象。
+ */
+async function insertArtifactFixture(database, runId) {
+  const artifactId = randomUUID();
+  await database.query(
+    "INSERT INTO artifacts (id, run_id, logical_name, storage_key, media_type, byte_length, sha256, provenance, created_at) VALUES (?, ?, 'Runtime inventory evidence', ?, 'application/json', 128, ?, ?, CURRENT_TIMESTAMP(3))",
+    [
+      artifactId,
+      runId,
+      `artifacts/${artifactId}`,
+      "B".repeat(64),
+      JSON.stringify({ source: "runtime-test-fixture" }),
+    ],
+  );
+  return artifactId;
 }

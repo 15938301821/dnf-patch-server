@@ -18,11 +18,23 @@ import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
 import { createPool, type Pool } from "mysql2/promise";
 import type { Environment } from "../../config/environment.js";
 import * as artifactSchema from "./artifact-schema.js";
+import * as browserSessionSchema from "./browser-session-schema.js";
 import * as controlSchema from "./schema.js";
+import * as professionModelExecutionSchema from "./profession-model-execution-schema.js";
+import * as professionSourceSchema from "./profession-source-schema.js";
+import * as stylePackageSchema from "./style-package-schema.js";
 import * as studioSchema from "./studio-schema.js";
 
 /** Drizzle 的统一关系 schema，只合并表定义，不在此处创建或迁移数据库结构。 */
-const schema = { ...controlSchema, ...artifactSchema, ...studioSchema };
+const schema = {
+  ...controlSchema,
+  ...artifactSchema,
+  ...browserSessionSchema,
+  ...studioSchema,
+  ...professionModelExecutionSchema,
+  ...professionSourceSchema,
+  ...stylePackageSchema,
+};
 
 /** 服务进程共享的数据库基础设施 provider；不封装任何领域 SQL。 */
 @Injectable()

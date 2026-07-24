@@ -18,7 +18,7 @@
  * 不从 Artifact 内容重新证明条目、来源哈希或资源映射。
  */
 import { Injectable } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { hasExactJobLease } from "../../common/contracts/index.js";
 import { artifactUploadSessions } from "../../common/db/artifact-schema.js";
@@ -66,6 +66,8 @@ export interface NpkRepositoryPort {
     projectId: string,
     runId: string,
   ): Promise<InventoryView | undefined>;
+  /** 按 ID 查询冻结 Inventory 摘要；归属由调用方继续比较。 */
+  findById(inventoryId: string): Promise<InventoryView | undefined>;
   /** 查询指定 Inventory 下条目的最小归属/摘要证据，不返回资源正文。 */
   findEntryEvidence(
     inventoryId: string,
@@ -151,9 +153,12 @@ export class NpkRepository implements NpkRepositoryPort {
         .for("update");
       if (!run) throw new Error("INVENTORY_RUN_INVARIANT_FAILED");
 
-      const [upload] = await transaction
+      const uploads = await transaction
         .select({
           artifactId: artifacts.id,
+          logicalName: artifacts.logicalName,
+          mediaType: artifacts.mediaType,
+          provenance: artifacts.provenance,
           finalizedAt: artifactUploadSessions.finalizedAt,
         })
         .from(artifactUploadSessions)
@@ -171,14 +176,41 @@ export class NpkRepository implements NpkRepositoryPort {
             eq(artifactUploadSessions.workerId, input.workerId),
             eq(artifactUploadSessions.leaseId, input.leaseId),
             eq(artifactUploadSessions.attempt, input.attempt),
-            eq(artifactUploadSessions.artifactId, input.inventoryArtifactId),
+            inArray(artifactUploadSessions.artifactId, [
+              input.inventoryArtifactId,
+              input.sourceFrameManifestArtifactId,
+            ]),
             eq(artifactUploadSessions.status, "finalized"),
           ),
         )
-        .limit(1)
         .for("update");
-      if (!upload || upload.finalizedAt === null) {
+      if (
+        uploads.length !== 2 ||
+        uploads.some((upload) => upload.finalizedAt === null)
+      ) {
         return { status: "artifact-not-finalized" };
+      }
+      const inventoryArtifact = uploads.find(
+        (upload) => upload.artifactId === input.inventoryArtifactId,
+      );
+      const frameManifestArtifact = uploads.find(
+        (upload) => upload.artifactId === input.sourceFrameManifestArtifactId,
+      );
+      if (
+        !hasExpectedArtifactEvidence(
+          inventoryArtifact,
+          "inventory-evidence.json",
+          "npk-inventory",
+          input.sourceSha256,
+        ) ||
+        !hasExpectedArtifactEvidence(
+          frameManifestArtifact,
+          "source-frame-manifest.json",
+          "source-frame-manifest",
+          input.sourceSha256,
+        )
+      ) {
+        return { status: "artifact-evidence-mismatch" };
       }
 
       const [existing] = await transaction
@@ -193,6 +225,12 @@ export class NpkRepository implements NpkRepositoryPort {
         .limit(1)
         .for("update");
       if (existing) {
+        if (
+          existing.sourceFrameManifestArtifactId !==
+          input.sourceFrameManifestArtifactId
+        ) {
+          return { status: "artifact-evidence-mismatch" };
+        }
         return { status: "accepted", inventory: toInventoryView(existing) };
       }
 
@@ -242,12 +280,7 @@ export class NpkRepository implements NpkRepositoryPort {
     return row ? toInventoryView(row) : undefined;
   }
 
-  /**
-   * 查询指定 Project 与 producing Run 的最近 frozen Inventory。
-   * @param projectId Project 归属边界。
-   * @param runId producing Run 标识。
-   * @returns 匹配归属且 frozen 的 View，否则 undefined。
-   */
+  /** 查询指定 Project 与 producing Run 的最近 frozen Inventory。 */
   async findByRun(
     projectId: string,
     runId: string,
@@ -263,6 +296,21 @@ export class NpkRepository implements NpkRepositoryPort {
         ),
       )
       .orderBy(desc(npkInventories.createdAt))
+      .limit(1);
+    return row ? toInventoryView(row) : undefined;
+  }
+
+  /** 按服务器 Inventory ID 查询冻结摘要，不返回条目路径、正文或对象定位。 */
+  async findById(inventoryId: string): Promise<InventoryView | undefined> {
+    const [row] = await this.connection.database
+      .select()
+      .from(npkInventories)
+      .where(
+        and(
+          eq(npkInventories.id, inventoryId),
+          eq(npkInventories.status, "frozen"),
+        ),
+      )
       .limit(1);
     return row ? toInventoryView(row) : undefined;
   }
@@ -284,6 +332,8 @@ export class NpkRepository implements NpkRepositoryPort {
         projectId: npkInventories.projectId,
         runId: npkInventories.runId,
         metadataSha256: npkInventoryEntries.metadataSha256,
+        sourceFrameManifestArtifactId:
+          npkInventories.sourceFrameManifestArtifactId,
       })
       .from(npkInventoryEntries)
       .innerJoin(
@@ -297,7 +347,14 @@ export class NpkRepository implements NpkRepositoryPort {
         ),
       )
       .limit(1);
-    return row;
+    if (!row) return undefined;
+    const { sourceFrameManifestArtifactId, ...evidence } = row;
+    return {
+      ...evidence,
+      ...(sourceFrameManifestArtifactId
+        ? { sourceFrameManifestArtifactId }
+        : {}),
+    };
   }
 }
 
@@ -338,6 +395,9 @@ async function insertInventory(
     ...(input.inventoryArtifactId
       ? { inventoryArtifactId: input.inventoryArtifactId }
       : {}),
+    ...(hasFrameManifest(input)
+      ? { sourceFrameManifestArtifactId: input.sourceFrameManifestArtifactId }
+      : {}),
   });
   await transaction.insert(npkInventoryEntries).values(
     input.entries.map((entry) => ({
@@ -359,6 +419,9 @@ async function insertInventory(
     entryCount: input.entries.length,
     status: "frozen",
     inventoryArtifactId: input.inventoryArtifactId ?? null,
+    sourceFrameManifestArtifactId: hasFrameManifest(input)
+      ? input.sourceFrameManifestArtifactId
+      : null,
     createdAt,
   });
 }
@@ -383,9 +446,43 @@ function toInventoryView(
     ...(row.inventoryArtifactId
       ? { inventoryArtifactId: row.inventoryArtifactId }
       : {}),
+    ...(row.sourceFrameManifestArtifactId
+      ? { sourceFrameManifestArtifactId: row.sourceFrameManifestArtifactId }
+      : {}),
     entryCount: row.entryCount,
     createdAtUtc: row.createdAt.toISOString(),
   };
+}
+
+/** 核对 finalized Artifact 的角色、源身份与媒体类型，防止任意同 Run 对象冒充 Inventory 证据。 */
+function hasExpectedArtifactEvidence(
+  artifact:
+    | {
+        logicalName: string;
+        mediaType: string;
+        provenance: Record<string, unknown>;
+      }
+    | undefined,
+  logicalName: string,
+  kind: string,
+  sourceSha256: string,
+): boolean {
+  return (
+    artifact?.logicalName === logicalName &&
+    artifact.mediaType === "application/json" &&
+    artifact.provenance.schemaVersion === 1 &&
+    artifact.provenance.kind === kind &&
+    typeof artifact.provenance.sourceSha256 === "string" &&
+    artifact.provenance.sourceSha256.toUpperCase() ===
+      sourceSha256.toUpperCase()
+  );
+}
+
+/** 区分普通创建 DTO 与强制携带源帧清单的 Worker DTO。 */
+function hasFrameManifest(
+  input: CreateInventoryInput | CreateWorkerInventoryInput,
+): input is CreateWorkerInventoryInput {
+  return "sourceFrameManifestArtifactId" in input;
 }
 
 /**

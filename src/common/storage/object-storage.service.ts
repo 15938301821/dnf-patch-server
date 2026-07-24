@@ -28,7 +28,10 @@ import {
   type ObjectStoragePort,
   type ObjectStorageUploadAuthorization,
   type ObjectStorageUploadRequest,
+  type ObjectStorageVerifiedBytes,
+  type ObjectStorageVerifiedReadRequest,
   type ObjectStorageVerificationRequest,
+  type ObjectStorageWriteRequest,
 } from "./object-storage.client.js";
 import {
   OBJECT_STORAGE_CLIENT,
@@ -49,6 +52,18 @@ const verificationRequestSchema = objectRequestSchema.extend({
   expectedByteLength: z.number().int().min(0),
   expectedSha256: objectStorageSha256Schema,
 });
+/** 小型正文读取在完整证据之外增加用途级内存上限，禁止调用方借此拉取大 Artifact。 */
+const verifiedReadRequestSchema = verificationRequestSchema
+  .extend({ maxByteLength: z.number().int().positive() })
+  .strict();
+/** 服务端写入输入必须携带真实字节和冻结摘要，拒绝任意额外 Provider 参数。 */
+const writeRequestSchema = objectRequestSchema
+  .extend({
+    mediaType: objectStorageMediaTypeSchema,
+    bytes: z.instanceof(Uint8Array),
+    sha256: objectStorageSha256Schema,
+  })
+  .strict();
 
 /** 对象存储业务端口实现，隔离领域层与 AWS SDK/MinIO 协议细节。 */
 @Injectable()
@@ -110,6 +125,64 @@ export class ObjectStorageService implements ObjectStoragePort {
       url,
       expiresAtUtc: expiresAtUtc(this.options.signedUrlTtlSeconds),
     };
+  }
+
+  /**
+   * 将服务端已生成的有界字节写入固定私有 key，并完整回读形成证据。
+   * PUT 使用不可覆盖语义；若 PUT 响应丢失或 key 已由同一恢复流程写入，会以冻结摘要回读确认，
+   * 只有完整证据一致才返回成功。
+   */
+  async write(
+    input: ObjectStorageWriteRequest,
+  ): Promise<ObjectStorageEvidence> {
+    this.assertEnabled();
+    const parsed = writeRequestSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_INVALID_INPUT",
+        "服务端对象写入声明不合法。",
+      );
+    }
+    if (parsed.data.bytes.byteLength > this.options.maxObjectBytes) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_OBJECT_TOO_LARGE",
+        "对象超过单对象容量上限。",
+      );
+    }
+    const actualSha256 = createHash("sha256")
+      .update(parsed.data.bytes)
+      .digest("hex")
+      .toUpperCase();
+    if (actualSha256 !== parsed.data.sha256) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_SHA256_MISMATCH",
+        "服务端对象字节与冻结摘要不一致。",
+      );
+    }
+    const declaration: NormalizedObjectStorageUploadRequest = {
+      objectKey: parsed.data.objectKey,
+      mediaType: parsed.data.mediaType,
+      byteLength: parsed.data.bytes.byteLength,
+      sha256: actualSha256,
+    };
+    try {
+      await this.client.write(declaration, parsed.data.bytes);
+    } catch {
+      // PUT 可能已成功但响应丢失；固定 key + 摘要回读是唯一允许的恢复判据。
+    }
+    try {
+      return await this.verify({
+        objectKey: declaration.objectKey,
+        expectedMediaType: declaration.mediaType,
+        expectedByteLength: declaration.byteLength,
+        expectedSha256: declaration.sha256,
+      });
+    } catch {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_WRITE_FAILED",
+        "对象写入后未能确认完整证据。",
+      );
+    }
   }
 
   /**
@@ -175,6 +248,85 @@ export class ObjectStorageService implements ObjectStoragePort {
       mediaType: parsed.expectedMediaType,
       byteLength,
       sha256,
+    };
+  }
+
+  /**
+   * 完整读取一个严格有界的小型对象，在返回正文前同时复核媒体类型、长度和 SHA-256。
+   * @param input 已由业务记录冻结的对象证据与当前解析器内存预算；不接受 bucket 或 URL。
+   * @returns 只有全部字节和证据一致时才返回的正文；失败时不泄露部分内容。
+   * @throws ObjectStorageError 输入、容量、媒体类型、长度、Provider 长度或摘要任一不匹配时抛出。
+   */
+  async readVerifiedBytes(
+    input: ObjectStorageVerifiedReadRequest,
+  ): Promise<ObjectStorageVerifiedBytes> {
+    // 步骤 1：用途级预算必须比全局限制更严格；声明本身超限时不发起网络读取。
+    this.assertEnabled();
+    const parsed = verifiedReadRequestSchema.safeParse(input);
+    if (
+      !parsed.success ||
+      parsed.data.maxByteLength > this.options.maxObjectBytes
+    ) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_INVALID_INPUT",
+        "对象正文读取声明不合法。",
+      );
+    }
+    if (parsed.data.expectedByteLength > parsed.data.maxByteLength) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_OBJECT_TOO_LARGE",
+        "对象超过当前解析器的正文容量上限。",
+      );
+    }
+
+    const object = await this.client.read(parsed.data.objectKey);
+    if (object.contentType !== parsed.data.expectedMediaType) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_MEDIA_TYPE_MISMATCH",
+        "对象媒体类型与声明不一致。",
+      );
+    }
+
+    // 步骤 2：在有界内存中累计完整正文；超限立即中止且不向业务层返回部分 bytes。
+    const hash = createHash("sha256");
+    const chunks: Uint8Array[] = [];
+    let byteLength = 0;
+    for await (const chunk of object.body) {
+      byteLength += chunk.byteLength;
+      if (byteLength > parsed.data.maxByteLength) {
+        throw new ObjectStorageError(
+          "OBJECT_STORAGE_OBJECT_TOO_LARGE",
+          "对象超过当前解析器的正文容量上限。",
+        );
+      }
+      chunks.push(chunk);
+      hash.update(chunk);
+    }
+    const sha256 = hash.digest("hex").toUpperCase();
+
+    // 步骤 3：Provider 元数据与冻结证据全部一致后，才拼接并返回正文。
+    if (
+      (object.contentLength !== undefined &&
+        object.contentLength !== byteLength) ||
+      byteLength !== parsed.data.expectedByteLength
+    ) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_LENGTH_MISMATCH",
+        "对象长度与声明不一致。",
+      );
+    }
+    if (sha256 !== parsed.data.expectedSha256) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_SHA256_MISMATCH",
+        "对象 SHA-256 与声明不一致。",
+      );
+    }
+    return {
+      objectKey: parsed.data.objectKey,
+      mediaType: parsed.data.expectedMediaType,
+      byteLength,
+      sha256,
+      bytes: Buffer.concat(chunks, byteLength),
     };
   }
 

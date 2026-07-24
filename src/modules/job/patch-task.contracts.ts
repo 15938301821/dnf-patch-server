@@ -17,61 +17,67 @@ export const createPatchTaskSchema = z
 
 const workerLeaseSchema = {
   workerId: z.uuid(),
-  leaseId: z.uuid().optional(),
+  leaseId: z.uuid(),
+  attempt: z.number().int().min(1).max(10),
 };
 
-export const reportPatchTaskSkillProductionSchema = z
+const workerSkillSchema = {
+  ...workerLeaseSchema,
+  skillId: z.uuid(),
+};
+
+const activeSkillProductionReportSchema = z
   .object({
-    ...workerLeaseSchema,
-    skillId: z.uuid(),
-    status: z.enum([
-      "generating",
-      "adapting",
-      "validating",
-      "passed",
-      "failed",
-      "blocked",
-    ]),
-    modelCallId: z.uuid().optional(),
-    imageAttemptId: z.uuid().optional(),
-    asepriteProfileId: z.string().trim().min(1).max(128).optional(),
-    asepriteBinarySha256: sha256Schema.optional(),
-    asepriteArtifactId: z.uuid().optional(),
-    validationArtifactId: z.uuid().optional(),
-    errorCode: z.string().trim().min(1).max(80).optional(),
+    ...workerSkillSchema,
+    status: z.enum(["generating", "adapting", "validating"]),
+  })
+  .strict();
+
+const passedSkillProductionReportSchema = z
+  .object({
+    ...workerSkillSchema,
+    status: z.literal("passed"),
+    asepriteBinarySha256: sha256Schema,
+    asepriteAdapterSha256: sha256Schema,
+    asepriteArtifactId: z.uuid(),
+    validationArtifactId: z.uuid(),
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.status === "passed") {
-      for (const key of [
-        "modelCallId",
-        "imageAttemptId",
-        "asepriteProfileId",
-        "asepriteBinarySha256",
-        "asepriteArtifactId",
-        "validationArtifactId",
-      ] as const) {
-        if (value[key] === undefined) {
-          context.addIssue({
-            code: "custom",
-            path: [key],
-            message:
-              "通过的技能生产记录必须提供完整模型、图片、Aseprite 和验证证据。",
-          });
-        }
-      }
-    }
-    if (
-      (value.status === "failed" || value.status === "blocked") &&
-      value.errorCode === undefined
-    ) {
+    if (value.asepriteArtifactId === value.validationArtifactId) {
       context.addIssue({
         code: "custom",
-        path: ["errorCode"],
-        message: "失败或阻断的技能生产记录必须提供稳定错误码。",
+        path: ["validationArtifactId"],
+        message: "Aseprite 工程与 runtime 验证必须使用不同 Artifact。",
       });
     }
   });
+
+const failedSkillProductionReportSchema = z
+  .object({
+    ...workerSkillSchema,
+    status: z.enum(["failed", "blocked"]),
+    errorCode: z
+      .string()
+      .min(1)
+      .max(80)
+      .regex(/^[A-Z][A-Z0-9_]*$/u),
+  })
+  .strict();
+
+/**
+ * Worker 回填单技能生产状态的互斥严格 DTO。
+ * 进行中状态不能夹带终态证据；通过状态只提交本机工具摘要与两个 finalized Artifact，模型调用、
+ * 图片尝试、固定 profile 和来源证据由 Server 从当前 attempt 反查；失败状态只允许稳定错误码。
+ */
+export const reportPatchTaskSkillProductionSchema = z.discriminatedUnion(
+  "status",
+  [
+    activeSkillProductionReportSchema,
+    passedSkillProductionReportSchema,
+    failedSkillProductionReportSchema,
+  ],
+);
 
 export const reportPatchTaskPackageSchema = z
   .object({
@@ -122,22 +128,16 @@ export type PatchTaskStatus =
 
 export type PatchTaskReportStatus =
   | "accepted"
-  | "protocol-upgrade-required"
   | "lease-mismatch"
   | "job-kind-mismatch"
   | "skill-production-not-found"
   | "skill-production-terminal"
+  | "skill-production-evidence-mismatch"
+  | "model-execution-evidence-mismatch"
+  | "artifact-evidence-mismatch"
   | "package-not-found"
   | "package-terminal"
-  | "package-skills-incomplete"
-  | "model-call-not-found"
-  | "model-call-run-mismatch"
-  | "model-call-not-passed"
-  | "image-attempt-not-found"
-  | "image-attempt-run-mismatch"
-  | "image-attempt-not-ready"
-  | "artifact-not-found"
-  | "artifact-run-mismatch";
+  | "package-capability-not-frozen";
 
 export interface PatchTaskView {
   id: string;
@@ -150,9 +150,9 @@ export interface PatchTaskView {
   artifactAvailable: boolean;
 }
 
+/** 浏览器可查看的最终产物摘要；不暴露内部对象 key、下载授权或正文。 */
 export interface PatchTaskArtifactView {
   artifactName: string;
-  storageKey: string;
   mediaType: string;
   byteLength: number;
   sha256: string;
@@ -164,7 +164,6 @@ export interface PlannedPatchTaskSkill {
   skillId: string;
   sourceRunId: string;
   sourceFrameManifestArtifactId: string;
-  sourceMetadataSha256: string;
   promptSha256: string;
 }
 

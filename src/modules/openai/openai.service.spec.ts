@@ -153,6 +153,26 @@ describe("OpenAiService model evidence", () => {
     expect(result.value).toEqual({ accepted: true });
   });
 
+  it("在结构化出站前执行领域门禁，拒绝时零 Provider 调用", async () => {
+    const beforeEgress = vi.fn().mockResolvedValue("rejected");
+
+    const result = await service.structured(structuredRequest(), beforeEgress);
+
+    const pending = calls.create.mock.calls[0]?.[0] as
+      | ModelCallView
+      | undefined;
+    expect(beforeEgress).toHaveBeenCalledWith(pending);
+    expect(result.value).toBeUndefined();
+    expect(result.record).toMatchObject({
+      id: pending?.id,
+      status: "failed",
+      modelEgressPerformed: false,
+      errorCode: "MODEL_EGRESS_GUARD_REJECTED",
+    });
+    expect(calls.markEgressPerformed).not.toHaveBeenCalled();
+    expect(provider.structured).not.toHaveBeenCalled();
+  });
+
   it("provider 失败时保留 performed 事实并进入 failed", async () => {
     provider.image.mockRejectedValue(new Error("provider unavailable"));
 
@@ -168,6 +188,54 @@ describe("OpenAiService model evidence", () => {
       modelEgressAuthorized: true,
       modelEgressPerformed: true,
       errorCode: "MODEL_PROVIDER_REQUEST_FAILED",
+    });
+  });
+
+  it("在图片出站前持久化执行绑定，门禁拒绝时零 Provider 调用", async () => {
+    const beforeEgress = vi.fn().mockResolvedValue("rejected");
+
+    const result = await service.image(
+      {
+        runId: crypto.randomUUID(),
+        role: "artist",
+        prompt: "bounded prompt",
+      },
+      beforeEgress,
+    );
+
+    const pending = calls.create.mock.calls[0]?.[0] as
+      | ModelCallView
+      | undefined;
+    expect(beforeEgress).toHaveBeenCalledWith(pending);
+    expect(result.record).toMatchObject({
+      id: pending?.id,
+      status: "failed",
+      modelEgressPerformed: false,
+      errorCode: "MODEL_EGRESS_GUARD_REJECTED",
+    });
+    expect(calls.markEgressPerformed).not.toHaveBeenCalled();
+    expect(provider.image).not.toHaveBeenCalled();
+  });
+
+  it("只有图片出站门禁接受后才标记 performed 并调用 Provider", async () => {
+    const beforeEgress = vi.fn().mockResolvedValue("accepted");
+    provider.image.mockResolvedValue(Buffer.from("png"));
+
+    const result = await service.image(
+      {
+        runId: crypto.randomUUID(),
+        role: "artist",
+        prompt: "bounded prompt",
+      },
+      beforeEgress,
+    );
+
+    expect(beforeEgress).toHaveBeenCalledOnce();
+    expect(calls.markEgressPerformed).toHaveBeenCalledOnce();
+    expect(provider.image).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      bytes: Buffer.from("png"),
+      record: { status: "passed", modelEgressPerformed: true },
     });
   });
 });

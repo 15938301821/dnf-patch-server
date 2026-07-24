@@ -17,10 +17,11 @@ import { Module } from "@nestjs/common";
 import { AuthController } from "./auth.controller.js";
 import { AuthService } from "./auth.service.js";
 import { AuthRepository } from "./auth.repository.js";
+import { AuthSessionRepository } from "./auth-session.repository.js";
 
 @Module({
   controllers: [AuthController],
-  providers: [AuthRepository, AuthService],
+  providers: [AuthRepository, AuthSessionRepository, AuthService],
   exports: [AuthService],
 })
 /** Auth 领域的 Nest 依赖注入边界，只向其他模块公开受控 AuthService。 */

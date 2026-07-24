@@ -1,5 +1,5 @@
 /**
- * @fileoverview 执行 Drizzle migration，并在审计字段升级前阻断无法证明事实的历史数据。
+ * @fileoverview 执行 Drizzle migration，并在审计证据升级前阻断无法证明事实的历史数据。
  * @module database
  * @author AI生成
  * @created 2026-07-20
@@ -8,8 +8,8 @@
  * 调用关系：`npm run db:migrate` 直接执行本 CLI；脚本先用单连接检查历史审计数据，再交给 Drizzle
  * migrator 读取 drizzle/。输入只有进程 DATABASE_URL 与数据库现状，无 HTTP/Worker 输入；输出是
  * migration 成功或进程错误。副作用包括读取 information_schema、执行 migration 并关闭连接池。
- * 安全边界：无法证明历史 ModelCall egress 或 NPK inventory producing Run 时必须 fail-closed，
- * 禁止猜测回填；连接 URL、SQL 驱动对象和历史内容不得进入输出。
+ * 安全边界：无法证明历史 ModelCall egress、NPK inventory producing Run 或单技能 Worker 输出归属
+ * 时必须 fail-closed，禁止猜测回填；连接 URL、SQL 驱动对象和历史内容不得进入输出。
  */
 import "reflect-metadata";
 import { drizzle } from "drizzle-orm/mysql2";
@@ -19,6 +19,7 @@ import {
   type PoolConnection,
   type RowDataPacket,
 } from "mysql2/promise";
+import { assertStyleSkillProductionEvidenceMigrationReady } from "./style-skill-production-migration-precheck.js";
 
 /** 固定 COUNT 查询的数据库行；驱动可能把数值返回为 number 或 string。 */
 interface CountRow extends RowDataPacket {
@@ -43,6 +44,7 @@ try {
   try {
     await assertNpkInventoryOwnershipMigrationReady(connection);
     await assertModelCallEgressMigrationReady(connection);
+    await assertStyleSkillProductionEvidenceMigrationReady(connection);
   } finally {
     connection.release();
   }

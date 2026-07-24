@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateStyleContentCompleteness,
+  importProfessionSkillCatalogSchema,
   saveProfessionStyleSchema,
   stylePromptPackageMaxBytes,
   type SaveProfessionStyleInput,
@@ -47,6 +48,31 @@ describe("profession style contracts", () => {
     if (!prompt) throw new Error("TEST_PROMPT_REQUIRED");
     prompt.themePrompt = "x".repeat(stylePromptPackageMaxBytes);
     expect(saveProfessionStyleSchema.safeParse(input).success).toBe(false);
+  });
+
+  it("rejects duplicate Inventory Entries in a skill source", () => {
+    const source = {
+      sourceInventoryEntryId: skillId,
+      sourceMetadataSha256: "B".repeat(64),
+    };
+    expect(
+      importProfessionSkillCatalogSchema.safeParse({
+        workflowProjectId: "22222222-2222-4222-8222-222222222222",
+        catalogSnapshotId: "33333333-3333-4333-8333-333333333333",
+        sourceRunId: "44444444-4444-4444-8444-444444444444",
+        skills: [
+          {
+            stableKey: "momentaryslash",
+            displayName: "momentaryslash",
+            sourceScope: "entire-inventory",
+            sourceInventoryId: "55555555-5555-4555-8555-555555555555",
+            sourceEntries: [source, source],
+            sourceFrameManifestArtifactId:
+              "66666666-6666-4666-8666-666666666666",
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
 });
 

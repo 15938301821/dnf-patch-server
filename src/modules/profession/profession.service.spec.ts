@@ -9,6 +9,7 @@ import { ConflictException } from "@nestjs/common";
 import { NotFoundException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  ImportProfessionSkillCatalogInput,
   ProfessionStyle,
   StyleBuildContext,
 } from "./profession.contracts.js";
@@ -19,7 +20,11 @@ const styleId = "22222222-2222-4222-8222-222222222222";
 const skillId = "33333333-3333-4333-8333-333333333333";
 const projectId = "44444444-4444-4444-8444-444444444444";
 const snapshotId = "55555555-5555-4555-8555-555555555555";
+const sourceRunId = "66666666-6666-4666-8666-666666666666";
+const frameManifestArtifactId = "77777777-7777-4777-8777-777777777777";
+const inventoryId = "99999999-9999-4999-8999-999999999999";
 const ownerUserId = "88888888-8888-4888-8888-888888888888";
+const secondEntryId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 describe("ProfessionService style gates", () => {
   const professions = {
@@ -35,6 +40,8 @@ describe("ProfessionService style gates", () => {
     get: vi.fn(),
     getSnapshot: vi.fn(),
   };
+  const runs = { get: vi.fn() };
+  const inventories = { getById: vi.fn(), getEntryEvidence: vi.fn() };
   let service: ProfessionService;
 
   beforeEach(() => {
@@ -51,12 +58,34 @@ describe("ProfessionService style gates", () => {
     professions.replaceSkillCatalog.mockResolvedValue([]);
     projects.get.mockResolvedValue({});
     projects.getSnapshot.mockResolvedValue({});
+    runs.get.mockResolvedValue({
+      id: sourceRunId,
+      projectId,
+      snapshotId,
+    });
+    inventories.getById.mockResolvedValue({
+      id: inventoryId,
+      projectId,
+      runId: sourceRunId,
+      entryCount: 2,
+      sourceFrameManifestArtifactId: frameManifestArtifactId,
+    });
+    inventories.getEntryEvidence.mockImplementation(
+      (_inventoryId: string, entryId: string) =>
+        Promise.resolve({
+          id: entryId,
+          inventoryId,
+          projectId,
+          runId: sourceRunId,
+          metadataSha256: entryId === skillId ? "B".repeat(64) : "C".repeat(64),
+          sourceFrameManifestArtifactId: frameManifestArtifactId,
+        }),
+    );
     service = new ProfessionService(
       professions as never,
       projects as never,
-      {} as never,
-      {} as never,
-      {} as never,
+      runs as never,
+      inventories as never,
     );
   });
 
@@ -210,7 +239,108 @@ describe("ProfessionService style gates", () => {
 
     expect(professions.replaceSkillCatalog).not.toHaveBeenCalled();
   });
+
+  it("imports a skill only with the frame manifest frozen by its Inventory", async () => {
+    professions.replaceSkillCatalog.mockResolvedValue([
+      { id: skillId, mappingStatus: "verified" },
+    ]);
+
+    await expect(
+      service.importSkillCatalog(professionId, skillCatalogInput()),
+    ).resolves.toMatchObject({
+      professionId,
+      sourceRunId,
+      importedSkillCount: 1,
+    });
+
+    expect(professions.replaceSkillCatalog).toHaveBeenCalledWith(
+      professionId,
+      projectId,
+      snapshotId,
+      [
+        expect.objectContaining({
+          sourceFrameManifestArtifactId: frameManifestArtifactId,
+          sourceEntries: [
+            {
+              sourceInventoryEntryId: skillId,
+              sourceMetadataSha256: "B".repeat(64),
+            },
+            {
+              sourceInventoryEntryId: secondEntryId,
+              sourceMetadataSha256: "C".repeat(64),
+            },
+          ],
+        }),
+      ],
+    );
+  });
+
+  it("rejects another Artifact from the same Run as a frame manifest", async () => {
+    const input = skillCatalogInput();
+    const [skill] = input.skills;
+    if (!skill) throw new Error("TEST_SKILL_REQUIRED");
+    input.skills[0] = {
+      ...skill,
+      sourceFrameManifestArtifactId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    };
+
+    const error = await service
+      .importSkillCatalog(professionId, input)
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    if (!(error instanceof ConflictException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "SKILL_FRAME_MANIFEST_EVIDENCE_MISMATCH",
+    });
+    expect(professions.replaceSkillCatalog).not.toHaveBeenCalled();
+  });
+
+  it("rejects a subset of an entire-inventory skill source", async () => {
+    const input = skillCatalogInput();
+    const [skill] = input.skills;
+    if (!skill) throw new Error("TEST_SKILL_REQUIRED");
+    input.skills[0] = {
+      ...skill,
+      sourceEntries: skill.sourceEntries.slice(0, 1),
+    };
+
+    await expect(
+      service.importSkillCatalog(professionId, input),
+    ).rejects.toMatchObject({
+      response: { code: "SKILL_INVENTORY_SCOPE_MISMATCH" },
+    });
+    expect(professions.replaceSkillCatalog).not.toHaveBeenCalled();
+  });
 });
+
+function skillCatalogInput(): ImportProfessionSkillCatalogInput {
+  return {
+    workflowProjectId: projectId,
+    catalogSnapshotId: snapshotId,
+    sourceRunId,
+    skills: [
+      {
+        stableKey: "momentaryslash",
+        displayName: "待核验资源",
+        promptStatus: "candidate" as const,
+        sourceScope: "entire-inventory" as const,
+        sourceInventoryId: inventoryId,
+        sourceEntries: [
+          {
+            sourceInventoryEntryId: skillId,
+            sourceMetadataSha256: "B".repeat(64),
+          },
+          {
+            sourceInventoryEntryId: secondEntryId,
+            sourceMetadataSha256: "C".repeat(64),
+          },
+        ],
+        sourceFrameManifestArtifactId: frameManifestArtifactId,
+      },
+    ],
+  };
+}
 
 function profession(): StyleBuildContext["profession"] {
   return {
@@ -281,8 +411,14 @@ function buildContext(): StyleBuildContext {
         },
         professionPromptSha256: "A".repeat(64),
         sourceRunId: "66666666-6666-4666-8666-666666666666",
+        sourceInventoryId: inventoryId,
         sourceFrameManifestArtifactId: "77777777-7777-4777-8777-777777777777",
-        sourceMetadataSha256: "B".repeat(64),
+        sourceEntries: [
+          {
+            sourceInventoryEntryId: skillId,
+            sourceMetadataSha256: "B".repeat(64),
+          },
+        ],
       },
     ],
   };

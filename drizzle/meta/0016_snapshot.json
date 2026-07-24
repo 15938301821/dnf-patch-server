@@ -1,0 +1,4227 @@
+{
+  "version": "5",
+  "dialect": "mysql",
+  "id": "19f3b387-f968-413e-baba-877949f87b09",
+  "prevId": "71fa60ea-af1b-4db6-8b4c-a1fd9d625492",
+  "tables": {
+    "artifacts": {
+      "name": "artifacts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "logical_name": {
+          "name": "logical_name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "media_type": {
+          "name": "media_type",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "byte_length": {
+          "name": "byte_length",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provenance": {
+          "name": "provenance",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "artifacts_run_idx": {
+          "name": "artifacts_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        },
+        "artifacts_run_id_uq": {
+          "name": "artifacts_run_id_uq",
+          "columns": [
+            "run_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "artifacts_run_id_runs_id_fk": {
+          "name": "artifacts_run_id_runs_id_fk",
+          "tableFrom": "artifacts",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "artifacts_id": {
+          "name": "artifacts_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "factories": {
+      "name": "factories",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "config": {
+          "name": "config",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "config_sha256": {
+          "name": "config_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "factories_version_uq": {
+          "name": "factories_version_uq",
+          "columns": [
+            "id",
+            "version"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "factories_id": {
+          "name": "factories_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "guardrail_decisions": {
+      "name": "guardrail_decisions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policy_id": {
+          "name": "policy_id",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policy_sha256": {
+          "name": "policy_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "input_sha256": {
+          "name": "input_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decision": {
+          "name": "decision",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "details": {
+          "name": "details",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "guardrail_run_idx": {
+          "name": "guardrail_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "guardrail_decisions_run_id_runs_id_fk": {
+          "name": "guardrail_decisions_run_id_runs_id_fk",
+          "tableFrom": "guardrail_decisions",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "guardrail_decisions_id": {
+          "name": "guardrail_decisions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "image_attempts": {
+      "name": "image_attempts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_call_id": {
+          "name": "model_call_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "prompt_sha256": {
+          "name": "prompt_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "input_snapshot_sha256": {
+          "name": "input_snapshot_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "generation_config_sha256": {
+          "name": "generation_config_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actual_seed": {
+          "name": "actual_seed",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "adapter_identity": {
+          "name": "adapter_identity",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "output_artifact_id": {
+          "name": "output_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "direct_runtime_use_allowed": {
+          "name": "direct_runtime_use_allowed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "image_attempts_run_idx": {
+          "name": "image_attempts_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        },
+        "image_attempts_run_id_uq": {
+          "name": "image_attempts_run_id_uq",
+          "columns": [
+            "run_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "image_attempts_run_id_runs_id_fk": {
+          "name": "image_attempts_run_id_runs_id_fk",
+          "tableFrom": "image_attempts",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "image_attempts_model_call_run_fk": {
+          "name": "image_attempts_model_call_run_fk",
+          "tableFrom": "image_attempts",
+          "tableTo": "model_calls",
+          "columnsFrom": [
+            "run_id",
+            "model_call_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "image_attempts_output_artifact_run_fk": {
+          "name": "image_attempts_output_artifact_run_fk",
+          "tableFrom": "image_attempts",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "output_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "image_attempts_id": {
+          "name": "image_attempts_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "job_attempts": {
+      "name": "job_attempts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "result_sha256": {
+          "name": "result_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "job_attempts_uq": {
+          "name": "job_attempts_uq",
+          "columns": [
+            "job_id",
+            "attempt"
+          ],
+          "isUnique": true
+        },
+        "job_attempts_lease_evidence_uq": {
+          "name": "job_attempts_lease_evidence_uq",
+          "columns": [
+            "job_id",
+            "attempt",
+            "worker_id",
+            "lease_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "job_attempts_job_id_jobs_id_fk": {
+          "name": "job_attempts_job_id_jobs_id_fk",
+          "tableFrom": "job_attempts",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "job_attempts_worker_id_workers_id_fk": {
+          "name": "job_attempts_worker_id_workers_id_fk",
+          "tableFrom": "job_attempts",
+          "tableTo": "workers",
+          "columnsFrom": [
+            "worker_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "job_attempts_id": {
+          "name": "job_attempts_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "job_attempts_status_ck": {
+          "name": "job_attempts_status_ck",
+          "value": "`job_attempts`.`status` in ('running', 'passed', 'failed', 'blocked', 'timed_out')"
+        }
+      }
+    },
+    "jobs": {
+      "name": "jobs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_sha256": {
+          "name": "payload_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_owner_id": {
+          "name": "lease_owner_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatch_ready_at": {
+          "name": "dispatch_ready_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "max_attempts": {
+          "name": "max_attempts",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 3
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "jobs_claim_idx": {
+          "name": "jobs_claim_idx",
+          "columns": [
+            "status",
+            "kind",
+            "dispatch_ready_at",
+            "lease_expires_at"
+          ],
+          "isUnique": false
+        },
+        "jobs_run_idx": {
+          "name": "jobs_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        },
+        "jobs_run_id_uq": {
+          "name": "jobs_run_id_uq",
+          "columns": [
+            "run_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "jobs_run_id_runs_id_fk": {
+          "name": "jobs_run_id_runs_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "jobs_lease_owner_id_workers_id_fk": {
+          "name": "jobs_lease_owner_id_workers_id_fk",
+          "tableFrom": "jobs",
+          "tableTo": "workers",
+          "columnsFrom": [
+            "lease_owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "jobs_id": {
+          "name": "jobs_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "jobs_status_ck": {
+          "name": "jobs_status_ck",
+          "value": "`jobs`.`status` in ('queued', 'leased', 'passed', 'failed', 'blocked')"
+        },
+        "jobs_attempt_limit_ck": {
+          "name": "jobs_attempt_limit_ck",
+          "value": "`jobs`.`attempt_count` <= `jobs`.`max_attempts`"
+        },
+        "jobs_lease_fields_ck": {
+          "name": "jobs_lease_fields_ck",
+          "value": "(`jobs`.`status` = 'leased' and `jobs`.`lease_owner_id` is not null and `jobs`.`lease_id` is not null and `jobs`.`lease_expires_at` is not null) or (`jobs`.`status` <> 'leased' and `jobs`.`lease_owner_id` is null and `jobs`.`lease_id` is null and `jobs`.`lease_expires_at` is null)"
+        }
+      }
+    },
+    "manual_reviews": {
+      "name": "manual_reviews",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reviewer": {
+          "name": "reviewer",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "evidence_artifact_id": {
+          "name": "evidence_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "manual_reviews_run_uq": {
+          "name": "manual_reviews_run_uq",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "manual_reviews_run_id_runs_id_fk": {
+          "name": "manual_reviews_run_id_runs_id_fk",
+          "tableFrom": "manual_reviews",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "manual_reviews_evidence_artifact_run_fk": {
+          "name": "manual_reviews_evidence_artifact_run_fk",
+          "tableFrom": "manual_reviews",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "evidence_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "manual_reviews_id": {
+          "name": "manual_reviews_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "manual_reviews_status_ck": {
+          "name": "manual_reviews_status_ck",
+          "value": "`manual_reviews`.`status` in ('pending', 'approved', 'rejected')"
+        }
+      }
+    },
+    "model_calls": {
+      "name": "model_calls",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "endpoint_identity": {
+          "name": "endpoint_identity",
+          "type": "varchar(300)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_configuration_version": {
+          "name": "model_configuration_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "request_sha256": {
+          "name": "request_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "response_sha256": {
+          "name": "response_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "response_id": {
+          "name": "response_id",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_egress_authorized": {
+          "name": "model_egress_authorized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_egress_performed": {
+          "name": "model_egress_performed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "model_calls_run_idx": {
+          "name": "model_calls_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        },
+        "model_calls_run_id_uq": {
+          "name": "model_calls_run_id_uq",
+          "columns": [
+            "run_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "model_calls_run_id_runs_id_fk": {
+          "name": "model_calls_run_id_runs_id_fk",
+          "tableFrom": "model_calls",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "model_calls_id": {
+          "name": "model_calls_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "model_calls_status_ck": {
+          "name": "model_calls_status_ck",
+          "value": "`model_calls`.`status` in ('running', 'passed', 'failed', 'blocked', 'abandoned')"
+        },
+        "model_calls_egress_ck": {
+          "name": "model_calls_egress_ck",
+          "value": "`model_calls`.`model_egress_performed` = false or `model_calls`.`model_egress_authorized` = true"
+        },
+        "model_calls_finished_ck": {
+          "name": "model_calls_finished_ck",
+          "value": "(`model_calls`.`status` = 'running' and `model_calls`.`finished_at` is null) or (`model_calls`.`status` <> 'running' and `model_calls`.`finished_at` is not null)"
+        }
+      }
+    },
+    "npk_inventories": {
+      "name": "npk_inventories",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_label": {
+          "name": "source_label",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_length": {
+          "name": "source_length",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_sha256": {
+          "name": "source_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entry_count": {
+          "name": "entry_count",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "inventory_artifact_id": {
+          "name": "inventory_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_frame_manifest_artifact_id": {
+          "name": "source_frame_manifest_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "npk_inventories_project_idx": {
+          "name": "npk_inventories_project_idx",
+          "columns": [
+            "project_id"
+          ],
+          "isUnique": false
+        },
+        "npk_inventories_run_id_uq": {
+          "name": "npk_inventories_run_id_uq",
+          "columns": [
+            "run_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "npk_inventories_project_id_projects_id_fk": {
+          "name": "npk_inventories_project_id_projects_id_fk",
+          "tableFrom": "npk_inventories",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "npk_inventories_project_run_fk": {
+          "name": "npk_inventories_project_run_fk",
+          "tableFrom": "npk_inventories",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "project_id",
+            "run_id"
+          ],
+          "columnsTo": [
+            "project_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "npk_inventories_inventory_artifact_run_fk": {
+          "name": "npk_inventories_inventory_artifact_run_fk",
+          "tableFrom": "npk_inventories",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "inventory_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "npk_inventories_frame_manifest_artifact_run_fk": {
+          "name": "npk_inventories_frame_manifest_artifact_run_fk",
+          "tableFrom": "npk_inventories",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "source_frame_manifest_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "npk_inventories_id": {
+          "name": "npk_inventories_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "npk_inventory_entries": {
+      "name": "npk_inventory_entries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "inventory_id": {
+          "name": "inventory_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "internal_path": {
+          "name": "internal_path",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "img_version": {
+          "name": "img_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "frame_count": {
+          "name": "frame_count",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "metadata_sha256": {
+          "name": "metadata_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "npk_entries_inventory_id_uq": {
+          "name": "npk_entries_inventory_id_uq",
+          "columns": [
+            "inventory_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "npk_entries_path_uq": {
+          "name": "npk_entries_path_uq",
+          "columns": [
+            "inventory_id",
+            "internal_path"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "npk_inventory_entries_inventory_id_npk_inventories_id_fk": {
+          "name": "npk_inventory_entries_inventory_id_npk_inventories_id_fk",
+          "tableFrom": "npk_inventory_entries",
+          "tableTo": "npk_inventories",
+          "columnsFrom": [
+            "inventory_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "npk_inventory_entries_id": {
+          "name": "npk_inventory_entries_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "outbox_events": {
+      "name": "outbox_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "topic": {
+          "name": "topic",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "aggregate_id": {
+          "name": "aggregate_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "outbox_pending_idx": {
+          "name": "outbox_pending_idx",
+          "columns": [
+            "published_at",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "outbox_events_id": {
+          "name": "outbox_events_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "project_snapshots": {
+      "name": "project_snapshots",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_snapshot_id": {
+          "name": "client_snapshot_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "root_rules_sha256": {
+          "name": "root_rules_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "manifest_sha256": {
+          "name": "manifest_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "prompt_tree_sha256": {
+          "name": "prompt_tree_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tool_catalog_sha256": {
+          "name": "tool_catalog_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "repository_revision": {
+          "name": "repository_revision",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "full_skill_coverage_proven": {
+          "name": "full_skill_coverage_proven",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "project_snapshots_project_idx": {
+          "name": "project_snapshots_project_idx",
+          "columns": [
+            "project_id"
+          ],
+          "isUnique": false
+        },
+        "project_snapshots_project_id_uq": {
+          "name": "project_snapshots_project_id_uq",
+          "columns": [
+            "project_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "project_snapshots_client_uq": {
+          "name": "project_snapshots_client_uq",
+          "columns": [
+            "project_id",
+            "client_snapshot_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "project_snapshots_project_id_projects_id_fk": {
+          "name": "project_snapshots_project_id_projects_id_fk",
+          "tableFrom": "project_snapshots",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "project_snapshots_id": {
+          "name": "project_snapshots_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "project_snapshots_safety_state_ck": {
+          "name": "project_snapshots_safety_state_ck",
+          "value": "`project_snapshots`.`full_skill_coverage_proven` = false"
+        }
+      }
+    },
+    "projects": {
+      "name": "projects",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "factory_id": {
+          "name": "factory_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_project_id": {
+          "name": "client_project_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canonical_name": {
+          "name": "canonical_name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "archived": {
+          "name": "archived",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "projects_factory_idx": {
+          "name": "projects_factory_idx",
+          "columns": [
+            "factory_id"
+          ],
+          "isUnique": false
+        },
+        "projects_canonical_uq": {
+          "name": "projects_canonical_uq",
+          "columns": [
+            "canonical_name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "projects_factory_id_factories_id_fk": {
+          "name": "projects_factory_id_factories_id_fk",
+          "tableFrom": "projects",
+          "tableTo": "factories",
+          "columnsFrom": [
+            "factory_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "projects_id": {
+          "name": "projects_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "run_events": {
+      "name": "run_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "level": {
+          "name": "level",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "varchar(96)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_artifact_id": {
+          "name": "evidence_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "run_events_sequence_uq": {
+          "name": "run_events_sequence_uq",
+          "columns": [
+            "run_id",
+            "sequence"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "run_events_run_id_runs_id_fk": {
+          "name": "run_events_run_id_runs_id_fk",
+          "tableFrom": "run_events",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "run_events_evidence_artifact_run_fk": {
+          "name": "run_events_evidence_artifact_run_fk",
+          "tableFrom": "run_events",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "evidence_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "run_events_id": {
+          "name": "run_events_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "runs": {
+      "name": "runs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_run_id": {
+          "name": "client_run_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "action": {
+          "name": "action",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(48)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "current_stage": {
+          "name": "current_stage",
+          "type": "varchar(96)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_sha256": {
+          "name": "request_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_fingerprint_sha256": {
+          "name": "request_fingerprint_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "server_connection_enabled": {
+          "name": "server_connection_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "model_egress_authorized": {
+          "name": "model_egress_authorized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "deployment_authorized": {
+          "name": "deployment_authorized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "deployment_performed": {
+          "name": "deployment_performed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "full_skill_coverage_proven": {
+          "name": "full_skill_coverage_proven",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "client_compatibility_proven": {
+          "name": "client_compatibility_proven",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "runs_owner_user_idx": {
+          "name": "runs_owner_user_idx",
+          "columns": [
+            "owner_user_id"
+          ],
+          "isUnique": false
+        },
+        "runs_project_idx": {
+          "name": "runs_project_idx",
+          "columns": [
+            "project_id"
+          ],
+          "isUnique": false
+        },
+        "runs_project_id_uq": {
+          "name": "runs_project_id_uq",
+          "columns": [
+            "project_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "runs_idempotency_uq": {
+          "name": "runs_idempotency_uq",
+          "columns": [
+            "project_id",
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "runs_client_uq": {
+          "name": "runs_client_uq",
+          "columns": [
+            "project_id",
+            "client_run_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "runs_owner_user_id_users_id_fk": {
+          "name": "runs_owner_user_id_users_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "runs_project_id_projects_id_fk": {
+          "name": "runs_project_id_projects_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "runs_snapshot_id_project_snapshots_id_fk": {
+          "name": "runs_snapshot_id_project_snapshots_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "project_snapshots",
+          "columnsFrom": [
+            "snapshot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "runs_snapshot_project_fk": {
+          "name": "runs_snapshot_project_fk",
+          "tableFrom": "runs",
+          "tableTo": "project_snapshots",
+          "columnsFrom": [
+            "project_id",
+            "snapshot_id"
+          ],
+          "columnsTo": [
+            "project_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "runs_id": {
+          "name": "runs_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "runs_status_ck": {
+          "name": "runs_status_ck",
+          "value": "`runs`.`status` in ('queued', 'running', 'passed', 'failed', 'blocked')"
+        },
+        "runs_safety_state_ck": {
+          "name": "runs_safety_state_ck",
+          "value": "`runs`.`deployment_authorized` = false and `runs`.`deployment_performed` = false and `runs`.`full_skill_coverage_proven` = false and `runs`.`client_compatibility_proven` = false"
+        }
+      }
+    },
+    "user_model_configurations": {
+      "name": "user_model_configurations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "endpoint": {
+          "name": "endpoint",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_ciphertext": {
+          "name": "credential_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_nonce": {
+          "name": "credential_nonce",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_tag": {
+          "name": "credential_tag",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_key_version": {
+          "name": "credential_key_version",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "user_model_configurations_user_role_uq": {
+          "name": "user_model_configurations_user_role_uq",
+          "columns": [
+            "user_id",
+            "role"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "user_model_configurations_user_id_users_id_fk": {
+          "name": "user_model_configurations_user_id_users_id_fk",
+          "tableFrom": "user_model_configurations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "user_model_configurations_id": {
+          "name": "user_model_configurations_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "user_model_configurations_role_ck": {
+          "name": "user_model_configurations_role_ck",
+          "value": "`user_model_configurations`.`role` in ('orchestrator', 'spriteProcessor', 'referenceGenerator')"
+        }
+      }
+    },
+    "users": {
+      "name": "users",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "username": {
+          "name": "username",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "normalized_username": {
+          "name": "normalized_username",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_scheme": {
+          "name": "password_scheme",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_salt": {
+          "name": "password_salt",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "users_normalized_username_uq": {
+          "name": "users_normalized_username_uq",
+          "columns": [
+            "normalized_username"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "users_id": {
+          "name": "users_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "workers": {
+      "name": "workers",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilities": {
+          "name": "capabilities",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "disabled": {
+          "name": "disabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "last_heartbeat_at": {
+          "name": "last_heartbeat_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "workers_disabled_idx": {
+          "name": "workers_disabled_idx",
+          "columns": [
+            "disabled"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "workers_id": {
+          "name": "workers_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "artifact_upload_sessions": {
+      "name": "artifact_upload_sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "logical_name": {
+          "name": "logical_name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "media_type": {
+          "name": "media_type",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expected_byte_length": {
+          "name": "expected_byte_length",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expected_sha256": {
+          "name": "expected_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provenance": {
+          "name": "provenance",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "artifact_id": {
+          "name": "artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "finalized_at": {
+          "name": "finalized_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "object_deleted_at": {
+          "name": "object_deleted_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "artifact_upload_sessions_run_status_idx": {
+          "name": "artifact_upload_sessions_run_status_idx",
+          "columns": [
+            "run_id",
+            "status",
+            "expires_at"
+          ],
+          "isUnique": false
+        },
+        "artifact_upload_sessions_orphan_idx": {
+          "name": "artifact_upload_sessions_orphan_idx",
+          "columns": [
+            "object_deleted_at",
+            "status",
+            "expires_at"
+          ],
+          "isUnique": false
+        },
+        "artifact_upload_sessions_object_key_uq": {
+          "name": "artifact_upload_sessions_object_key_uq",
+          "columns": [
+            "object_key"
+          ],
+          "isUnique": true
+        },
+        "artifact_upload_sessions_artifact_uq": {
+          "name": "artifact_upload_sessions_artifact_uq",
+          "columns": [
+            "artifact_id"
+          ],
+          "isUnique": true
+        },
+        "artifact_upload_sessions_evidence_binding_uq": {
+          "name": "artifact_upload_sessions_evidence_binding_uq",
+          "columns": [
+            "id",
+            "run_id",
+            "job_id",
+            "worker_id",
+            "lease_id",
+            "attempt",
+            "artifact_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "artifact_upload_sessions_run_id_runs_id_fk": {
+          "name": "artifact_upload_sessions_run_id_runs_id_fk",
+          "tableFrom": "artifact_upload_sessions",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "artifact_upload_sessions_worker_id_workers_id_fk": {
+          "name": "artifact_upload_sessions_worker_id_workers_id_fk",
+          "tableFrom": "artifact_upload_sessions",
+          "tableTo": "workers",
+          "columnsFrom": [
+            "worker_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "artifact_upload_sessions_job_run_fk": {
+          "name": "artifact_upload_sessions_job_run_fk",
+          "tableFrom": "artifact_upload_sessions",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "run_id",
+            "job_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "artifact_upload_sessions_attempt_lease_fk": {
+          "name": "artifact_upload_sessions_attempt_lease_fk",
+          "tableFrom": "artifact_upload_sessions",
+          "tableTo": "job_attempts",
+          "columnsFrom": [
+            "job_id",
+            "attempt",
+            "worker_id",
+            "lease_id"
+          ],
+          "columnsTo": [
+            "job_id",
+            "attempt",
+            "worker_id",
+            "lease_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "artifact_upload_sessions_artifact_run_fk": {
+          "name": "artifact_upload_sessions_artifact_run_fk",
+          "tableFrom": "artifact_upload_sessions",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "artifact_upload_sessions_id": {
+          "name": "artifact_upload_sessions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "artifact_upload_sessions_status_ck": {
+          "name": "artifact_upload_sessions_status_ck",
+          "value": "`artifact_upload_sessions`.`status` in ('authorized', 'finalized', 'rejected')"
+        },
+        "artifact_upload_sessions_state_ck": {
+          "name": "artifact_upload_sessions_state_ck",
+          "value": "(`artifact_upload_sessions`.`status` = 'authorized' and `artifact_upload_sessions`.`artifact_id` is null and `artifact_upload_sessions`.`error_code` is null and `artifact_upload_sessions`.`finalized_at` is null and `artifact_upload_sessions`.`object_deleted_at` is null) or (`artifact_upload_sessions`.`status` = 'finalized' and `artifact_upload_sessions`.`artifact_id` is not null and `artifact_upload_sessions`.`error_code` is null and `artifact_upload_sessions`.`finalized_at` is not null and `artifact_upload_sessions`.`object_deleted_at` is null) or (`artifact_upload_sessions`.`status` = 'rejected' and `artifact_upload_sessions`.`artifact_id` is null and `artifact_upload_sessions`.`error_code` is not null and `artifact_upload_sessions`.`finalized_at` is null)"
+        },
+        "artifact_upload_sessions_expiry_ck": {
+          "name": "artifact_upload_sessions_expiry_ck",
+          "value": "`artifact_upload_sessions`.`expires_at` > `artifact_upload_sessions`.`created_at`"
+        },
+        "artifact_upload_sessions_object_key_ck": {
+          "name": "artifact_upload_sessions_object_key_ck",
+          "value": "`artifact_upload_sessions`.`object_key` like 'artifacts/%'"
+        }
+      }
+    },
+    "shared_fx_stage_evidences": {
+      "name": "shared_fx_stage_evidences",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "worker_id": {
+          "name": "worker_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "artifact_id": {
+          "name": "artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "artifact_sha256": {
+          "name": "artifact_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "upload_id": {
+          "name": "upload_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "shared_fx_stage_evidences_job_attempt_idx": {
+          "name": "shared_fx_stage_evidences_job_attempt_idx",
+          "columns": [
+            "job_id",
+            "attempt"
+          ],
+          "isUnique": false
+        },
+        "shared_fx_stage_evidences_stage_uq": {
+          "name": "shared_fx_stage_evidences_stage_uq",
+          "columns": [
+            "job_id",
+            "attempt",
+            "stage"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "shared_fx_stage_evidences_run_id_runs_id_fk": {
+          "name": "shared_fx_stage_evidences_run_id_runs_id_fk",
+          "tableFrom": "shared_fx_stage_evidences",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "shared_fx_stage_evidences_worker_id_workers_id_fk": {
+          "name": "shared_fx_stage_evidences_worker_id_workers_id_fk",
+          "tableFrom": "shared_fx_stage_evidences",
+          "tableTo": "workers",
+          "columnsFrom": [
+            "worker_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "shared_fx_stage_evidences_job_run_fk": {
+          "name": "shared_fx_stage_evidences_job_run_fk",
+          "tableFrom": "shared_fx_stage_evidences",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "run_id",
+            "job_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "shared_fx_stage_evidences_attempt_lease_fk": {
+          "name": "shared_fx_stage_evidences_attempt_lease_fk",
+          "tableFrom": "shared_fx_stage_evidences",
+          "tableTo": "job_attempts",
+          "columnsFrom": [
+            "job_id",
+            "attempt",
+            "worker_id",
+            "lease_id"
+          ],
+          "columnsTo": [
+            "job_id",
+            "attempt",
+            "worker_id",
+            "lease_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "shared_fx_stage_evidences_artifact_run_fk": {
+          "name": "shared_fx_stage_evidences_artifact_run_fk",
+          "tableFrom": "shared_fx_stage_evidences",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "shared_fx_stage_evidences_upload_binding_fk": {
+          "name": "shared_fx_stage_evidences_upload_binding_fk",
+          "tableFrom": "shared_fx_stage_evidences",
+          "tableTo": "artifact_upload_sessions",
+          "columnsFrom": [
+            "upload_id",
+            "run_id",
+            "job_id",
+            "worker_id",
+            "lease_id",
+            "attempt",
+            "artifact_id"
+          ],
+          "columnsTo": [
+            "id",
+            "run_id",
+            "job_id",
+            "worker_id",
+            "lease_id",
+            "attempt",
+            "artifact_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "shared_fx_stage_evidences_id": {
+          "name": "shared_fx_stage_evidences_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "shared_fx_stage_evidences_stage_ck": {
+          "name": "shared_fx_stage_evidences_stage_ck",
+          "value": "`shared_fx_stage_evidences`.`stage` in ('inventory', 'material', 'aseprite', 'runtime', 'npk', 'independent-validation')"
+        }
+      }
+    },
+    "browser_sessions": {
+      "name": "browser_sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "refresh_token_sha256": {
+          "name": "refresh_token_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "browser_sessions_user_uq": {
+          "name": "browser_sessions_user_uq",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": true
+        },
+        "browser_sessions_refresh_sha256_uq": {
+          "name": "browser_sessions_refresh_sha256_uq",
+          "columns": [
+            "refresh_token_sha256"
+          ],
+          "isUnique": true
+        },
+        "browser_sessions_active_idx": {
+          "name": "browser_sessions_active_idx",
+          "columns": [
+            "revoked_at",
+            "expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "browser_sessions_user_id_users_id_fk": {
+          "name": "browser_sessions_user_id_users_id_fk",
+          "tableFrom": "browser_sessions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "browser_sessions_id": {
+          "name": "browser_sessions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "profession_skills": {
+      "name": "profession_skills",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "profession_id": {
+          "name": "profession_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stable_key": {
+          "name": "stable_key",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prompt_status": {
+          "name": "prompt_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'candidate'"
+        },
+        "mapping_status": {
+          "name": "mapping_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'unverified'"
+        },
+        "execution_status": {
+          "name": "execution_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'draft-only'"
+        },
+        "source_run_id": {
+          "name": "source_run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_inventory_id": {
+          "name": "source_inventory_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_inventory_entry_id": {
+          "name": "source_inventory_entry_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_frame_manifest_artifact_id": {
+          "name": "source_frame_manifest_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_metadata_sha256": {
+          "name": "source_metadata_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "profession_prompt": {
+          "name": "profession_prompt",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "profession_prompt_sha256": {
+          "name": "profession_prompt_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "profession_skills_profession_idx": {
+          "name": "profession_skills_profession_idx",
+          "columns": [
+            "profession_id"
+          ],
+          "isUnique": false
+        },
+        "profession_skills_stable_key_uq": {
+          "name": "profession_skills_stable_key_uq",
+          "columns": [
+            "profession_id",
+            "stable_key"
+          ],
+          "isUnique": true
+        },
+        "profession_skills_profession_id_uq": {
+          "name": "profession_skills_profession_id_uq",
+          "columns": [
+            "profession_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "profession_skills_source_inventory_uq": {
+          "name": "profession_skills_source_inventory_uq",
+          "columns": [
+            "profession_id",
+            "id",
+            "source_inventory_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "profession_skills_profession_id_professions_id_fk": {
+          "name": "profession_skills_profession_id_professions_id_fk",
+          "tableFrom": "profession_skills",
+          "tableTo": "professions",
+          "columnsFrom": [
+            "profession_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "profession_skills_source_run_id_runs_id_fk": {
+          "name": "profession_skills_source_run_id_runs_id_fk",
+          "tableFrom": "profession_skills",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "source_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "profession_skills_source_inventory_run_fk": {
+          "name": "profession_skills_source_inventory_run_fk",
+          "tableFrom": "profession_skills",
+          "tableTo": "npk_inventories",
+          "columnsFrom": [
+            "source_run_id",
+            "source_inventory_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "profession_skills_source_inventory_entry_fk": {
+          "name": "profession_skills_source_inventory_entry_fk",
+          "tableFrom": "profession_skills",
+          "tableTo": "npk_inventory_entries",
+          "columnsFrom": [
+            "source_inventory_id",
+            "source_inventory_entry_id"
+          ],
+          "columnsTo": [
+            "inventory_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "profession_skills_source_artifact_run_fk": {
+          "name": "profession_skills_source_artifact_run_fk",
+          "tableFrom": "profession_skills",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "source_run_id",
+            "source_frame_manifest_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "profession_skills_id": {
+          "name": "profession_skills_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "profession_skills_prompt_status_ck": {
+          "name": "profession_skills_prompt_status_ck",
+          "value": "`profession_skills`.`prompt_status` in ('candidate', 'reviewed')"
+        },
+        "profession_skills_mapping_status_ck": {
+          "name": "profession_skills_mapping_status_ck",
+          "value": "`profession_skills`.`mapping_status` in ('unverified', 'verified')"
+        },
+        "profession_skills_execution_status_ck": {
+          "name": "profession_skills_execution_status_ck",
+          "value": "`profession_skills`.`execution_status` in ('draft-only', 'build-ready')"
+        },
+        "profession_skills_build_ready_evidence_ck": {
+          "name": "profession_skills_build_ready_evidence_ck",
+          "value": "`profession_skills`.`execution_status` <> 'build-ready' or (`profession_skills`.`mapping_status` = 'verified' and `profession_skills`.`source_run_id` is not null and `profession_skills`.`source_inventory_id` is not null and `profession_skills`.`source_inventory_entry_id` is not null and `profession_skills`.`source_frame_manifest_artifact_id` is not null and `profession_skills`.`source_metadata_sha256` is not null)"
+        },
+        "profession_skills_prompt_binding_ck": {
+          "name": "profession_skills_prompt_binding_ck",
+          "value": "(`profession_skills`.`profession_prompt` is null and `profession_skills`.`profession_prompt_sha256` is null) or (`profession_skills`.`profession_prompt` is not null and `profession_skills`.`profession_prompt_sha256` is not null)"
+        }
+      }
+    },
+    "profession_style_skills": {
+      "name": "profession_style_skills",
+      "columns": {
+        "profession_id": {
+          "name": "profession_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "style_id": {
+          "name": "style_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "custom_prompt": {
+          "name": "custom_prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "changes": {
+          "name": "changes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "acceptance_criteria": {
+          "name": "acceptance_criteria",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "exclusions": {
+          "name": "exclusions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "profession_style_skills_ordinal_uq": {
+          "name": "profession_style_skills_ordinal_uq",
+          "columns": [
+            "style_id",
+            "ordinal"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "profession_style_skills_profession_id_professions_id_fk": {
+          "name": "profession_style_skills_profession_id_professions_id_fk",
+          "tableFrom": "profession_style_skills",
+          "tableTo": "professions",
+          "columnsFrom": [
+            "profession_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "profession_style_skills_style_profession_fk": {
+          "name": "profession_style_skills_style_profession_fk",
+          "tableFrom": "profession_style_skills",
+          "tableTo": "profession_styles",
+          "columnsFrom": [
+            "profession_id",
+            "style_id"
+          ],
+          "columnsTo": [
+            "profession_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "profession_style_skills_skill_profession_fk": {
+          "name": "profession_style_skills_skill_profession_fk",
+          "tableFrom": "profession_style_skills",
+          "tableTo": "profession_skills",
+          "columnsFrom": [
+            "profession_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "profession_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "profession_style_skills_pk": {
+          "name": "profession_style_skills_pk",
+          "columns": [
+            "style_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "profession_styles": {
+      "name": "profession_styles",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "profession_id": {
+          "name": "profession_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canonical_name": {
+          "name": "canonical_name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "theme_definition": {
+          "name": "theme_definition",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "publish_status": {
+          "name": "publish_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'private'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "profession_styles_profession_idx": {
+          "name": "profession_styles_profession_idx",
+          "columns": [
+            "profession_id"
+          ],
+          "isUnique": false
+        },
+        "profession_styles_name_uq": {
+          "name": "profession_styles_name_uq",
+          "columns": [
+            "profession_id",
+            "canonical_name"
+          ],
+          "isUnique": true
+        },
+        "profession_styles_profession_id_uq": {
+          "name": "profession_styles_profession_id_uq",
+          "columns": [
+            "profession_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "profession_styles_profession_id_professions_id_fk": {
+          "name": "profession_styles_profession_id_professions_id_fk",
+          "tableFrom": "profession_styles",
+          "tableTo": "professions",
+          "columnsFrom": [
+            "profession_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "profession_styles_id": {
+          "name": "profession_styles_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "profession_styles_publish_status_ck": {
+          "name": "profession_styles_publish_status_ck",
+          "value": "`profession_styles`.`publish_status` in ('private', 'pending', 'published', 'rejected')"
+        }
+      }
+    },
+    "professions": {
+      "name": "professions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "slug": {
+          "name": "slug",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canonical_name": {
+          "name": "canonical_name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workflow_project_id": {
+          "name": "workflow_project_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "catalog_snapshot_id": {
+          "name": "catalog_snapshot_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "publish_status": {
+          "name": "publish_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'private'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "professions_owner_user_idx": {
+          "name": "professions_owner_user_idx",
+          "columns": [
+            "owner_user_id"
+          ],
+          "isUnique": false
+        },
+        "professions_owner_slug_uq": {
+          "name": "professions_owner_slug_uq",
+          "columns": [
+            "owner_user_id",
+            "slug"
+          ],
+          "isUnique": true
+        },
+        "professions_owner_canonical_name_uq": {
+          "name": "professions_owner_canonical_name_uq",
+          "columns": [
+            "owner_user_id",
+            "canonical_name"
+          ],
+          "isUnique": true
+        },
+        "professions_workflow_project_uq": {
+          "name": "professions_workflow_project_uq",
+          "columns": [
+            "workflow_project_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "professions_owner_user_id_users_id_fk": {
+          "name": "professions_owner_user_id_users_id_fk",
+          "tableFrom": "professions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "professions_workflow_project_id_projects_id_fk": {
+          "name": "professions_workflow_project_id_projects_id_fk",
+          "tableFrom": "professions",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "workflow_project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "professions_catalog_snapshot_project_fk": {
+          "name": "professions_catalog_snapshot_project_fk",
+          "tableFrom": "professions",
+          "tableTo": "project_snapshots",
+          "columnsFrom": [
+            "workflow_project_id",
+            "catalog_snapshot_id"
+          ],
+          "columnsTo": [
+            "project_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "professions_id": {
+          "name": "professions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "professions_publish_status_ck": {
+          "name": "professions_publish_status_ck",
+          "value": "`professions`.`publish_status` in ('private', 'pending', 'published', 'rejected')"
+        },
+        "professions_workflow_binding_ck": {
+          "name": "professions_workflow_binding_ck",
+          "value": "(`professions`.`workflow_project_id` is null and `professions`.`catalog_snapshot_id` is null) or (`professions`.`workflow_project_id` is not null and `professions`.`catalog_snapshot_id` is not null)"
+        }
+      }
+    },
+    "style_packages": {
+      "name": "style_packages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "profession_id": {
+          "name": "profession_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "style_id": {
+          "name": "style_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "package_artifact_id": {
+          "name": "package_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "manifest_sha256": {
+          "name": "manifest_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'queued'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "style_packages_style_idx": {
+          "name": "style_packages_style_idx",
+          "columns": [
+            "style_id"
+          ],
+          "isUnique": false
+        },
+        "style_packages_run_uq": {
+          "name": "style_packages_run_uq",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "style_packages_run_id_runs_id_fk": {
+          "name": "style_packages_run_id_runs_id_fk",
+          "tableFrom": "style_packages",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_packages_style_profession_fk": {
+          "name": "style_packages_style_profession_fk",
+          "tableFrom": "style_packages",
+          "tableTo": "profession_styles",
+          "columnsFrom": [
+            "profession_id",
+            "style_id"
+          ],
+          "columnsTo": [
+            "profession_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_packages_artifact_run_fk": {
+          "name": "style_packages_artifact_run_fk",
+          "tableFrom": "style_packages",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "package_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "style_packages_id": {
+          "name": "style_packages_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "style_packages_status_ck": {
+          "name": "style_packages_status_ck",
+          "value": "`style_packages`.`status` in ('queued', 'building', 'passed', 'failed', 'blocked')"
+        },
+        "style_packages_passed_evidence_ck": {
+          "name": "style_packages_passed_evidence_ck",
+          "value": "`style_packages`.`status` <> 'passed' or (`style_packages`.`package_artifact_id` is not null and `style_packages`.`manifest_sha256` is not null and `style_packages`.`finished_at` is not null)"
+        }
+      }
+    },
+    "style_skill_productions": {
+      "name": "style_skill_productions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "profession_id": {
+          "name": "profession_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "style_id": {
+          "name": "style_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_run_id": {
+          "name": "source_run_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_frame_manifest_artifact_id": {
+          "name": "source_frame_manifest_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prompt_sha256": {
+          "name": "prompt_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_call_id": {
+          "name": "model_call_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "image_attempt_id": {
+          "name": "image_attempt_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "aseprite_profile_id": {
+          "name": "aseprite_profile_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "aseprite_binary_sha256": {
+          "name": "aseprite_binary_sha256",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "aseprite_artifact_id": {
+          "name": "aseprite_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "validation_artifact_id": {
+          "name": "validation_artifact_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'planned'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "style_skill_productions_style_idx": {
+          "name": "style_skill_productions_style_idx",
+          "columns": [
+            "style_id"
+          ],
+          "isUnique": false
+        },
+        "style_skill_productions_run_idx": {
+          "name": "style_skill_productions_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        },
+        "style_skill_productions_run_skill_uq": {
+          "name": "style_skill_productions_run_skill_uq",
+          "columns": [
+            "run_id",
+            "skill_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "style_skill_productions_run_id_runs_id_fk": {
+          "name": "style_skill_productions_run_id_runs_id_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_source_run_id_runs_id_fk": {
+          "name": "style_skill_productions_source_run_id_runs_id_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "source_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_style_profession_fk": {
+          "name": "style_skill_productions_style_profession_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "profession_styles",
+          "columnsFrom": [
+            "profession_id",
+            "style_id"
+          ],
+          "columnsTo": [
+            "profession_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_skill_profession_fk": {
+          "name": "style_skill_productions_skill_profession_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "profession_skills",
+          "columnsFrom": [
+            "profession_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "profession_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_selected_skill_fk": {
+          "name": "style_skill_productions_selected_skill_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "profession_style_skills",
+          "columnsFrom": [
+            "style_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "style_id",
+            "skill_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_job_run_fk": {
+          "name": "style_skill_productions_job_run_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "run_id",
+            "job_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_model_call_run_fk": {
+          "name": "style_skill_productions_model_call_run_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "model_calls",
+          "columnsFrom": [
+            "run_id",
+            "model_call_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_image_attempt_run_fk": {
+          "name": "style_skill_productions_image_attempt_run_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "image_attempts",
+          "columnsFrom": [
+            "run_id",
+            "image_attempt_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_source_artifact_run_fk": {
+          "name": "style_skill_productions_source_artifact_run_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "source_run_id",
+            "source_frame_manifest_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_aseprite_artifact_run_fk": {
+          "name": "style_skill_productions_aseprite_artifact_run_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "aseprite_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "style_skill_productions_validation_artifact_run_fk": {
+          "name": "style_skill_productions_validation_artifact_run_fk",
+          "tableFrom": "style_skill_productions",
+          "tableTo": "artifacts",
+          "columnsFrom": [
+            "run_id",
+            "validation_artifact_id"
+          ],
+          "columnsTo": [
+            "run_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "style_skill_productions_id": {
+          "name": "style_skill_productions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "style_skill_productions_status_ck": {
+          "name": "style_skill_productions_status_ck",
+          "value": "`style_skill_productions`.`status` in ('planned', 'generating', 'adapting', 'validating', 'passed', 'failed', 'blocked')"
+        },
+        "style_skill_productions_finished_ck": {
+          "name": "style_skill_productions_finished_ck",
+          "value": "(`style_skill_productions`.`status` in ('passed', 'failed', 'blocked') and `style_skill_productions`.`finished_at` is not null) or (`style_skill_productions`.`status` not in ('passed', 'failed', 'blocked') and `style_skill_productions`.`finished_at` is null)"
+        },
+        "style_skill_productions_passed_evidence_ck": {
+          "name": "style_skill_productions_passed_evidence_ck",
+          "value": "`style_skill_productions`.`status` <> 'passed' or (`style_skill_productions`.`model_call_id` is not null and `style_skill_productions`.`image_attempt_id` is not null and `style_skill_productions`.`aseprite_profile_id` is not null and `style_skill_productions`.`aseprite_binary_sha256` is not null and `style_skill_productions`.`aseprite_artifact_id` is not null and `style_skill_productions`.`validation_artifact_id` is not null)"
+        }
+      }
+    },
+    "profession_skill_source_entries": {
+      "name": "profession_skill_source_entries",
+      "columns": {
+        "profession_id": {
+          "name": "profession_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_inventory_id": {
+          "name": "source_inventory_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_inventory_entry_id": {
+          "name": "source_inventory_entry_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "profession_skill_source_entries_ordinal_uq": {
+          "name": "profession_skill_source_entries_ordinal_uq",
+          "columns": [
+            "skill_id",
+            "ordinal"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "profession_skill_source_entries_skill_inventory_fk": {
+          "name": "profession_skill_source_entries_skill_inventory_fk",
+          "tableFrom": "profession_skill_source_entries",
+          "tableTo": "profession_skills",
+          "columnsFrom": [
+            "profession_id",
+            "skill_id",
+            "source_inventory_id"
+          ],
+          "columnsTo": [
+            "profession_id",
+            "id",
+            "source_inventory_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "profession_skill_source_entries_inventory_entry_fk": {
+          "name": "profession_skill_source_entries_inventory_entry_fk",
+          "tableFrom": "profession_skill_source_entries",
+          "tableTo": "npk_inventory_entries",
+          "columnsFrom": [
+            "source_inventory_id",
+            "source_inventory_entry_id"
+          ],
+          "columnsTo": [
+            "inventory_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "profession_skill_source_entries_pk": {
+          "name": "profession_skill_source_entries_pk",
+          "columns": [
+            "skill_id",
+            "source_inventory_entry_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    }
+  },
+  "views": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {},
+    "indexes": {}
+  }
+}

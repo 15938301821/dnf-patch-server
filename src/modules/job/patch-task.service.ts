@@ -30,10 +30,19 @@ import type {
   ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
 import { PatchTaskRepository } from "./patch-task.repository.js";
+import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type {
+  FrozenProfessionSkillExecutionContext,
+  ResolveProfessionExecutionContextResult,
+} from "./profession-execution-context.js";
 import {
   createStyleSkillProductionJobPayload,
   type StyleSkillProductionJobPayloadV2,
 } from "./style-skill-production.contracts.js";
+import type {
+  ProfessionProductionProgressInput,
+  ProfessionProductionProgressView,
+} from "./profession-production-progress.contracts.js";
 
 interface PatchTaskRepositoryPort {
   list(ownerUserId: string): Promise<PatchTaskView[]>;
@@ -54,6 +63,23 @@ interface PatchTaskRepositoryPort {
     jobId: string,
     input: ReportPatchTaskPackageInput,
   ): Promise<PatchTaskReportResult>;
+  resolveProfessionSkillExecution(
+    jobId: string,
+    input: RequestProfessionSkillExecutionInput,
+  ): Promise<ResolveProfessionExecutionContextResult>;
+  resolveProfessionProductionProgress(
+    jobId: string,
+    input: ProfessionProductionProgressInput,
+  ): Promise<
+    | { status: "accepted"; progress: ProfessionProductionProgressView }
+    | {
+        status:
+          | "lease-mismatch"
+          | "job-kind-mismatch"
+          | "job-integrity-failed"
+          | "production-integrity-failed";
+      }
+  >;
 }
 
 interface ProfessionBuildContextPort {
@@ -177,7 +203,6 @@ export class PatchTaskService {
             sourceRunId: skill.sourceEvidence.sourceRunId,
             sourceFrameManifestArtifactId:
               skill.sourceEvidence.sourceFrameManifestArtifactId,
-            sourceMetadataSha256: skill.sourceEvidence.sourceMetadataSha256,
             promptSha256: skill.promptSha256,
           }),
         ),
@@ -240,7 +265,91 @@ export class PatchTaskService {
   ): Promise<void> {
     assertReportAccepted(await this.patchTasks.reportPackage(jobId, input));
   }
+
+  async resolveProfessionSkillExecution(
+    jobId: string,
+    input: RequestProfessionSkillExecutionInput,
+  ): Promise<FrozenProfessionSkillExecutionContext> {
+    const result = await this.patchTasks.resolveProfessionSkillExecution(
+      jobId,
+      input,
+    );
+    if (result.status === "accepted") return result.context;
+    const definition = professionExecutionFailureDefinitions[result.status];
+    if (definition.kind === "not-found") {
+      throw new NotFoundException({
+        code: definition.code,
+        message: definition.message,
+      });
+    }
+    throw new ConflictException({
+      code: definition.code,
+      message: definition.message,
+    });
+  }
+
+  /** 读取当前 lease 的冻结多技能进度；完整性失败统一映射为不泄露数据库细节的冲突。 */
+  async resolveProfessionProductionProgress(
+    jobId: string,
+    input: ProfessionProductionProgressInput,
+  ): Promise<ProfessionProductionProgressView> {
+    const result = await this.patchTasks.resolveProfessionProductionProgress(
+      jobId,
+      input,
+    );
+    if (result.status === "accepted") return result.progress;
+    const definition = professionProgressFailureDefinitions[result.status];
+    throw new ConflictException({
+      code: definition.code,
+      message: definition.message,
+    });
+  }
 }
+
+const professionProgressFailureDefinitions = {
+  "lease-mismatch": {
+    code: "JOB_LEASE_MISMATCH",
+    message: "任务租约不存在、已过期或不属于当前 Worker。",
+  },
+  "job-kind-mismatch": {
+    code: "PATCH_TASK_JOB_KIND_REQUIRED",
+    message: "只有 profession 类型任务可以读取职业生产进度。",
+  },
+  "job-integrity-failed": {
+    code: "PROFESSION_JOB_INTEGRITY_FAILED",
+    message: "职业制作任务的冻结内容完整性校验失败。",
+  },
+  "production-integrity-failed": {
+    code: "PROFESSION_PRODUCTION_EVIDENCE_MISMATCH",
+    message: "职业技能生产证据与冻结任务不一致。",
+  },
+} as const;
+
+const professionExecutionFailureDefinitions: Record<
+  Exclude<ResolveProfessionExecutionContextResult["status"], "accepted">,
+  { kind: "conflict" | "not-found"; code: string; message: string }
+> = {
+  "lease-mismatch": {
+    kind: "conflict",
+    code: "JOB_LEASE_MISMATCH",
+    message: "任务租约不存在、已过期或不属于当前 Worker。",
+  },
+  "job-kind-mismatch": {
+    kind: "conflict",
+    code: "PATCH_TASK_JOB_KIND_REQUIRED",
+    message: "只有 profession 类型任务可以请求固定技能生产步骤。",
+  },
+  "job-integrity-failed": {
+    kind: "conflict",
+    code: "PROFESSION_JOB_INTEGRITY_FAILED",
+    message: "职业制作任务的冻结内容完整性校验失败。",
+  },
+  "skill-not-found": {
+    kind: "not-found",
+    code: "PROFESSION_JOB_SKILL_NOT_FOUND",
+    message: "请求的技能不在职业制作任务的冻结技能集合中。",
+  },
+};
 
 function assertReportAccepted(result: PatchTaskReportResult): void {
   if (result.status === "accepted") return;
@@ -261,11 +370,6 @@ const reportFailureDefinitions: Record<
   Exclude<PatchTaskReportResult["status"], "accepted">,
   { kind: "conflict" | "not-found"; code: string; message: string }
 > = {
-  "protocol-upgrade-required": {
-    kind: "conflict",
-    code: "WORKER_PROTOCOL_UPGRADE_REQUIRED",
-    message: "重试后的任务必须提交 claim 返回的 leaseId。",
-  },
   "lease-mismatch": {
     kind: "conflict",
     code: "JOB_LEASE_MISMATCH",
@@ -286,6 +390,21 @@ const reportFailureDefinitions: Record<
     code: "STYLE_SKILL_PRODUCTION_TERMINAL",
     message: "主题技能生产记录已终结，不能再次回填。",
   },
+  "skill-production-evidence-mismatch": {
+    kind: "conflict",
+    code: "STYLE_SKILL_PRODUCTION_EVIDENCE_MISMATCH",
+    message: "主题技能生产记录与当前冻结任务证据不一致。",
+  },
+  "model-execution-evidence-mismatch": {
+    kind: "conflict",
+    code: "STYLE_SKILL_MODEL_EXECUTION_EVIDENCE_MISMATCH",
+    message: "当前任务轮次的固定模型执行证据不完整或不一致。",
+  },
+  "artifact-evidence-mismatch": {
+    kind: "conflict",
+    code: "STYLE_SKILL_ARTIFACT_EVIDENCE_MISMATCH",
+    message: "技能输出 Artifact 未由当前任务轮次完整生成。",
+  },
   "package-not-found": {
     kind: "not-found",
     code: "STYLE_PACKAGE_NOT_FOUND",
@@ -296,50 +415,10 @@ const reportFailureDefinitions: Record<
     code: "STYLE_PACKAGE_TERMINAL",
     message: "主题包记录已终结，不能再次回填。",
   },
-  "package-skills-incomplete": {
+  "package-capability-not-frozen": {
     kind: "conflict",
-    code: "STYLE_PACKAGE_SKILLS_INCOMPLETE",
-    message: "主题包通过前，所有选中技能生产记录都必须先通过。",
-  },
-  "model-call-not-found": {
-    kind: "not-found",
-    code: "STYLE_SKILL_MODEL_CALL_NOT_FOUND",
-    message: "技能生产引用的模型调用不存在。",
-  },
-  "model-call-run-mismatch": {
-    kind: "conflict",
-    code: "STYLE_SKILL_MODEL_CALL_RUN_MISMATCH",
-    message: "技能生产引用的模型调用不属于当前 Run。",
-  },
-  "model-call-not-passed": {
-    kind: "conflict",
-    code: "STYLE_SKILL_MODEL_CALL_NOT_PASSED",
-    message: "技能生产引用的模型调用尚未通过。",
-  },
-  "image-attempt-not-found": {
-    kind: "not-found",
-    code: "STYLE_SKILL_IMAGE_ATTEMPT_NOT_FOUND",
-    message: "技能生产引用的图片尝试不存在。",
-  },
-  "image-attempt-run-mismatch": {
-    kind: "conflict",
-    code: "STYLE_SKILL_IMAGE_ATTEMPT_RUN_MISMATCH",
-    message: "技能生产引用的图片尝试不属于当前 Run。",
-  },
-  "image-attempt-not-ready": {
-    kind: "conflict",
-    code: "STYLE_SKILL_IMAGE_ATTEMPT_NOT_READY",
-    message: "技能生产引用的图片尝试尚未生成或适配。",
-  },
-  "artifact-not-found": {
-    kind: "not-found",
-    code: "STYLE_SKILL_ARTIFACT_NOT_FOUND",
-    message: "技能或主题包引用的 Artifact 不存在。",
-  },
-  "artifact-run-mismatch": {
-    kind: "conflict",
-    code: "STYLE_SKILL_ARTIFACT_RUN_MISMATCH",
-    message: "技能或主题包引用的 Artifact 不属于当前 Run。",
+    code: "STYLE_PACKAGE_CAPABILITY_NOT_FROZEN",
+    message: "当前职业制作任务未冻结最终封包工具与验证契约。",
   },
 };
 

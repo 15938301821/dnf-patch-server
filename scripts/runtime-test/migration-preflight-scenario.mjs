@@ -12,7 +12,7 @@ import { assert, errorMessage, runProcess } from "./process.mjs";
 
 const host = "127.0.0.1";
 
-/** 使用正式 migration 入口验证两类不可证明历史数据均被阻断。 */
+/** 使用正式 migration 入口验证三类不可证明历史数据均被阻断。 */
 export async function exerciseMigrationPreflight(port) {
   const suffix = randomBytes(4).toString("hex");
   const cases = [
@@ -25,6 +25,15 @@ export async function exerciseMigrationPreflight(port) {
       databaseName: `dnf_patch_legacy_model_${suffix}`,
       table: "model_calls",
       errorCode: "MODEL_CALL_EGRESS_MIGRATION_BLOCKED",
+    },
+    {
+      databaseName: `dnf_patch_legacy_production_${suffix}`,
+      table: "style_skill_productions",
+      errorCode: "STYLE_SKILL_PRODUCTION_EVIDENCE_MIGRATION_BLOCKED",
+      createSql:
+        "CREATE TABLE `style_skill_productions` (id CHAR(36) NOT NULL PRIMARY KEY, status VARCHAR(32) NOT NULL, job_id VARCHAR(64))",
+      insertSql:
+        "INSERT INTO `style_skill_productions` (id, status, job_id) VALUES ('legacy-row', 'passed', NULL)",
     },
   ];
   const admin = await createConnection({ host, port, user: "root" });
@@ -44,6 +53,7 @@ export async function exerciseMigrationPreflight(port) {
   return {
     legacyNpkBlocked: true,
     legacyModelCallBlocked: true,
+    legacyStyleSkillProductionBlocked: true,
   };
 }
 
@@ -59,10 +69,12 @@ async function createLegacyTable(admin, port, migrationCase) {
   });
   try {
     await connection.query(
-      `CREATE TABLE \`${migrationCase.table}\` (id CHAR(36) NOT NULL PRIMARY KEY)`,
+      migrationCase.createSql ??
+        `CREATE TABLE \`${migrationCase.table}\` (id CHAR(36) NOT NULL PRIMARY KEY)`,
     );
     await connection.query(
-      `INSERT INTO \`${migrationCase.table}\` (id) VALUES ('legacy-row')`,
+      migrationCase.insertSql ??
+        `INSERT INTO \`${migrationCase.table}\` (id) VALUES ('legacy-row')`,
     );
   } finally {
     await connection.end();

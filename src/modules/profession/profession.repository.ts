@@ -7,9 +7,7 @@
  */
 import { Injectable } from "@nestjs/common";
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../../common/db/database.service.js";
-import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import {
   professionSkills,
   professionStyles,
@@ -35,6 +33,10 @@ import {
   toSkillThemePrompt,
   toStyle,
 } from "./profession.mapper.js";
+import {
+  readProfessionSkillSources,
+  replaceProfessionSkillCatalog,
+} from "./profession-skill-sources.repository.js";
 
 @Injectable()
 export class ProfessionRepository {
@@ -359,68 +361,14 @@ export class ProfessionRepository {
   ): Promise<ProfessionSkillSummary[]> {
     const now = new Date();
     await this.connection.database.transaction(async (transaction) => {
-      await transaction
-        .update(professions)
-        .set({ workflowProjectId, catalogSnapshotId, updatedAt: now })
-        .where(eq(professions.id, professionId));
-      await transaction
-        .update(professionSkills)
-        .set({
-          mappingStatus: "unverified",
-          executionStatus: "draft-only",
-          sourceRunId: null,
-          sourceInventoryId: null,
-          sourceInventoryEntryId: null,
-          sourceFrameManifestArtifactId: null,
-          sourceMetadataSha256: null,
-          professionPrompt: null,
-          professionPromptSha256: null,
-          updatedAt: now,
-        })
-        .where(eq(professionSkills.professionId, professionId));
-      const existing = await transaction
-        .select()
-        .from(professionSkills)
-        .where(eq(professionSkills.professionId, professionId));
-      const byStableKey = new Map(
-        existing.map((skill) => [skill.stableKey, skill]),
+      await replaceProfessionSkillCatalog(
+        transaction,
+        professionId,
+        workflowProjectId,
+        catalogSnapshotId,
+        skills,
+        now,
       );
-      for (const skill of skills) {
-        const current = byStableKey.get(skill.stableKey);
-        const professionPromptSha256 = skill.professionPrompt
-          ? sha256JcsV1(skill.professionPrompt)
-          : null;
-        const values = {
-          displayName: skill.displayName,
-          promptStatus: skill.promptStatus,
-          mappingStatus: "verified" as const,
-          executionStatus: skill.professionPrompt
-            ? ("build-ready" as const)
-            : ("draft-only" as const),
-          sourceRunId: skill.sourceRunId,
-          sourceInventoryId: skill.sourceInventoryId,
-          sourceInventoryEntryId: skill.sourceInventoryEntryId,
-          sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
-          sourceMetadataSha256: skill.sourceMetadataSha256.toUpperCase(),
-          professionPrompt: skill.professionPrompt ?? null,
-          professionPromptSha256,
-          updatedAt: now,
-        };
-        if (current) {
-          await transaction
-            .update(professionSkills)
-            .set(values)
-            .where(eq(professionSkills.id, current.id));
-        } else {
-          await transaction.insert(professionSkills).values({
-            id: randomUUID(),
-            professionId,
-            stableKey: skill.stableKey,
-            ...values,
-            createdAt: now,
-          });
-        }
-      }
     });
     return this.listSkills(professionId);
   }
@@ -442,6 +390,10 @@ export class ProfessionRepository {
           inArray(professionSkills.id, style.selectedSkillIds),
         ),
       );
+    const sourceEntriesBySkillId = await readProfessionSkillSources(
+      this.connection.database,
+      rows.map((skill) => skill.id),
+    );
     const skillsById = new Map(rows.map((skill) => [skill.id, skill]));
     const skills = style.selectedSkillIds.map((skillId) =>
       skillsById.get(skillId),
@@ -459,14 +411,18 @@ export class ProfessionRepository {
       missingProfessionPromptSkillIds,
       skills: skills.flatMap((skill) => {
         const summary = skill ? toSkillSummary(skill) : undefined;
+        const sourceEntries = skill
+          ? (sourceEntriesBySkillId.get(skill.id) ?? [])
+          : [];
         if (
           !skill ||
           !summary?.professionPrompt ||
           !summary.professionPromptSha256 ||
           skill.executionStatus !== "build-ready" ||
           !skill.sourceRunId ||
+          !skill.sourceInventoryId ||
           !skill.sourceFrameManifestArtifactId ||
-          !skill.sourceMetadataSha256
+          sourceEntries.length === 0
         ) {
           return [];
         }
@@ -474,8 +430,9 @@ export class ProfessionRepository {
           {
             ...summary,
             sourceRunId: skill.sourceRunId,
+            sourceInventoryId: skill.sourceInventoryId,
             sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
-            sourceMetadataSha256: skill.sourceMetadataSha256,
+            sourceEntries,
             professionPrompt: summary.professionPrompt,
             professionPromptSha256: summary.professionPromptSha256,
           },

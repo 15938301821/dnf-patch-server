@@ -111,6 +111,8 @@ function storageStub(
       expiresAtUtc: "2026-07-22T12:05:00.000Z",
     }),
     authorizeDownload: vi.fn().mockRejectedValue(new Error("not used")),
+    write: vi.fn().mockRejectedValue(new Error("not used")),
+    readVerifiedBytes: vi.fn().mockRejectedValue(new Error("not used")),
     verify: vi.fn().mockResolvedValue({
       objectKey: `artifacts/${uploadId}`,
       mediaType: "application/octet-stream",

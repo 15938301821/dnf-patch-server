@@ -83,14 +83,27 @@ export const createInventorySchema = z
  * 数据库时间和锁定 Job 再次验证它们，不能只相信 schema 成功。
  */
 export const createWorkerInventorySchema = createInventorySchema
-  .omit({ runId: true, inventoryArtifactId: true })
+  .omit({
+    runId: true,
+    inventoryArtifactId: true,
+  })
   .extend({
     workerId: z.uuid(),
     leaseId: z.uuid(),
     attempt: z.number().int().min(1).max(10),
     inventoryArtifactId: z.uuid(),
+    sourceFrameManifestArtifactId: z.uuid(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (input.inventoryArtifactId === input.sourceFrameManifestArtifactId) {
+      context.addIssue({
+        code: "custom",
+        path: ["sourceFrameManifestArtifactId"],
+        message: "Inventory 与源帧清单必须使用不同 Artifact。",
+      });
+    }
+  });
 
 /** 普通 NPK Inventory 创建路径收到的已解析输入，不是数据库行或 NPK 文件内容。 */
 export type CreateInventoryInput = z.infer<typeof createInventorySchema>;
@@ -116,6 +129,7 @@ export interface InventoryView {
   sourceSha256: string;
   status: "frozen";
   inventoryArtifactId?: string;
+  sourceFrameManifestArtifactId?: string;
   entryCount: number;
   createdAtUtc: string;
 }
@@ -130,6 +144,7 @@ export interface InventoryEntryEvidence {
   projectId: string;
   runId: string;
   metadataSha256: string;
+  sourceFrameManifestArtifactId?: string;
 }
 
 /**
@@ -140,5 +155,9 @@ export interface InventoryEntryEvidence {
 export type WorkerInventoryMutationResult =
   | { status: "accepted"; inventory: InventoryView }
   | {
-      status: "lease-mismatch" | "job-kind-mismatch" | "artifact-not-finalized";
+      status:
+        | "lease-mismatch"
+        | "job-kind-mismatch"
+        | "artifact-not-finalized"
+        | "artifact-evidence-mismatch";
     };

@@ -23,6 +23,7 @@ import {
 } from "../../common/db/schema.js";
 import { allowedJobKindSchema } from "../guardrail/guardrail.contracts.js";
 import type { RunEventView } from "../run/run.contracts.js";
+import { closeJobAttempt } from "./job-attempt-close.repository-support.js";
 import type {
   ClaimJobInput,
   CompleteJobInput,
@@ -43,6 +44,10 @@ import { toJobView } from "./job.mapper.js";
 import { aggregateRunStatus } from "./run-status.js";
 import { validatePersistedJobIntegrity } from "./job-integrity.js";
 import { findSharedFxCompletionEvidenceForJob } from "./shared-fx-completion.repository-support.js";
+import {
+  closeProfessionPackageWithoutArtifact,
+  prepareProfessionCompletion,
+} from "./job-profession-completion.repository-support.js";
 
 interface ClaimJobResult {
   job: JobView;
@@ -56,6 +61,7 @@ interface ClaimIntegrityFailure {
 interface CompleteJobResult {
   status:
     | LeaseMutationStatus
+    | "profession-evidence-incomplete"
     | "shared-fx-evidence-incomplete"
     | "shared-fx-review-conflict";
   runEvent?: RunEventView;
@@ -144,7 +150,7 @@ export class JobRepository {
       ) {
         const now = await databaseNow(transaction);
         if (candidate.status === "leased") {
-          await closeAttempt(
+          await closeJobAttempt(
             transaction,
             candidate,
             now,
@@ -186,7 +192,7 @@ export class JobRepository {
       const now = await databaseNow(transaction);
       const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1_000);
       if (candidate.status === "leased") {
-        await closeAttempt(
+        await closeJobAttempt(
           transaction,
           candidate,
           now,
@@ -314,8 +320,18 @@ export class JobRepository {
           return { status: "shared-fx-review-conflict" };
         }
       }
+      const professionCompletion = await prepareProfessionCompletion(
+        transaction,
+        job,
+        input,
+        now,
+      );
+      if (professionCompletion.status === "evidence-incomplete") {
+        return { status: "profession-evidence-incomplete" };
+      }
       const resultSha256 =
         sharedFxCompletion?.independentValidationSha256 ??
+        professionCompletion.resultSha256 ??
         input.resultSha256?.toUpperCase();
       await transaction
         .update(jobs)
@@ -342,6 +358,12 @@ export class JobRepository {
             eq(jobAttempts.attempt, job.attemptCount),
           ),
         );
+      await closeProfessionPackageWithoutArtifact(
+        transaction,
+        job,
+        input.status,
+        now,
+      );
       if (sharedFxCompletion) {
         await appendJobRunEvent(
           transaction,
@@ -383,7 +405,13 @@ export class JobRepository {
       const now = await databaseNow(transaction);
       const events: RunEventView[] = [];
       for (const job of expired) {
-        await closeAttempt(transaction, job, now, "timed_out", "LEASE_EXPIRED");
+        await closeJobAttempt(
+          transaction,
+          job,
+          now,
+          "timed_out",
+          "LEASE_EXPIRED",
+        );
         const exhausted = job.attemptCount >= job.maxAttempts;
         await transaction
           .update(jobs)
@@ -469,29 +497,4 @@ async function finalizeRunIfComplete(
         : "Run 的 Worker 任务已完成，但至少一个任务失败。",
     now,
   );
-}
-
-/** 以受限终态关闭仍 running 的当前 attempt；不会创建新 attempt 或直接重排 Job。 */
-async function closeAttempt(
-  transaction: JobTransaction,
-  job: typeof jobs.$inferSelect,
-  now: Date,
-  status: "blocked" | "timed_out",
-  errorCode: "JOB_INTEGRITY_FAILED" | "LEASE_EXPIRED",
-): Promise<void> {
-  if (job.attemptCount === 0) return;
-  await transaction
-    .update(jobAttempts)
-    .set({
-      status,
-      errorCode,
-      finishedAt: now,
-    })
-    .where(
-      and(
-        eq(jobAttempts.jobId, job.id),
-        eq(jobAttempts.attempt, job.attemptCount),
-        eq(jobAttempts.status, "running"),
-      ),
-    );
 }

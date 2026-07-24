@@ -13,7 +13,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isMysqlDuplicateEntry } from "../../common/db/mysql-errors.js";
 import type { Environment } from "../../config/environment.js";
 import {
@@ -29,6 +29,7 @@ import type {
   SessionUser,
 } from "./auth.contracts.js";
 import { AuthRepository, type AuthUserRecord } from "./auth.repository.js";
+import { AuthSessionRepository } from "./auth-session.repository.js";
 import { hashPassword, verifyPassword } from "./password.js";
 
 const accessTtlSeconds = 15 * 60;
@@ -39,6 +40,8 @@ export class AuthService {
   constructor(
     private readonly config: ConfigService<Environment, true>,
     @Inject(AuthRepository) private readonly users: AuthRepository,
+    @Inject(AuthSessionRepository)
+    private readonly sessions: AuthSessionRepository,
   ) {}
 
   async register(
@@ -78,7 +81,7 @@ export class AuthService {
       }
       throw error;
     }
-    return this.issueSession(user);
+    return this.issueNewSession(user);
   }
 
   async login(
@@ -90,7 +93,7 @@ export class AuthService {
     if (!user || !(await verifyPassword(input.password, user.password))) {
       throw loginFailed();
     }
-    return this.issueSession(user);
+    return this.issueNewSession(user);
   }
 
   async refresh(refreshToken: string | undefined): Promise<{
@@ -103,13 +106,19 @@ export class AuthService {
     const user = payload
       ? await this.users.findById(payload.subject)
       : undefined;
-    if (!payload || !user) {
-      throw new UnauthorizedException({
-        code: "REFRESH_TOKEN_INVALID",
-        message: "会话已失效，请重新登录。",
-      });
+    if (!refreshToken || !payload || !user) {
+      throw refreshTokenInvalid();
     }
-    return this.issueSession(user);
+    const next = this.createSessionTokens(user, payload.sessionId);
+    const rotated = await this.sessions.rotate({
+      sessionId: payload.sessionId,
+      userId: user.id,
+      currentRefreshTokenSha256: tokenSha256(refreshToken),
+      refreshTokenSha256: tokenSha256(next.refreshToken),
+      expiresAt: next.refreshExpiresAt,
+    });
+    if (!rotated) throw refreshTokenInvalid();
+    return { session: next.session, refreshToken: next.refreshToken };
   }
 
   async requireBrowserUser(
@@ -119,48 +128,113 @@ export class AuthService {
     const payload = token
       ? verifyBrowserSessionToken(this.sessionSecret(), token, "access")
       : undefined;
-    const user = payload
-      ? await this.users.findById(payload.subject)
-      : undefined;
+    const active = payload
+      ? await this.sessions.isActive(payload.sessionId, payload.subject)
+      : false;
+    const user =
+      payload && active
+        ? await this.users.findById(payload.subject)
+        : undefined;
     if (!payload || !user) throw loginFailed();
     return toSessionUser(user);
+  }
+
+  /**
+   * 供全局 Guard 检查已验签 Access Token 对应的服务端会话是否仍活动。
+   * @param token Authorization Bearer 中提取的候选 Token，不含 `Bearer` 前缀。
+   * @returns 签名、用途、期限和数据库 session 均有效时为 true；不返回用户或会话行。
+   */
+  async isBrowserAccessTokenActive(token: string): Promise<boolean> {
+    const payload = verifyBrowserSessionToken(
+      this.sessionSecret(),
+      token,
+      "access",
+    );
+    return payload
+      ? this.sessions.isActive(payload.sessionId, payload.subject)
+      : false;
+  }
+
+  /**
+   * 撤销当前浏览器 Access Token 所属的服务端会话。
+   * @param authorization Controller 收到的 Bearer header；不能用共享 Client token 代替用户会话。
+   * @returns 撤销写入完成后结算；后续 Access/Refresh 请求均会 fail-closed。
+   */
+  async logout(authorization: string | undefined): Promise<void> {
+    const token = authorization?.match(/^Bearer\s+(.+)$/iu)?.[1];
+    const payload = token
+      ? verifyBrowserSessionToken(this.sessionSecret(), token, "access")
+      : undefined;
+    if (
+      !payload ||
+      !(await this.sessions.revoke(payload.sessionId, payload.subject))
+    ) {
+      throw loginFailed();
+    }
   }
 
   currentUser(authorization: string | undefined): Promise<SessionUser> {
     return this.requireBrowserUser(authorization);
   }
 
-  private issueSession(user: AuthUserRecord): {
+  private async issueNewSession(user: AuthUserRecord): Promise<{
     session: AuthSession;
     refreshToken: string;
-  } {
-    return {
-      session: this.sessionFor(user),
-      refreshToken: createBrowserSessionToken(
-        this.sessionSecret(),
-        user,
-        "refresh",
-        refreshTtlSeconds,
-      ),
-    };
+  }> {
+    const sessionId = randomUUID();
+    const result = this.createSessionTokens(user, sessionId);
+    await this.sessions.replace({
+      sessionId,
+      userId: user.id,
+      refreshTokenSha256: tokenSha256(result.refreshToken),
+      expiresAt: result.refreshExpiresAt,
+    });
+    return { session: result.session, refreshToken: result.refreshToken };
   }
 
-  private sessionFor(user: AuthUserRecord): AuthSession {
+  /** 为同一 sessionId 签发用途隔离的 Access/Refresh Token，并返回 Refresh 的精确期限。 */
+  private createSessionTokens(
+    user: AuthUserRecord,
+    sessionId: string,
+  ): {
+    session: AuthSession;
+    refreshToken: string;
+    refreshExpiresAt: Date;
+  } {
     const accessToken = createBrowserSessionToken(
       this.sessionSecret(),
       user,
+      sessionId,
       "access",
       accessTtlSeconds,
+    );
+    const refreshToken = createBrowserSessionToken(
+      this.sessionSecret(),
+      user,
+      sessionId,
+      "refresh",
+      refreshTtlSeconds,
     );
     const verified = verifyBrowserSessionToken(
       this.sessionSecret(),
       accessToken,
       "access",
     );
-    if (!verified) throw new Error("BROWSER_SESSION_SIGNING_FAILED");
+    const verifiedRefresh = verifyBrowserSessionToken(
+      this.sessionSecret(),
+      refreshToken,
+      "refresh",
+    );
+    if (!verified || !verifiedRefresh) {
+      throw new Error("BROWSER_SESSION_SIGNING_FAILED");
+    }
     return {
-      accessToken,
-      user: userFromSession(verified),
+      session: {
+        accessToken,
+        user: userFromSession(verified),
+      },
+      refreshToken,
+      refreshExpiresAt: new Date(verifiedRefresh.expiresAt * 1_000),
     };
   }
 
@@ -185,5 +259,18 @@ function loginFailed(): UnauthorizedException {
   return new UnauthorizedException({
     code: "LOGIN_FAILED",
     message: "用户名或密码无效。",
+  });
+}
+
+/** 把 Refresh Token 单向绑定到数据库会话；摘要不返回给 Controller 或日志。 */
+function tokenSha256(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex").toUpperCase();
+}
+
+/** @returns Refresh Token 缺失、重放、过期、撤销或用户不存在时使用的统一脱敏异常。 */
+function refreshTokenInvalid(): UnauthorizedException {
+  return new UnauthorizedException({
+    code: "REFRESH_TOKEN_INVALID",
+    message: "会话已失效，请重新登录。",
   });
 }

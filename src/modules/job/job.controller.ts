@@ -58,6 +58,12 @@ import {
   type SharedFxStageEvidenceView,
 } from "./shared-fx-stage-evidence.contracts.js";
 import { SharedFxStageEvidenceService } from "./shared-fx-stage-evidence.service.js";
+import {
+  professionProductionProgressInputSchema,
+  professionProductionProgressViewSchema,
+  type ProfessionProductionProgressInput,
+  type ProfessionProductionProgressView,
+} from "./profession-production-progress.contracts.js";
 
 @Controller("jobs")
 /** 浏览器 PatchTask HTTP 适配层，认证后仅委托用户归属受控的 PatchTaskService。 */
@@ -119,7 +125,7 @@ export class PatchTaskController {
    * 获取当前认证用户拥有的 PatchTask 最终 Artifact 摘要。
    * @param id 经 idSchema 校验的任务标识。
    * @param authorization 浏览器 Bearer token；所有权由 Service 使用稳定 userId 复核。
-   * @returns `{ data }` 封装的 Artifact ViewModel，不返回直接对象存储 URL 或资源字节。
+   * @returns `{ data }` 封装的 Artifact ViewModel，不返回内部对象 key、存储 URL 或资源字节。
    */
   @Get(":id/artifact")
   async artifact(
@@ -174,6 +180,23 @@ export class JobController {
   }
 
   /**
+   * 读取当前 Profession Job 的冻结多技能进度。
+   * @param jobId path 中已校验 UUID；不能由 Worker 替换为 Run 或其他 Job。
+   * @param input body 中当前 Worker、leaseId 和 attempt，Repository 使用数据库时间再次复核。
+   * @returns 冻结技能顺序与有限状态；全部 passed 时才有 Server 复算的 resultSha256。
+   */
+  @Post(":id/profession-production-progress")
+  async professionProductionProgress(
+    @Param("id", new ZodValidationPipe(idSchema)) jobId: string,
+    @Body(new ZodValidationPipe(professionProductionProgressInputSchema))
+    input: ProfessionProductionProgressInput,
+  ): Promise<ProfessionProductionProgressView> {
+    return professionProductionProgressViewSchema.parse(
+      await this.patchTasks.resolveProfessionProductionProgress(jobId, input),
+    );
+  }
+
+  /**
    * 完成一个当前 attempt 的 Job。
    * @param jobId path 中已校验 Job id。
    * @param input 已校验终态、Worker/lease 与结果或错误证据。
@@ -223,10 +246,11 @@ export class JobController {
   }
 
   /**
-   * 回填 PatchTask 的打包阶段结果。
+   * 校验 PatchTask 的打包阶段报告；当前 V2 未冻结封包能力，因此固定 fail-closed。
    * @param jobId path 中已校验 Job id。
-   * @param input 已校验包报告；Service 复核当前 Job 与 Artifact/Run 的绑定。
-   * @returns 固定 `accepted` 响应；不会由 Controller 直接签发下载或部署。
+   * @param input 已校验包报告；Service 复核精确 lease 后返回 409 且不写 package/Artifact。
+   * @returns 未来冻结封包契约后的 `accepted` 响应；当前 V2 不会到达该返回。
+   * @throws ConflictException 当前 V2 固定返回 `STYLE_PACKAGE_CAPABILITY_NOT_FROZEN`。
    */
   @Post(":id/package")
   async reportPackage(

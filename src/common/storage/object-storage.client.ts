@@ -71,7 +71,8 @@ export type ObjectStorageErrorCode =
   | "OBJECT_STORAGE_MEDIA_TYPE_MISMATCH"
   | "OBJECT_STORAGE_OBJECT_TOO_LARGE"
   | "OBJECT_STORAGE_READ_FAILED"
-  | "OBJECT_STORAGE_SHA256_MISMATCH";
+  | "OBJECT_STORAGE_SHA256_MISMATCH"
+  | "OBJECT_STORAGE_WRITE_FAILED";
 
 /** 对象存储端口的稳定内部异常，上层按 code 映射而不暴露底层 Provider 对象。 */
 export class ObjectStorageError extends Error {
@@ -121,6 +122,16 @@ export interface NormalizedObjectStorageUploadRequest extends ObjectStorageUploa
   sha256: string;
 }
 
+/** 服务端受控写入 DTO；字节只在进程内流转，调用方不能选择 bucket 或 Provider 参数。 */
+export interface ObjectStorageWriteRequest extends ObjectStorageObjectRequest {
+  /** 固定对象媒体类型，写入后必须通过 Provider 回读严格匹配。 */
+  mediaType: string;
+  /** 待持久化字节；Service 会重新计算长度和 SHA-256，不信任调用方摘要。 */
+  bytes: Uint8Array;
+  /** 调用方冻结的预期 SHA-256，必须与 bytes 的服务端计算结果一致。 */
+  sha256: string;
+}
+
 /** 返回受控上传方的短期 PUT ViewModel，不包含 bucket 或对象存储凭据。 */
 export interface ObjectStorageUploadAuthorization {
   /** 授权绑定的固定对象 key，供调用方关联上传会话。 */
@@ -163,6 +174,15 @@ export interface ObjectStorageVerificationRequest extends ObjectStorageObjectReq
   expectedSha256: string;
 }
 
+/**
+ * 服务内读取小型可信正文的声明；业务层必须从已锁定记录生成 key 和预期证据。
+ * `maxByteLength` 是当前业务用途的更小内存预算，不能放宽环境的单对象上限。
+ */
+export interface ObjectStorageVerifiedReadRequest extends ObjectStorageVerificationRequest {
+  /** 当前解析器允许载入内存的最大字节数；必须为正整数且不大于全局对象上限。 */
+  maxByteLength: number;
+}
+
 /** 服务端完整读取对象后形成的完整性证据；不证明候选补丁兼容或已部署。 */
 export interface ObjectStorageEvidence {
   /** 已复核对象的固定相对 key。 */
@@ -173,6 +193,12 @@ export interface ObjectStorageEvidence {
   byteLength: number;
   /** 实际从完整字节流计算的大写 SHA-256。 */
   sha256: string;
+}
+
+/** 小型对象在完整媒体类型、长度和 SHA 复核后的内存结果；不包含 bucket 或永久 URL。 */
+export interface ObjectStorageVerifiedBytes extends ObjectStorageEvidence {
+  /** 已复核且不超过调用方预算的完整对象正文；失败路径不得返回部分字节。 */
+  bytes: Uint8Array;
 }
 
 /** 基础设施客户端只处理对象协议细节，不判断业务归属或 Artifact 状态。 */
@@ -188,6 +214,11 @@ export interface ObjectStorageClientPort {
   ): Promise<Pick<ObjectStorageUploadAuthorization, "requiredHeaders" | "url">>;
   /** @returns 固定 key 的短期 GET URL；调用前业务层必须完成授权。 */
   authorizeDownload(objectKey: string, ttlSeconds: number): Promise<string>;
+  /** @returns 固定 key 的不可覆盖 PUT 完成后 resolve；写入证据仍需上层回读验证。 */
+  write(
+    input: NormalizedObjectStorageUploadRequest,
+    bytes: Uint8Array,
+  ): Promise<void>;
   /** @returns 固定 key 的异步正文流及可选响应元数据。 */
   read(objectKey: string): Promise<ObjectStorageReadResult>;
   /** @returns Provider 删除完成后 resolve；调用方必须先证明对象可清理。 */
@@ -204,10 +235,16 @@ export interface ObjectStoragePort {
   authorizeDownload(
     input: ObjectStorageObjectRequest,
   ): Promise<ObjectStorageDownloadAuthorization>;
+  /** @returns 服务端不可覆盖写入并完整回读后形成的证据。 */
+  write(input: ObjectStorageWriteRequest): Promise<ObjectStorageEvidence>;
   /** @returns 完整读取并重算后的证据；只证明长度、媒体类型和哈希匹配。 */
   verify(
     input: ObjectStorageVerificationRequest,
   ): Promise<ObjectStorageEvidence>;
+  /** @returns 完整复核后的小型对象正文；只供固定领域解析器恢复私有证据。 */
+  readVerifiedBytes(
+    input: ObjectStorageVerifiedReadRequest,
+  ): Promise<ObjectStorageVerifiedBytes>;
   /** @returns 删除完成后 resolve；不会同步删除数据库 Artifact 元数据。 */
   delete(input: ObjectStorageObjectRequest): Promise<void>;
 }

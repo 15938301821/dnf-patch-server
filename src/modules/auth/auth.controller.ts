@@ -62,12 +62,16 @@ export class AuthController {
   }
 
   @Post("logout")
-  logout(@Res({ passthrough: true }) response: FastifyReply): { data: null } {
-    void response.header(
-      "Set-Cookie",
-      "dnf_patch_refresh=; HttpOnly; SameSite=Lax; Path=/v1/auth/refresh; Max-Age=0",
-    );
-    return { data: null };
+  async logout(
+    @Headers("authorization") authorization: string | undefined,
+    @Res({ passthrough: true }) response: FastifyReply,
+  ): Promise<{ data: null }> {
+    try {
+      await this.auth.logout(authorization);
+      return { data: null };
+    } finally {
+      clearRefreshCookie(response);
+    }
   }
 }
 
@@ -75,6 +79,14 @@ function setRefreshCookie(response: FastifyReply, refreshToken: string): void {
   void response.header(
     "Set-Cookie",
     `dnf_patch_refresh=${refreshToken}; HttpOnly; SameSite=Lax; Path=/v1/auth/refresh; Max-Age=${String(7 * 24 * 60 * 60)}`,
+  );
+}
+
+/** 无论服务端撤销是否成功都让当前浏览器删除 Cookie；复制品仍由数据库会话状态拒绝。 */
+function clearRefreshCookie(response: FastifyReply): void {
+  void response.header(
+    "Set-Cookie",
+    "dnf_patch_refresh=; HttpOnly; SameSite=Lax; Path=/v1/auth/refresh; Max-Age=0",
   );
 }
 

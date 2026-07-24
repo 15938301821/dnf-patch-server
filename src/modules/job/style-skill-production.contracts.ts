@@ -31,6 +31,24 @@ const uniqueSkillIdsSchema = z
     message: "selectedSkillIds 不能包含重复项。",
   });
 
+const frozenSourceEntriesSchema = z
+  .array(
+    z
+      .object({
+        sourceInventoryEntryId: z.uuid(),
+        sourceMetadataSha256: sha256Schema,
+      })
+      .strict(),
+  )
+  .min(1)
+  .max(500)
+  .refine(
+    (entries) =>
+      new Set(entries.map((entry) => entry.sourceInventoryEntryId)).size ===
+      entries.length,
+    { message: "冻结技能源不能包含重复 Inventory Entry。" },
+  );
+
 const frozenStyleSkillSchema = z
   .object({
     skillId: z.uuid(),
@@ -41,8 +59,9 @@ const frozenStyleSkillSchema = z
     sourceEvidence: z
       .object({
         sourceRunId: z.uuid(),
+        sourceInventoryId: z.uuid(),
         sourceFrameManifestArtifactId: z.uuid(),
-        sourceMetadataSha256: sha256Schema,
+        sourceEntries: frozenSourceEntriesSchema,
       })
       .strict(),
   })
@@ -185,8 +204,12 @@ export function createStyleSkillProductionJobPayload(
       skillThemePrompt,
       sourceEvidence: {
         sourceRunId: skill.sourceRunId,
+        sourceInventoryId: skill.sourceInventoryId,
         sourceFrameManifestArtifactId: skill.sourceFrameManifestArtifactId,
-        sourceMetadataSha256: skill.sourceMetadataSha256.toUpperCase(),
+        sourceEntries: skill.sourceEntries.map((source) => ({
+          sourceInventoryEntryId: source.sourceInventoryEntryId,
+          sourceMetadataSha256: source.sourceMetadataSha256.toUpperCase(),
+        })),
       },
     };
     return {

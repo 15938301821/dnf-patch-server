@@ -18,6 +18,7 @@ import { RunService } from "../run/run.service.js";
 import type {
   ImageModelRequest,
   ImageModelResult,
+  ModelEgressGuard,
   ModelCallView,
   ModelRole,
   StructuredModelRequest,
@@ -74,6 +75,7 @@ export class OpenAiService {
   /** 结构化调用只使用服务端固定模型、空工具列表和禁用存储的 provider adapter。 */
   async structured<T>(
     request: StructuredModelRequest<T>,
+    beforeEgress?: ModelEgressGuard,
   ): Promise<StructuredModelResult<T>> {
     const context = await this.resolveContext(request.runId, request.role);
     const requestSha256 = sha256Json({
@@ -98,6 +100,8 @@ export class OpenAiService {
       context,
       requestSha256,
     );
+    const guardedRecord = await this.applyEgressGuard(record, beforeEgress);
+    if (guardedRecord.status === "failed") return { record: guardedRecord };
     const egressRecord = await this.beginEgress(record);
     if (egressRecord.status === "failed") return { record: egressRecord };
     try {
@@ -133,7 +137,10 @@ export class OpenAiService {
   }
 
   /** 图像调用只返回短暂字节与哈希证据，不把图片 BLOB 写入数据库。 */
-  async image(request: ImageModelRequest): Promise<ImageModelResult> {
+  async image(
+    request: ImageModelRequest,
+    beforeEgress?: ModelEgressGuard,
+  ): Promise<ImageModelResult> {
     const context = await this.resolveContext(request.runId, "artist");
     const requestSha256 = sha256Json({
       model: context.model,
@@ -158,6 +165,8 @@ export class OpenAiService {
       context,
       requestSha256,
     );
+    const guardedRecord = await this.applyEgressGuard(record, beforeEgress);
+    if (guardedRecord.status === "failed") return { record: guardedRecord };
     const egressRecord = await this.beginEgress(record);
     if (egressRecord.status === "failed") return { record: egressRecord };
     try {
@@ -247,6 +256,25 @@ export class OpenAiService {
       status: "failed",
       errorCode: "MODEL_EGRESS_STATE_CONFLICT",
     });
+  }
+
+  private async applyEgressGuard(
+    record: ModelCallView,
+    beforeEgress: ModelEgressGuard | undefined,
+  ): Promise<ModelCallView> {
+    if (!beforeEgress) return record;
+    try {
+      if ((await beforeEgress(record)) === "accepted") return record;
+      return await this.finishRecord(record, {
+        status: "failed",
+        errorCode: "MODEL_EGRESS_GUARD_REJECTED",
+      });
+    } catch {
+      return this.finishRecord(record, {
+        status: "failed",
+        errorCode: "MODEL_EGRESS_GUARD_FAILED",
+      });
+    }
   }
 
   private async recordBlocked(

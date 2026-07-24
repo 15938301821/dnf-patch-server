@@ -51,7 +51,7 @@ import {
     ArtifactService,
     ArtifactOrphanReaperService,
   ],
-  exports: [ArtifactService],
+  exports: [ArtifactService, ARTIFACT_UPLOAD_OPTIONS],
 })
 /**
  * Artifact 纵向领域的 Nest 装配入口。

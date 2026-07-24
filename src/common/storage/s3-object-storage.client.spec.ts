@@ -13,9 +13,10 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  PutObjectCommand,
   type DeleteObjectCommandOutput,
   type GetObjectCommandOutput,
-  type PutObjectCommand,
+  type PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
 import { describe, expect, it } from "vitest";
 import {
@@ -42,16 +43,22 @@ function byteStream(...chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
 /** 记录 GET/DELETE 命令并返回固定响应的 AWS SDK fake，不连接网络。 */
 class FakeCommandClient implements S3StorageCommandClient {
   /** 按调用顺序保存命令，供断言固定 bucket 与 key。 */
-  readonly commands: Array<GetObjectCommand | DeleteObjectCommand> = [];
+  readonly commands: Array<
+    GetObjectCommand | PutObjectCommand | DeleteObjectCommand
+  > = [];
 
   /** @returns 固定 GET 响应与内存正文。 */
   send(command: GetObjectCommand): Promise<GetObjectCommandOutput>;
+  /** @returns 固定 PUT 成功响应。 */
+  send(command: PutObjectCommand): Promise<PutObjectCommandOutput>;
   /** @returns 固定 DELETE 成功响应。 */
   send(command: DeleteObjectCommand): Promise<DeleteObjectCommandOutput>;
   /** @returns 按命令类型返回对应 fake 响应，并记录命令。 */
   send(
-    command: GetObjectCommand | DeleteObjectCommand,
-  ): Promise<GetObjectCommandOutput | DeleteObjectCommandOutput> {
+    command: GetObjectCommand | PutObjectCommand | DeleteObjectCommand,
+  ): Promise<
+    GetObjectCommandOutput | PutObjectCommandOutput | DeleteObjectCommandOutput
+  > {
     this.commands.push(command);
     if (command instanceof GetObjectCommand) {
       return Promise.resolve({
@@ -60,6 +67,9 @@ class FakeCommandClient implements S3StorageCommandClient {
         ContentLength: 8,
         ContentType: "application/octet-stream",
       });
+    }
+    if (command instanceof PutObjectCommand) {
+      return Promise.resolve({ $metadata: {} });
     }
     return Promise.resolve({ $metadata: {} });
   }
@@ -203,6 +213,37 @@ describe("S3ObjectStorageClient", () => {
     expect(commandClient.commands[0]?.input).toMatchObject({
       Bucket: "dnf-patch-artifacts",
       Key: "runs/run-id/artifact.bin",
+    });
+  });
+
+  it("writes server bytes with immutable evidence-bound PUT commands", async () => {
+    const commandClient = new FakeCommandClient();
+    const client = new S3ObjectStorageClient(
+      "dnf-patch-artifacts",
+      commandClient,
+      new FakePresigner(),
+    );
+    const bytes = Buffer.from("artifact");
+
+    await client.write(
+      {
+        objectKey: "artifacts/model-output",
+        mediaType: "image/png",
+        byteLength: bytes.byteLength,
+        sha256: "A".repeat(64),
+      },
+      bytes,
+    );
+
+    expect(commandClient.commands[0]).toBeInstanceOf(PutObjectCommand);
+    expect(commandClient.commands[0]?.input).toMatchObject({
+      Bucket: "dnf-patch-artifacts",
+      Key: "artifacts/model-output",
+      Body: bytes,
+      ContentType: "image/png",
+      ContentLength: bytes.byteLength,
+      IfNoneMatch: "*",
+      Metadata: { "dnf-sha256": "A".repeat(64) },
     });
   });
 

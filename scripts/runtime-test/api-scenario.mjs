@@ -16,6 +16,14 @@ import {
 } from "./api-support.mjs";
 import { exerciseJobIntegrityQuarantine } from "./job-integrity-scenario.mjs";
 import { exerciseEvidenceApi } from "./evidence-scenario.mjs";
+import { exerciseProfessionSkillProduction } from "./profession-skill-production-scenario.mjs";
+import {
+  activateDeferredJob,
+  assertReclaimedAttemptState,
+  createRunBody,
+  deferQueuedJob,
+  expireLease,
+} from "./api-scenario-support.mjs";
 import { assert } from "./process.mjs";
 
 const host = "127.0.0.1";
@@ -188,6 +196,7 @@ export async function exerciseApi({
   let integrityRun;
   let integrityJobId;
   let evidence;
+  let professionSkillProduction;
   try {
     await requestJson(
       baseUrl,
@@ -353,9 +362,19 @@ export async function exerciseApi({
     evidence = await exerciseEvidenceApi({
       baseUrl,
       clientToken,
+      database,
       projectId: project.id,
       runId: run.id,
       otherRunId: retryRun.id,
+    });
+    professionSkillProduction = await exerciseProfessionSkillProduction({
+      baseUrl,
+      workerToken,
+      database,
+      projectId: project.id,
+      snapshotId: snapshot.id,
+      sourceRunId: run.id,
+      workerId,
     });
     const integrity = await exerciseJobIntegrityQuarantine({
       baseUrl,
@@ -384,6 +403,10 @@ export async function exerciseApi({
     "Runtime integrity scenario did not create a quarantined job.",
   );
   assert(evidence !== undefined, "Runtime evidence scenario did not run.");
+  assert(
+    professionSkillProduction !== undefined,
+    "Runtime Profession skill production scenario did not run.",
+  );
   return {
     projectId: project.id,
     snapshotId: snapshot.id,
@@ -416,84 +439,7 @@ export async function exerciseApi({
       integrityFailureQuarantined: true,
     },
     evidence: { httpOwnershipEnforced: evidence.httpOwnershipEnforced },
+    professionSkillProduction,
     liveEventsReceived: true,
   };
-}
-/** @param database 隔离 MySQL 连接；@param runId 场景 Run。@returns 被置为不可调度的唯一 Job ID。@throws 找不到唯一 queued Job 或更新失败时抛出。 */
-async function deferQueuedJob(database, runId) {
-  const [result] = await database.query(
-    "UPDATE jobs SET dispatch_ready_at = NULL WHERE run_id = ? AND status = 'queued'",
-    [runId],
-  );
-  assert(result.affectedRows === 1, "Could not defer the queued test Job.");
-  const [rows] = await database.query(
-    "SELECT id FROM jobs WHERE run_id = ? AND dispatch_ready_at IS NULL",
-    [runId],
-  );
-  assert(rows.length === 1, "Deferred test Job was not persisted.");
-  return rows[0].id;
-}
-/** @param database 隔离 MySQL 连接；@param jobId 已延迟 Job。@returns 更新完成后无值返回。@throws Job 未处于可激活状态时抛出。 */
-async function activateDeferredJob(database, jobId) {
-  const [result] = await database.query(
-    "UPDATE jobs SET dispatch_ready_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND dispatch_ready_at IS NULL",
-    [jobId],
-  );
-  assert(
-    result.affectedRows === 1,
-    "Could not activate the deferred test Job.",
-  );
-}
-/** @param projectId/snapshotId 已创建且同属的测试事实源；@param overrides 场景内固定 clientRunId/hash/scope。@returns 四项安全状态固定 false 的版本化创建 Run DTO。 */
-function createRunBody(projectId, snapshotId, overrides = {}) {
-  return {
-    projectId,
-    snapshotId,
-    clientRunId: overrides.clientRunId ?? "runtime-run",
-    action: "validate-only",
-    requestSha256: overrides.requestSha256 ?? "5".repeat(64),
-    serverConnectionEnabled: true,
-    modelEgressAuthorized: false,
-    deploymentAuthorized: false,
-    deploymentPerformed: false,
-    fullSkillCoverageProven: false,
-    clientCompatibilityProven: false,
-    jobs: [
-      {
-        kind: "context-freeze",
-        payload: {
-          schemaVersion: 1,
-          profileId: "runtime-profile",
-          parameters: {
-            scope: overrides.scope ?? "runtime-integration",
-          },
-        },
-        maxAttempts: 2,
-      },
-    ],
-    policyId: "runtime-policy",
-    policySha256: "6".repeat(64),
-  };
-}
-/** @param database 隔离 MySQL 连接；@param jobId 当前 leased Job。@returns 数据库时间过期写入完成后无值返回。@throws 未精确更新一个租约时抛出。 */
-async function expireLease(database, jobId) {
-  const [result] = await database.query(
-    "UPDATE jobs SET lease_expires_at = CURRENT_TIMESTAMP(3) - INTERVAL 1 SECOND WHERE id = ? AND status = 'leased'",
-    [jobId],
-  );
-  assert(result.affectedRows === 1, "Could not expire the active test lease.");
-}
-/** @param database 隔离 MySQL 连接；@param jobId 已重领 Job。@returns 旧 attempt timed_out 且新 attempt running 时完成。@throws attempt 顺序、错误码或状态不符时抛出。 */
-async function assertReclaimedAttemptState(database, jobId) {
-  const [attempts] = await database.query(
-    "SELECT attempt, status, error_code AS errorCode FROM job_attempts WHERE job_id = ? ORDER BY attempt",
-    [jobId],
-  );
-  assert(
-    attempts.length === 2 &&
-      attempts[0].status === "timed_out" &&
-      attempts[0].errorCode === "LEASE_EXPIRED" &&
-      attempts[1].status === "running",
-    "Reclaim did not close the expired attempt before opening a new attempt.",
-  );
 }

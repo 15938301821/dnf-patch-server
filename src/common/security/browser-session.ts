@@ -20,6 +20,8 @@ export type BrowserSessionKind = "access" | "refresh";
 export interface BrowserSessionPayload {
   /** token 用途；验证方必须传入预期种类，禁止 refresh 冒充 access。 */
   kind: BrowserSessionKind;
+  /** 同一登录会话的稳定 UUID；Access/Refresh 共享，用于服务端撤销和一次性轮换。 */
+  sessionId: string;
   /** 持久化用户 UUID，是后续所有权检查的稳定主体，不使用 displayName 代替。 */
   subject: string;
   /** 签发时用户名快照，仅用于响应展示，不能单独作为租户边界。 */
@@ -52,6 +54,7 @@ export interface BrowserSessionUser extends BrowserSessionPrincipal {
  * 签发一个带用途和过期时间的浏览器会话 token。
  * @param secret environmentSchema 校验的会话签名秘密，只在进程内存中使用。
  * @param user 已由认证 Service 从数据库确认的稳定用户主体。
+ * @param sessionId Auth Service 为一次登录生成的 UUID；同组 Access/Refresh 必须一致。
  * @param kind access 或 refresh，用于阻止跨用途重放。
  * @param ttlSeconds 调用方固定的有效期秒数；函数据当前时钟计算绝对过期时间。
  * @returns `session.<payload>.<signature>` 字符串；正文可解码但签名不可伪造，不含用户密码或密钥。
@@ -59,12 +62,14 @@ export interface BrowserSessionUser extends BrowserSessionPrincipal {
 export function createBrowserSessionToken(
   secret: string,
   user: BrowserSessionPrincipal,
+  sessionId: string,
   kind: BrowserSessionKind,
   ttlSeconds: number,
 ): string {
   // 步骤 1：只写入认证所需的稳定主体与展示快照，并为每次签发生成独立 nonce。
   const payload: BrowserSessionPayload = {
     kind,
+    sessionId,
     subject: user.id,
     username: user.username,
     displayName: user.displayName,
@@ -132,6 +137,7 @@ function parsePayload(value: string): BrowserSessionPayload | undefined {
       parsed === null ||
       typeof parsed !== "object" ||
       !("kind" in parsed) ||
+      !("sessionId" in parsed) ||
       !("subject" in parsed) ||
       !("username" in parsed) ||
       !("displayName" in parsed) ||
@@ -141,7 +147,11 @@ function parsePayload(value: string): BrowserSessionPayload | undefined {
       return undefined;
     }
     const payload = parsed as BrowserSessionPayload;
-    return typeof payload.subject === "string" &&
+    return typeof payload.sessionId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+        payload.sessionId,
+      ) &&
+      typeof payload.subject === "string" &&
       payload.subject.length <= 64 &&
       typeof payload.username === "string" &&
       payload.username.length <= 64 &&

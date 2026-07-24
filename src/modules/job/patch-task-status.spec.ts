@@ -6,7 +6,10 @@
  * @relatedPlan N/A（对应当前前端任务状态直接需求）
  */
 import { describe, expect, it } from "vitest";
-import { mapPatchTaskStatus } from "./patch-task-status.js";
+import {
+  mapPatchTaskProgress,
+  mapPatchTaskStatus,
+} from "./patch-task-status.js";
 
 describe("mapPatchTaskStatus", () => {
   it("preserves failed and blocked terminal states", () => {
@@ -20,5 +23,12 @@ describe("mapPatchTaskStatus", () => {
     expect(mapPatchTaskStatus("queued", "queued")).toBe("queued");
     expect(mapPatchTaskStatus("running", "queued")).toBe("running");
     expect(mapPatchTaskStatus("passed", "passed")).toBe("passed");
+  });
+
+  it("blocks a completed Profession Run without a final package", () => {
+    expect(mapPatchTaskStatus("passed", "queued")).toBe("blocked");
+    expect(mapPatchTaskStatus("passed", "building")).toBe("blocked");
+    expect(mapPatchTaskProgress(2, 2, "passed", "queued")).toBe(90);
+    expect(mapPatchTaskProgress(2, 2, "passed", "passed")).toBe(100);
   });
 });

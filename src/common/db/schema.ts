@@ -4,9 +4,8 @@
  * @author AI生成
  * @created 2026-07-23
  * @relatedPlan N/A - 用户直接需求
- * 调用关系：各领域 Repository 读写这些表，DatabaseService 合并关系 schema，drizzle-kit 据此生成 migration。
- * 输入输出：输入是 Service 已校验的 DTO/领域状态，输出是内部数据库行；副作用仅由调用方 transaction 执行。
- * 安全边界：JSON 必须写前读后校验；Run/Job/attempt/Artifact/outbox 归属、租约 fencing 与四项 false 状态由事务、复合外键和 CHECK 共同保护。
+ * 调用关系：Repository 读写这些表，DatabaseService 合并关系 schema，drizzle-kit 据此生成 migration。输入是已校验 DTO/领域状态，输出为内部数据库行。
+ * 副作用与安全边界：写入仅由调用方 transaction 执行；JSON 双向校验，归属、租约 fencing 与四项 false 状态由事务、复合外键和 CHECK 保护。
  */
 import { sql } from "drizzle-orm";
 import {
@@ -25,7 +24,8 @@ import {
 import { users } from "./identity-schema.js";
 /** 重导出身份表供统一 schema 消费；凭据持久化行不等于可返回客户端的脱敏 ViewModel。 */
 export { userModelConfigurations, users } from "./identity-schema.js";
-
+/** 重导出提交后通知表，保持各领域现有统一 schema 导入路径稳定。 */
+export { outboxEvents } from "./outbox-schema.js";
 const id = (name: string) => varchar(name, { length: 64 });
 const sha256 = (name: string) => varchar(name, { length: 64 });
 const utc = (name: string) => datetime(name, { mode: "date", fsp: 3 });
@@ -321,6 +321,8 @@ export const npkInventories = mysqlTable(
     entryCount: int("entry_count", { unsigned: true }).notNull(),
     status: varchar("status", { length: 40 }).notNull(),
     inventoryArtifactId: id("inventory_artifact_id"),
+    /** 同 Run 逐帧结构清单；历史记录可为空，但职业映射不能引用空值。 */
+    sourceFrameManifestArtifactId: id("source_frame_manifest_artifact_id"),
     createdAt: utc("created_at").notNull(),
   },
   (table) => [
@@ -335,6 +337,11 @@ export const npkInventories = mysqlTable(
       columns: [table.runId, table.inventoryArtifactId],
       foreignColumns: [artifacts.runId, artifacts.id],
       name: "npk_inventories_inventory_artifact_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.sourceFrameManifestArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "npk_inventories_frame_manifest_artifact_run_fk",
     }).onDelete("restrict"),
   ],
 );
@@ -481,20 +488,5 @@ export const manualReviews = mysqlTable(
       "manual_reviews_status_ck",
       sql`${table.status} in ('pending', 'approved', 'rejected')`,
     ),
-  ],
-);
-/** OutboxEvent 与业务状态在同一 transaction 写入，提交后 dispatcher 消费并设置 publishedAt；payload 需运行时校验，未发布记录可重试且不能提前广播成功。 */
-export const outboxEvents = mysqlTable(
-  "outbox_events",
-  {
-    id: id("id").primaryKey(),
-    topic: varchar("topic", { length: 120 }).notNull(),
-    aggregateId: id("aggregate_id").notNull(),
-    payload: json("payload").$type<Record<string, unknown>>().notNull(),
-    createdAt: utc("created_at").notNull(),
-    publishedAt: utc("published_at"),
-  },
-  (table) => [
-    index("outbox_pending_idx").on(table.publishedAt, table.createdAt),
   ],
 );

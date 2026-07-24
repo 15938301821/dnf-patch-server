@@ -136,6 +136,12 @@ export class NpkService {
         message: "Inventory 必须绑定当前租约已 finalize 的同 Job Artifact。",
       });
     }
+    if (result.status === "artifact-evidence-mismatch") {
+      throw new ConflictException({
+        code: "INVENTORY_ARTIFACT_EVIDENCE_MISMATCH",
+        message: "Inventory Artifact 的角色或来源证据不匹配。",
+      });
+    }
     throw new ConflictException({
       code: "JOB_LEASE_MISMATCH",
       message: "任务租约不存在、已过期或不属于当前 Worker。",
@@ -171,6 +177,21 @@ export class NpkService {
     runId: string,
   ): Promise<InventoryView | undefined> {
     return this.inventories.findByRun(projectId, runId);
+  }
+
+  /**
+   * 按 ID 查询 frozen Inventory 摘要，供跨模块核对整个 Inventory 的条目数量和证据身份。
+   * @throws INVENTORY_NOT_FOUND 当记录不存在或未处于 frozen 状态。
+   */
+  async getById(inventoryId: string): Promise<InventoryView> {
+    const inventory = await this.inventories.findById(inventoryId);
+    if (!inventory) {
+      throw new NotFoundException({
+        code: "INVENTORY_NOT_FOUND",
+        message: "冻结 Inventory 不存在。",
+      });
+    }
+    return inventory;
   }
 
   /**
