@@ -16,6 +16,7 @@
     "test:startup-exceptions": "npm run build && node scripts/audit-startup-exceptions.mjs",
     "test:mysql": "npm run build && node scripts/test-mysql-runtime.mjs",
     "test:inventory-real": "npm run build && npm --prefix ../dnf-patch-worker run build && node scripts/test-inventory-real.mjs",
+    "probe:profession-persistence": "node scripts/probe-profession-engineer-persistence.cjs",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "typecheck": "tsc --noEmit",
@@ -63,7 +64,8 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.48.1",
     "vitest": "4.1.10",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "yauzl": "3.2.0"
   },
   "overrides": {
     "@fastify/ajv-compiler": {
