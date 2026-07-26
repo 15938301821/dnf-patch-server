@@ -53,6 +53,15 @@ export const heartbeatJobSchema = z
   })
   .strict();
 
+/** Worker 只可用当前 fencing token 和稳定错误码显式交还瞬时失败的 attempt。 */
+export const surrenderJobSchema = z
+  .object({
+    workerId: z.uuid(),
+    leaseId: z.uuid(),
+    errorCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,79}$/u),
+  })
+  .strict();
+
 /**
  * Worker 完成一个已领取 Job 的严格 DTO。
  * 通过必须用 resultSha256 绑定输出证据；失败/阻断必须带稳定 errorCode，防止仅凭文本消息被下游当作成功。
@@ -95,6 +104,9 @@ export type ClaimJobInput = z.infer<typeof claimJobSchema>;
 
 /** Worker 续租请求的已解析身份和可选 fencing token。 */
 export type HeartbeatJobInput = z.infer<typeof heartbeatJobSchema>;
+
+/** Worker 显式交还当前 attempt 的严格输入。 */
+export type SurrenderJobInput = z.infer<typeof surrenderJobSchema>;
 
 /** Worker 完成请求的已解析终态与结果/错误证据。 */
 export type CompleteJobInput = z.infer<typeof completeJobSchema>;

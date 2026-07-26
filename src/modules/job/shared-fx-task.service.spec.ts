@@ -103,6 +103,39 @@ describe("SharedFxTaskService", () => {
     expect(workers.hasEnabledCapability).toHaveBeenCalledWith("shared-fx");
   });
 
+  it("uses the Factory v3 shared-fx contract profile", async () => {
+    factories.get.mockResolvedValue({
+      ...factory(),
+      version: "3.0.0",
+      config: {
+        schemaVersion: 3,
+        policyId: "shared-fx-policy",
+        policySha256: "E".repeat(64),
+        allowedJobKinds: ["inventory", "shared-fx"],
+        jobContracts: [
+          {
+            kind: "inventory",
+            schemaVersion: 1,
+            profileId: "resource-profile",
+          },
+          {
+            kind: "shared-fx",
+            schemaVersion: 1,
+            profileId: "shared-fx-production-v1",
+          },
+        ],
+        arbitraryExecution: false,
+        deploymentAuthorized: false,
+      },
+    });
+
+    await service.create(input, "shared-fx.request-1", ownerUserId);
+
+    const job = runs.create.mock.calls[0]?.[0].jobs[0];
+    const payload = sharedFxJobPayloadV1Schema.parse(job?.payload);
+    expect(payload.profileId).toBe("shared-fx-production-v1");
+  });
+
   it("fails closed before Run creation when the Snapshot lacks a manifest hash", async () => {
     projects.getSnapshot.mockResolvedValue({
       ...snapshot(),

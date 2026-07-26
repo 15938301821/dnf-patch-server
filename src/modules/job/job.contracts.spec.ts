@@ -6,7 +6,7 @@
  * @relatedPlan N/A（服务端 Job 完成契约收紧）
  */
 import { describe, expect, it } from "vitest";
-import { completeJobSchema } from "./job.contracts.js";
+import { completeJobSchema, surrenderJobSchema } from "./job.contracts.js";
 
 const workerId = "11111111-1111-4111-8111-111111111111";
 const leaseId = "22222222-2222-4222-8222-222222222222";
@@ -49,5 +49,28 @@ describe("completeJobSchema", () => {
         errorCode: "GUARDRAIL_BLOCKED",
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("surrenderJobSchema", () => {
+  it("requires an exact lease and a bounded stable error code", () => {
+    expect(
+      surrenderJobSchema.safeParse({
+        ...base,
+        errorCode: "MODEL_PROVIDER_REQUEST_FAILED",
+      }).success,
+    ).toBe(true);
+    expect(
+      surrenderJobSchema.safeParse({
+        workerId,
+        errorCode: "MODEL_PROVIDER_REQUEST_FAILED",
+      }).success,
+    ).toBe(false);
+    expect(
+      surrenderJobSchema.safeParse({
+        ...base,
+        errorCode: "provider error with spaces",
+      }).success,
+    ).toBe(false);
   });
 });

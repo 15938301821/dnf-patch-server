@@ -7,6 +7,7 @@
  */
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import { sha256JcsV1 } from "../../common/utils/canonical.js";
+import { resolveFactoryJobContract } from "../factory/factory.contracts.js";
 import { FactoryService } from "../factory/factory.service.js";
 import { ProjectService } from "../project/project.service.js";
 import type { CreateRunInput, RunCreateOptions } from "../run/run.contracts.js";
@@ -47,10 +48,15 @@ interface SharedFxRunCreatePort {
   ): ReturnType<RunService["create"]>;
 }
 
-type FactoryV2Config = Extract<
+type RunnableFactoryConfig = Extract<
   Awaited<ReturnType<FactoryService["get"]>>["config"],
-  { schemaVersion: 2 }
+  { schemaVersion: 2 | 3 }
 >;
+
+interface SharedFxFactoryContext {
+  config: RunnableFactoryConfig;
+  profileId: string;
+}
 
 @Injectable()
 export class SharedFxTaskService {
@@ -91,7 +97,7 @@ export class SharedFxTaskService {
       });
     }
     const factory = await this.factories.get(project.factoryId);
-    const factoryConfig = requireSharedFxFactory(factory);
+    const factoryContext = requireSharedFxFactory(factory);
     if (!(await this.workers.hasEnabledCapability("shared-fx"))) {
       throw new ConflictException({
         code: "SHARED_FX_WORKER_REQUIRED",
@@ -100,13 +106,13 @@ export class SharedFxTaskService {
     }
 
     const payload = createSharedFxJobPayload({
-      profileId: factoryConfig.profileId,
-      policyId: factoryConfig.policyId,
-      policySha256: factoryConfig.policySha256,
+      profileId: factoryContext.profileId,
+      policyId: factoryContext.config.policyId,
+      policySha256: factoryContext.config.policySha256,
       snapshot,
     });
     const run = await this.runs.create(
-      createSharedFxRunInput(input, factoryConfig, payload),
+      createSharedFxRunInput(input, factoryContext.config, payload),
       idempotencyKey,
       { ownerUserId },
     );
@@ -118,41 +124,36 @@ export class SharedFxTaskService {
   }
 }
 
-/** 仅接受已启用且完整登记 shared-fx v1 的 Factory v2 策略。 */
+/** 仅接受已启用且完整登记 shared-fx v1 的 Factory v2/v3 策略。 */
 function requireSharedFxFactory(
   factory: Awaited<ReturnType<FactoryService["get"]>>,
-): FactoryV2Config {
+): SharedFxFactoryContext {
   if (!factory.enabled) {
     throw new ConflictException({
       code: "FACTORY_DISABLED",
       message: "工厂模板已禁用。",
     });
   }
-  if (factory.config.schemaVersion !== 2) {
+  if (factory.config.schemaVersion === 1) {
     throw new ConflictException({
       code: "FACTORY_POLICY_VERSION_REQUIRED",
-      message: "共享特效任务需要 Factory v2 冻结策略。",
+      message: "共享特效任务需要 Factory v2 或 v3 冻结策略。",
     });
   }
-  const contract = factory.config.jobContracts.find(
-    (candidate) => candidate.kind === "shared-fx",
-  );
-  if (
-    !factory.config.allowedJobKinds.includes("shared-fx") ||
-    contract?.schemaVersion !== 1
-  ) {
+  const contract = resolveFactoryJobContract(factory.config, "shared-fx");
+  if (contract?.schemaVersion !== 1) {
     throw new ConflictException({
       code: "SHARED_FX_CONTRACT_REQUIRED",
       message: "Factory 未启用 shared-fx v1 声明式契约。",
     });
   }
-  return factory.config;
+  return { config: factory.config, profileId: contract.profileId };
 }
 
 /** 构造可审计 Run 请求，但不接受调用方提供的 Worker 负载或安全状态。 */
 function createSharedFxRunInput(
   input: CreateSharedFxTaskInput,
-  factoryConfig: FactoryV2Config,
+  factoryConfig: RunnableFactoryConfig,
   payload: SharedFxJobPayloadV1,
 ): CreateRunInput {
   const request = {

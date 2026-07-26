@@ -1,0 +1,1 @@
+ALTER TABLE `professions` DROP INDEX `professions_workflow_project_uq`;

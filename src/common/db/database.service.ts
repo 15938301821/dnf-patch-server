@@ -54,6 +54,11 @@ export class DatabaseService implements OnModuleDestroy {
       timezone: "Z",
       enableKeepAlive: true,
     });
+    this.pool.pool.on("connection", (connection) => {
+      connection.query("SET SESSION time_zone = '+00:00'", (error) => {
+        if (error) connection.destroy();
+      });
+    });
     this.database = drizzle(this.pool, { schema, mode: "default" });
   }
 

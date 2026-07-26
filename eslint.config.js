@@ -14,7 +14,7 @@ export default tseslint.config(
   ...strictTypeChecked,
   prettier,
   {
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.{mjs,cjs}"],
     languageOptions: { globals: globals.node },
     rules: {
       "max-lines": [

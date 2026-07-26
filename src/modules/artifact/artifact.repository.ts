@@ -78,6 +78,25 @@ export class ArtifactRepository implements ArtifactRepositoryPort {
   }
 
   /**
+   * 在上游领域完成用户所有权与固定角色解析后，二次确认 Artifact 属于指定 Run。
+   *
+   * @param runId 已由调用领域完成所有权检查的 Run UUID；本方法不单独持有浏览器身份。
+   * @param artifactId 从该领域终态证据取得的 Artifact UUID，而非客户端提供的对象 key。
+   * @returns 同 Run 时返回仅供 ArtifactService 签名的 objectKey，否则返回 undefined 并禁止签名。
+   */
+  async findObjectKey(
+    runId: string,
+    artifactId: string,
+  ): Promise<string | undefined> {
+    const [row] = await this.connection.database
+      .select({ objectKey: artifacts.storageKey })
+      .from(artifacts)
+      .where(and(eq(artifacts.runId, runId), eq(artifacts.id, artifactId)))
+      .limit(1);
+    return row?.objectKey;
+  }
+
+  /**
    * 读取一个 Run 的已 finalized Artifact 元数据并按创建时间排序。
    *
    * @param runId 来自 ArtifactService 的 Run UUID；调用方负责其认证或领域所有权边界。

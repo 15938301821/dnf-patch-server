@@ -8,6 +8,7 @@
 import { max, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { DatabaseService } from "../../common/db/database.service.js";
+import { databaseUtcDate } from "../../common/db/mysql-datetime.js";
 import {
   jobs,
   manualReviews,
@@ -23,11 +24,11 @@ export type JobTransaction = Parameters<
 /** 使用数据库时间，避免 Worker 或 Nest 进程时钟影响租约与事件顺序。 */
 export async function databaseNow(transaction: JobTransaction): Promise<Date> {
   const [row] = await transaction
-    .select({ value: sql<Date>`CURRENT_TIMESTAMP(3)` })
+    .select({ value: sql<Date | string>`CURRENT_TIMESTAMP(3)` })
     .from(jobs)
     .limit(1);
   if (!row) throw new Error("DATABASE_TIME_UNAVAILABLE");
-  return row.value instanceof Date ? row.value : new Date(row.value);
+  return databaseUtcDate(row.value);
 }
 
 /**

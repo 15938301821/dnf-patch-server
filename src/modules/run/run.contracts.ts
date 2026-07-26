@@ -13,7 +13,7 @@
  * ViewModel，不包含数据库行、Worker 令牌、本机路径、可执行命令、模型密钥或对象存储 URL。
  * 副作用：本文件只做内存 schema 校验和类型推导，不访问数据库、网络、Worker 或游戏资源。
  * 安全边界：serverConnectionEnabled 固定 true，部署/覆盖/兼容性状态固定 false；Job payload 必须由下游按
- * Factory v2 的逐 kind contract 再次解析。schema 成功不代表 Project/Snapshot/Factory 归属、Guardrail、
+ * Factory v2/v3 的逐 kind contract 再次解析。schema 成功不代表 Project/Snapshot/Factory 归属、Guardrail、
  * Worker capability、Artifact 证据或客户端兼容已证明。
  */
 import { z } from "zod";

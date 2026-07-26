@@ -1,5 +1,5 @@
 /**
- * @fileoverview 将候选帧证据与 Run 所属 Factory v2 冻结策略和来源帧不变量进行比对，并持久化审计决策；
+ * @fileoverview 将候选帧证据与 Run 所属 Factory v2/v3 冻结策略和来源帧不变量进行比对，并持久化审计决策；
  * 不读取图片/NPK 字节、不调用模型、不创建 Worker Job或部署补丁。
  * @module modules/guardrail/frame-service
  * @author AI生成
@@ -12,7 +12,7 @@
  * 图片字节或原始数据库行。
  * 副作用：读取 Run 绑定并插入 Guardrail 决策。当前写入不创建 Run/Job，也不替代 Run 创建事务中的
  * 声明式 payload Guardrail。
- * 安全边界：策略必须从该 Run 的 Factory v2 冻结配置解析；来源哈希、尺寸、锚点或可见 alpha 不一致时
+ * 安全边界：策略必须从该 Run 的 Factory v2/v3 冻结配置解析；来源哈希、尺寸、锚点或可见 alpha 不一致时
  * fail-closed。allow 不是资源映射、客户端兼容或部署证明。
  */
 import {
@@ -46,7 +46,7 @@ export class FrameGuardrailService {
    * 评估并记录候选帧是否保持来源不变量。
    *
    * 步骤 1：沿 Run -> Project -> Factory 查询当前 Run 的冻结配置；步骤 2：验证调用方 policyId/
-   * policySha256 与 Factory v2 完全一致；步骤 3：逐项比较来源身份、尺寸/画布、锚点和 alpha；
+   * policySha256 与 Factory v2/v3 完全一致；步骤 3：逐项比较来源身份、尺寸/画布、锚点和 alpha；
    * 步骤 4：无论 allow/deny 都写入带输入摘要的审计决策。Run/策略缺失或不匹配时在写入前抛出，
    * 防止调用方把候选帧绑定到任意策略。
    *
@@ -140,17 +140,17 @@ export class FrameGuardrailService {
 export type FramePolicyBindingStatus = "matched" | "mismatch" | "unavailable";
 
 /**
- * 只接受 Run 所属的 Factory v2 冻结策略，避免调用方伪造 Frame Guardrail 的策略来源。
+ * 只接受 Run 所属的 Factory v2/v3 冻结策略，避免调用方伪造 Frame Guardrail 的策略来源。
  * @param input 请求中声明的 policyId 与 policySha256，不信任其本身，需要与数据库 JSON 比对。
  * @param factoryConfig 从 Run 所属 Factory 读取的未知 JSON，必须先通过 factoryConfigSchema 解析。
- * @returns matched 表示 v2 配置与请求完全对应；unavailable/mismatch 都要求上游拒绝而非降级。
+ * @returns matched 表示可运行配置与请求完全对应；unavailable/mismatch 都要求上游拒绝而非降级。
  */
 export function validateFramePolicyBinding(
   input: Pick<FrameGuardrailInput, "policyId" | "policySha256">,
   factoryConfig: unknown,
 ): FramePolicyBindingStatus {
   const parsed = factoryConfigSchema.safeParse(factoryConfig);
-  if (!parsed.success || parsed.data.schemaVersion !== 2) {
+  if (!parsed.success || parsed.data.schemaVersion === 1) {
     return "unavailable";
   }
   return parsed.data.policyId === input.policyId &&

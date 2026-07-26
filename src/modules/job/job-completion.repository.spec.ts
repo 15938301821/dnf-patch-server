@@ -70,7 +70,7 @@ describe("JobRepository.complete Profession evidence gate", () => {
     expect(harness.updated).toEqual([]);
   });
 
-  it("blocks the unfinished package while completing verified skill production", async () => {
+  it("activates the deferred package while completing verified skill production", async () => {
     const fixture = completionFixture();
     const completion = resolveProfessionCompletionEvidence(
       fixture.job,
@@ -94,15 +94,14 @@ describe("JobRepository.complete Profession evidence gate", () => {
       }),
     ).resolves.toMatchObject({ status: "accepted" });
 
-    expect(harness.updated).toHaveLength(4);
+    expect(harness.updated).toHaveLength(3);
     expect(harness.updated[0]).toMatchObject({ status: "passed" });
     expect(harness.updated[1]).toMatchObject({ status: "passed" });
     expect(harness.updated[2]).toMatchObject({
-      status: "blocked",
-      finishedAt: databaseTime,
+      dispatchReadyAt: databaseTime,
+      updatedAt: databaseTime,
     });
-    expect(harness.updated[3]).toMatchObject({ status: "passed" });
-    expect(harness.insert).toHaveBeenCalledTimes(2);
+    expect(harness.insert).not.toHaveBeenCalled();
   });
 });
 
@@ -184,7 +183,7 @@ function completionHarness(fixture: CompletionFixture): CompletionHarness {
   };
 }
 
-/** 提供 accepted 路径后续的 Job 聚合与事件查询，并记录四个状态更新和两个事件插入。 */
+/** 提供 accepted 路径的 deferred Package 行与未终结 Job 聚合，并记录原子状态更新。 */
 function acceptedCompletionHarness(
   fixture: CompletionFixture,
 ): AcceptedCompletionHarness {
@@ -194,8 +193,20 @@ function acceptedCompletionHarness(
     [{ id: runId }],
     fixture.productions,
     fixture.artifacts,
-    [{ id: jobId, status: "passed" }],
-    [{ sequence: null }],
+    [
+      {
+        id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        status: "queued",
+        dispatchReadyAt: null,
+      },
+    ],
+    [
+      { id: jobId, status: "passed" },
+      {
+        id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        status: "queued",
+      },
+    ],
   ];
   let selectIndex = 0;
   const forUpdate = vi.fn();

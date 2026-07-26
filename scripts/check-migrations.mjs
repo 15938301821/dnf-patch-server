@@ -18,6 +18,8 @@ import { resolve } from "node:path";
 const migrationRoot = resolve("drizzle");
 /** drizzle-kit journal 路径，是 migration 顺序与 tag 的静态事实源。 */
 const journalPath = resolve(migrationRoot, "meta", "_journal.json");
+/** MySQL 表、索引和约束名的最大字符长度；超限会在真实 DDL 时拒绝。 */
+const mysqlIdentifierMaxLength = 64;
 // 步骤 1：先解析 journal 结构；缺少 entries 时不能继续比较并必须失败。
 const journal = JSON.parse(await readFile(journalPath, "utf8"));
 if (!Array.isArray(journal.entries)) {
@@ -35,9 +37,10 @@ if (JSON.stringify(sqlFiles) !== JSON.stringify(journalFiles)) {
 }
 
 let foreignKeyCount = 0;
-// 步骤 3：逐条静态检查删除语义；限制性外键避免生命周期删除悄然移除审计证据。
+// 步骤 3：逐条静态检查标识符长度与删除语义，避免真实 MySQL 在运行时拒绝 migration。
 for (const file of sqlFiles) {
   const sql = await readFile(resolve(migrationRoot, file), "utf8");
+  assertMySqlIdentifierLengths(file, sql);
   if (/ON\s+DELETE\s+(?:CASCADE|SET\s+NULL)/iu.test(sql)) {
     throw new Error(`Migration contains destructive delete behavior: ${file}`);
   }
@@ -48,6 +51,29 @@ for (const file of sqlFiles) {
     foreignKeyCount += 1;
     if (!/ON\s+DELETE\s+restrict/iu.test(statement)) {
       throw new Error(`Foreign key is not delete-restrictive in ${file}.`);
+    }
+  }
+}
+
+/**
+ * 拒绝超过 MySQL 限制的表、索引或命名约束，避免静态门禁通过但真实 DDL 失败。
+ * @param file 当前 migration 文件名，仅用于稳定错误定位。
+ * @param sql migration SQL 正文，不执行也不解析业务数据。
+ */
+function assertMySqlIdentifierLengths(file, sql) {
+  const identifierPatterns = [
+    /CREATE\s+TABLE\s+`([^`]+)`/giu,
+    /(?:ADD\s+)?CONSTRAINT\s+`([^`]+)`/giu,
+    /CREATE\s+(?:UNIQUE\s+)?INDEX\s+`([^`]+)`/giu,
+  ];
+  for (const pattern of identifierPatterns) {
+    for (const match of sql.matchAll(pattern)) {
+      const identifier = match[1];
+      if (Array.from(identifier).length > mysqlIdentifierMaxLength) {
+        throw new Error(
+          `Migration identifier exceeds MySQL's ${mysqlIdentifierMaxLength}-character limit: ${file}: ${identifier}`,
+        );
+      }
     }
   }
 }

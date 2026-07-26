@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { sha256JcsV1 } from "../../common/utils/canonical.js";
+import { resolveFactoryJobContract } from "../factory/factory.contracts.js";
 import { FactoryService } from "../factory/factory.service.js";
 import { NpkService } from "../npk/npk.service.js";
 import { ProjectService } from "../project/project.service.js";
@@ -73,16 +74,17 @@ interface RunCreatePort {
   ): ReturnType<RunService["create"]>;
 }
 
-type FactoryV2Config = Extract<
+type RunnableFactoryConfig = Extract<
   Awaited<ReturnType<FactoryService["get"]>>["config"],
-  { schemaVersion: 2 }
+  { schemaVersion: 2 | 3 }
 >;
 
 interface ResourceImportContext {
   projectId: string;
   snapshotId: string;
   snapshot: Awaited<ReturnType<ProjectService["getSnapshot"]>>;
-  factoryConfig: FactoryV2Config;
+  factoryConfig: RunnableFactoryConfig;
+  inventoryProfileId: string;
 }
 
 type ResourceImportContextResolution =
@@ -185,18 +187,17 @@ export class ResourceImportService {
       if (project.archived) {
         return { ready: false, message: "资源导入 Project 已归档。" };
       }
-      const inventoryContract =
-        factory.config.schemaVersion === 2
-          ? factory.config.jobContracts.find(
-              (contract) => contract.kind === "inventory",
-            )
-          : undefined;
-      if (
-        !factory.enabled ||
-        factory.config.schemaVersion !== 2 ||
-        !factory.config.allowedJobKinds.includes("inventory") ||
-        inventoryContract?.schemaVersion !== 1
-      ) {
+      if (!factory.enabled || factory.config.schemaVersion === 1) {
+        return {
+          ready: false,
+          message: "资源导入 Factory 未启用 inventory v1 契约。",
+        };
+      }
+      const inventoryContract = resolveFactoryJobContract(
+        factory.config,
+        "inventory",
+      );
+      if (inventoryContract?.schemaVersion !== 1) {
         return {
           ready: false,
           message: "资源导入 Factory 未启用 inventory v1 契约。",
@@ -215,6 +216,7 @@ export class ResourceImportService {
           snapshotId,
           snapshot,
           factoryConfig: factory.config,
+          inventoryProfileId: inventoryContract.profileId,
         },
       };
     } catch (error) {
@@ -235,7 +237,7 @@ function createImportRunInput(
 ): CreateRunInput {
   const payload = {
     schemaVersion: 1 as const,
-    profileId: context.factoryConfig.profileId,
+    profileId: context.inventoryProfileId,
     parameters: {
       workflow: "resource-inventory-import-v1",
       mode: "server-mirror",

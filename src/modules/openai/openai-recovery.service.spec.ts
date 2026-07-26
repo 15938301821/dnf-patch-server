@@ -13,7 +13,7 @@ describe("OpenAiRecoveryService", () => {
     vi.useRealTimers();
   });
 
-  it("uses timeout multiplied by all provider attempts", async () => {
+  it("按 fallback 与全部 Provider attempt 计算恢复窗口", async () => {
     const calls = { abandonStale: vi.fn().mockResolvedValue(2) };
     const config = {
       getOrThrow: vi.fn((key: string) =>
@@ -24,7 +24,7 @@ describe("OpenAiRecoveryService", () => {
 
     await service.onApplicationBootstrap();
 
-    expect(calls.abandonStale).toHaveBeenCalledWith(30_000);
+    expect(calls.abandonStale).toHaveBeenCalledWith(40_000);
   });
 
   it("keeps degraded startup alive and retries after a database failure", async () => {

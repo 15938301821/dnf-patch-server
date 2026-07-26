@@ -12,6 +12,7 @@ import {
   encodeProfessionEngineerStylePlan,
   parseProfessionEngineerStylePlanBytes,
   professionEngineerModelDecisionSchema,
+  professionEngineerModelWireDecisionSchema,
   professionEngineerStylePlanSchema,
   type ProfessionEngineerModelDecision,
 } from "./profession-engineer-plan.js";
@@ -57,6 +58,24 @@ describe("Profession engineer style plan", () => {
       professionEngineerModelDecisionSchema.parse({
         ...decision(),
         parameters: { ...decision().parameters, crackDensity: 0.5 },
+      }),
+    ).toThrow();
+  });
+
+  it("keeps provider wire constraints compatible and enforces strict domain constraints afterwards", () => {
+    const wireDecision = professionEngineerModelWireDecisionSchema.parse({
+      ...decision(),
+      palette: { ...decision().palette, shadow: [10, 22] },
+      parameters: { ...decision().parameters, crackDensity: 0.5 },
+    });
+
+    expect(() =>
+      professionEngineerModelDecisionSchema.parse(wireDecision),
+    ).toThrow();
+    expect(() =>
+      professionEngineerModelWireDecisionSchema.parse({
+        ...wireDecision,
+        command: "do-not-accept",
       }),
     ).toThrow();
   });

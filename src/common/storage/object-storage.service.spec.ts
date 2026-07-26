@@ -122,6 +122,43 @@ describe("ObjectStorageService", () => {
     );
   });
 
+  it("passes a safe attachment name to the short-lived GET signer", async () => {
+    const authorizeDownload = vi
+      .fn()
+      .mockResolvedValue("http://127.0.0.1:9000/download");
+    const service = new ObjectStorageService(
+      enabledOptions,
+      clientStub({ authorizeDownload }).client,
+    );
+
+    await service.authorizeDownload({
+      objectKey: "artifacts/validation",
+      downloadName: "validation.json",
+    });
+
+    expect(authorizeDownload).toHaveBeenCalledWith(
+      "artifacts/validation",
+      300,
+      "validation.json",
+    );
+  });
+
+  it("rejects an unsafe attachment name before contacting the signer", async () => {
+    const authorizeDownload = vi.fn();
+    const service = new ObjectStorageService(
+      enabledOptions,
+      clientStub({ authorizeDownload }).client,
+    );
+
+    await expect(
+      service.authorizeDownload({
+        objectKey: "artifacts/validation",
+        downloadName: "../validation.json",
+      }),
+    ).rejects.toMatchObject({ code: "OBJECT_STORAGE_INVALID_INPUT" });
+    expect(authorizeDownload).not.toHaveBeenCalled();
+  });
+
   // 分块边界不能改变实际长度或 SHA-256，verify 必须消费完整流后才返回证据。
   it("recomputes length and SHA-256 from the complete object stream", async () => {
     const { client } = clientStub({

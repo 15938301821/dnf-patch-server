@@ -1,5 +1,5 @@
 /**
- * @fileoverview 编排 Run 的安全创建、幂等重放、Factory v2/Project/Snapshot/Job contract/Guardrail 校验、
+ * @fileoverview 编排 Run 的安全创建、幂等重放、Factory v2/v3、Project/Snapshot、Job contract 与 Guardrail 校验、
  * 事件读取与延迟派发补偿；不处理 HTTP 协议、直接 Drizzle 操作、Worker lease 或 Socket 广播。
  * @module modules/run/service
  * @author AI生成
@@ -12,7 +12,7 @@
  * ViewModel 或稳定 HTTP 领域错误，不返回数据库行、模型凭据、Worker token、本机路径或命令。
  * 副作用：create 经 Repository 原子写入 Run/决策/可选 Job/事件/outbox；get/events 只读；
  * blockDeferredDispatch 只在严格条件下执行补偿状态写入。
- * 安全边界：幂等重放绑定完整请求和 owner；Project/Snapshot/Factory v2/策略/Job contract 任一缺失或不一致
+ * 安全边界：幂等重放绑定完整请求和 owner；Project/Snapshot/Factory v2/v3、策略或 Job contract 任一缺失或不一致
  * 必须失败；Guardrail deny 创建 blocked Run 但零 Job；部署、全技能覆盖与兼容证明始终不可提升。该 Service
  * 不证明 Worker capability、Artifact 完整性、模型调用结果或真实客户端兼容性。
  */
@@ -24,6 +24,7 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { isMysqlDuplicateEntry } from "../../common/db/mysql-errors.js";
+import { resolveFactoryJobContract } from "../factory/factory.contracts.js";
 import { FactoryService } from "../factory/factory.service.js";
 import { GuardrailService } from "../guardrail/guardrail.service.js";
 import { parseJobPayload } from "../job/job-payload-contracts.js";
@@ -94,7 +95,7 @@ export class RunService {
    * 验证冻结上下文后创建或安全重放 Run。
    *
    * 步骤 1：计算覆盖完整 DTO 和 owner 的服务器幂等指纹，并优先检查同 Project 的已有 key；步骤 2：读取
-   * Project/Snapshot/Factory，拒绝 archived、disabled 或非 v2 Factory；步骤 3：确认 input policy 与 Factory
+   * Project/Snapshot/Factory，拒绝 archived、disabled 或只读 v1 Factory；步骤 3：确认 input policy 与 Factory
    * 冻结 policyId/hash 一致；步骤 4：逐 Job 检查允许 kind、版本化 payload schema、profile 和 shared-fx
    * Snapshot 绑定；步骤 5：为每个 Job 计算 Guardrail 决策；步骤 6：在 Repository 事务内写入权威状态。
    * MySQL 唯一键竞争时重新读取幂等记录，只接受相同服务器指纹，避免并发请求创建两个语义不同的 Run。
@@ -139,10 +140,10 @@ export class RunService {
         message: "工厂模板已禁用。",
       });
     }
-    if (factory.config.schemaVersion !== 2) {
+    if (factory.config.schemaVersion === 1) {
       throw new ConflictException({
         code: "FACTORY_POLICY_VERSION_REQUIRED",
-        message: "创建 Run 需要绑定策略哈希的 Factory v2 配置。",
+        message: "创建 Run 需要绑定策略哈希的 Factory v2 或 v3 配置。",
       });
     }
     if (
@@ -155,12 +156,9 @@ export class RunService {
         message: "Run 策略与工厂冻结策略不一致。",
       });
     }
-    const contracts = new Map(
-      factory.config.jobContracts.map((contract) => [contract.kind, contract]),
-    );
     for (const job of input.jobs) {
-      const contract = contracts.get(job.kind);
-      if (!factory.config.allowedJobKinds.includes(job.kind) || !contract) {
+      const contract = resolveFactoryJobContract(factory.config, job.kind);
+      if (!contract) {
         throw new ConflictException({
           code: "JOB_KIND_NOT_ALLOWED",
           message: "工厂模板未允许提交的任务类型。",
@@ -172,13 +170,13 @@ export class RunService {
           contract.schemaVersion,
           job.payload,
         );
-        if (payload.profileId !== factory.config.profileId) {
+        if (payload.profileId !== contract.profileId) {
           throw new Error("JOB_PROFILE_MISMATCH");
         }
         if (
           job.kind === "shared-fx" &&
           !hasSharedFxPayloadBinding(payload, {
-            profileId: factory.config.profileId,
+            profileId: contract.profileId,
             policyId: factory.config.policyId,
             policySha256: factory.config.policySha256,
             snapshot,

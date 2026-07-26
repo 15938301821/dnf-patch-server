@@ -47,8 +47,9 @@ const utc = (name: string) => datetime(name, { mode: "date", fsp: 3 });
 
 /**
  * 用户拥有的职业目录根；生产方是 Profession Repository，消费方是技能/风格与 PatchTask 流程。
- * ownerUserId 是稳定租户边界，name/slug 仅展示或路由；workflowProjectId 与 catalogSnapshotId 必须
- * 同时为空或同时存在，并由复合外键证明 Snapshot 属于该 Project。
+ * ownerUserId 是稳定租户边界，name/slug 仅展示或路由；多个职业可以引用同一份冻结的 Project/
+ * Snapshot 证据。workflowProjectId 与 catalogSnapshotId 必须同时为空或同时存在，并由复合外键
+ * 证明 Snapshot 属于该 Project。
  */
 export const professions = mysqlTable(
   "professions",
@@ -80,7 +81,6 @@ export const professions = mysqlTable(
       table.ownerUserId,
       table.canonicalName,
     ),
-    uniqueIndex("professions_workflow_project_uq").on(table.workflowProjectId),
     check(
       "professions_publish_status_ck",
       sql`${table.publishStatus} in ('private', 'pending', 'published', 'rejected')`,

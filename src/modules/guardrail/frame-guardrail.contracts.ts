@@ -34,7 +34,7 @@ const frameGeometrySchema = z
 /**
  * Frame Guardrail 的严格 HTTP DTO。
  * source.sha256 是来源证据身份，candidate.sourceSha256 必须由 Service 比对；policy 字段必须与 Run
- * 所属 Factory v2 的冻结策略一致，调用方不能自行选择任意策略。
+ * 所属 Factory v2/v3 的冻结策略一致，调用方不能自行选择任意策略。
  */
 export const frameGuardrailSchema = z
   .object({

@@ -95,6 +95,41 @@ export class ArtifactService {
   }
 
   /**
+   * 为已完成领域所有权检查的同 Run Artifact 签发短期浏览器下载 URL。
+   *
+   * 调用关系：PatchTaskService 只能在当前用户拥有的 passed Package V3 三角色证据完整后调用；
+   * ArtifactRepository 再次确认 Artifact 与 Run 归属，ObjectStoragePort 才接收内部 objectKey。
+   *
+   * @param runId 上游领域已按认证用户验证所有权的 Run UUID。
+   * @param artifactId 从固定终态角色证据解析出的 Artifact UUID，不能由浏览器自由选择。
+   * @param downloadName Artifact 表中经校验的逻辑名称，用于 attachment 响应而非对象定位。
+   * @returns 有限期下载授权；不暴露 objectKey，不证明对象已下载、兼容或获准部署。
+   * @throws ARTIFACT_NOT_FOUND 当 Artifact 不存在或不属于指定 Run；存储签名失败不会返回 URL。
+   */
+  async authorizeRunArtifactDownload(
+    runId: string,
+    artifactId: string,
+    downloadName: string,
+  ): Promise<ArtifactDownloadAuthorizationView> {
+    const objectKey = await this.artifacts.findObjectKey(runId, artifactId);
+    if (!objectKey) {
+      throw new NotFoundException({
+        code: "ARTIFACT_NOT_FOUND",
+        message: "Artifact 不存在或不属于当前 Run。",
+      });
+    }
+    const authorization = await this.storage.authorizeDownload({
+      objectKey,
+      downloadName,
+    });
+    return {
+      artifactId,
+      downloadUrl: authorization.url,
+      expiresAtUtc: authorization.expiresAtUtc,
+    };
+  }
+
+  /**
    * 读取某个 Run 已 finalized 的 Artifact 元数据列表。
    *
    * @param runId 来自 ArtifactController 已通过 UUID schema 的 path 参数。

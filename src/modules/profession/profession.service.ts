@@ -12,7 +12,10 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { isMysqlDuplicateEntry } from "../../common/db/mysql-errors.js";
-import { canonicalName } from "../../common/utils/canonical.js";
+import {
+  canonicalName,
+  stableStringifyJcsV1,
+} from "../../common/utils/canonical.js";
 import { NpkService } from "../npk/npk.service.js";
 import { ProjectService } from "../project/project.service.js";
 import { RunService } from "../run/run.service.js";
@@ -135,7 +138,8 @@ export class ProfessionService {
     input: SaveProfessionStyleInput,
     ownerUserId: string,
   ): Promise<ProfessionStyle> {
-    await this.requireStyle(professionId, styleId, ownerUserId);
+    const current = await this.requireStyle(professionId, styleId, ownerUserId);
+    if (sameStyleContent(current, input)) return current;
     if (await this.professions.hasProduction(styleId)) {
       throw new ConflictException({
         code: "STYLE_PRODUCTION_ALREADY_STARTED",
@@ -404,4 +408,19 @@ export class ProfessionService {
       incompleteSkillIds: completeness.incompleteSkillIds,
     });
   }
+}
+
+function sameStyleContent(
+  style: ProfessionStyle,
+  input: SaveProfessionStyleInput,
+): boolean {
+  return (
+    stableStringifyJcsV1({
+      name: style.name,
+      description: style.description,
+      themeDefinition: style.themeDefinition,
+      selectedSkillIds: style.selectedSkillIds,
+      skillPrompts: style.skillPrompts,
+    }) === stableStringifyJcsV1(input)
+  );
 }

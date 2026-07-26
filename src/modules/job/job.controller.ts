@@ -10,7 +10,8 @@
  * 稳定 userId 交给 PatchTaskService；JobController 位于 `/internal/`，通过 WorkerTokenGuard 后用
  * JobService/SharedFxStageEvidenceService/PatchTaskService 处理受控 lease 和证据回填。
  * 输入输出：输入是严格 DTO、path id、浏览器 authorization 或内部 Worker token；输出是脱敏任务/状态封装，
- * 不返回密码、token、lease 以外的凭据、工具路径、NPK/IMG 字节或对象存储 URL。
+ * 不返回密码、token、lease 以外的凭据、工具路径或 NPK/IMG 字节；浏览器下载端点只返回当前用户
+ * 已通过任务中固定 Artifact 角色的短期对象存储 URL，不返回 object key、bucket 或长期凭据。
  * 副作用：Controller 自身不直接写数据库；下游 Service 可创建声明式 Run、领取/续租/完成 Job 或保存已验证
  * 阶段证据。所有实际状态转换必须由 Service/Repository 的事务完成。
  * 安全边界：浏览器身份与 Worker token 是不同信任主体；普通路由必须将稳定 userId 传给 PatchTaskService，
@@ -33,19 +34,24 @@ import {
   claimJobSchema,
   completeJobSchema,
   heartbeatJobSchema,
+  surrenderJobSchema,
   type ClaimJobInput,
   type CompleteJobInput,
   type HeartbeatJobInput,
   type JobView,
+  type SurrenderJobInput,
 } from "./job.contracts.js";
 import { JobService } from "./job.service.js";
 import { idempotencyKeySchema } from "../run/run.contracts.js";
 import { AuthService } from "../auth/auth.service.js";
 import {
   createPatchTaskSchema,
+  patchTaskArtifactRoleSchema,
   reportPatchTaskPackageSchema,
   reportPatchTaskSkillProductionSchema,
   type CreatePatchTaskInput,
+  type PatchTaskArtifactDownloadView,
+  type PatchTaskArtifactRole,
   type PatchTaskArtifactView,
   type PatchTaskView,
   type ReportPatchTaskPackageInput,
@@ -135,6 +141,41 @@ export class PatchTaskController {
     const user = await this.auth.requireBrowserUser(authorization);
     return { data: await this.patchTasks.findArtifact(id, user.id) };
   }
+
+  /**
+   * 获取当前用户拥有的 passed PatchTask 三项 Package V3 Artifact 摘要。
+   * @param id path 中经 UUID schema 校验的 Run/任务标识。
+   * @param authorization 浏览器 Access Token；Service/Repository 继续执行 Run 所有权检查。
+   * @returns 固定顺序三项元数据，不含内部对象 key、URL 或正文。
+   */
+  @Get(":id/artifacts")
+  async artifacts(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: PatchTaskArtifactView[] }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return { data: await this.patchTasks.findArtifacts(id, user.id) };
+  }
+
+  /**
+   * 为当前用户任务的一个固定 Package V3 角色签发短期下载 URL。
+   * @param id path 中经 UUID schema 校验的 Run/任务标识。
+   * @param role path 中经 enum schema 校验的 candidate、manifest 或 validation；不接受 Artifact ID。
+   * @param authorization 浏览器 Access Token；认证成功仍需 Service 复核 Run 所有权和三项终态证据。
+   * @returns 选中角色的脱敏元数据和短期授权，不表示对象已下载、兼容或部署。
+   */
+  @Post(":id/artifacts/:role/download-authorization")
+  async authorizeArtifactDownload(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+    @Param("role", new ZodValidationPipe(patchTaskArtifactRoleSchema))
+    role: PatchTaskArtifactRole,
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: PatchTaskArtifactDownloadView }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return {
+      data: await this.patchTasks.authorizeArtifactDownload(id, role, user.id),
+    };
+  }
 }
 
 @Controller("internal/jobs")
@@ -177,6 +218,18 @@ export class JobController {
   ): Promise<{ status: "renewed" }> {
     await this.jobs.heartbeat(jobId, input);
     return { status: "renewed" };
+  }
+
+  /**
+   * 显式交还 Handler 遇到瞬时 API 故障的当前 attempt，避免停止心跳后等待 reaper。
+   * @returns requeued 表示稍后可重新领取；failed 表示 attempts 已耗尽并已收口 Run。
+   */
+  @Post(":id/surrender")
+  async surrender(
+    @Param("id", new ZodValidationPipe(idSchema)) jobId: string,
+    @Body(new ZodValidationPipe(surrenderJobSchema)) input: SurrenderJobInput,
+  ): Promise<{ status: "requeued" | "failed" }> {
+    return { status: await this.jobs.surrender(jobId, input) };
   }
 
   /**

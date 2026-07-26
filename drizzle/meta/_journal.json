@@ -141,6 +141,20 @@
       "when": 1784899112216,
       "tag": "0019_flawless_skrulls",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1784944411463,
+      "tag": "0020_nifty_gorilla_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1784948666232,
+      "tag": "0021_melted_slapstick",
+      "breakpoints": true
     }
   ]
 }

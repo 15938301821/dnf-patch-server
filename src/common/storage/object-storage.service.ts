@@ -14,6 +14,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { safeDisplayNameSchema } from "../contracts/index.js";
 import {
   ObjectStorageError,
   objectStorageKeySchema,
@@ -21,6 +22,7 @@ import {
   objectStorageSha256Schema,
   type NormalizedObjectStorageUploadRequest,
   type ObjectStorageClientPort,
+  type ObjectStorageDownloadRequest,
   type ObjectStorageDownloadAuthorization,
   type ObjectStorageEvidence,
   type ObjectStorageObjectRequest,
@@ -39,7 +41,13 @@ import {
 } from "./object-storage.tokens.js";
 
 /** 对象 key 的严格内部 DTO schema，拒绝调用方夹带未声明字段。 */
-const objectRequestSchema = z.object({ objectKey: objectStorageKeySchema });
+const objectRequestSchema = z
+  .object({ objectKey: objectStorageKeySchema })
+  .strict();
+/** 下载声明只允许附带安全逻辑名称，防止响应头注入或把名称误当成对象路径。 */
+const downloadRequestSchema = objectRequestSchema
+  .extend({ downloadName: safeDisplayNameSchema.optional() })
+  .strict();
 /** 上传授权输入 schema，绑定媒体类型、非负长度与规范化摘要。 */
 const uploadRequestSchema = objectRequestSchema.extend({
   mediaType: objectStorageMediaTypeSchema,
@@ -112,19 +120,43 @@ export class ObjectStorageService implements ObjectStoragePort {
    * @throws ObjectStorageError 当对象存储禁用或 key 非法。
    */
   async authorizeDownload(
-    input: ObjectStorageObjectRequest,
+    input: ObjectStorageDownloadRequest,
   ): Promise<ObjectStorageDownloadAuthorization> {
     this.assertEnabled();
-    const parsed = this.parseObjectRequest(input);
+    const parsed = this.parseDownloadRequest(input);
     const url = await this.client.authorizeDownload(
       parsed.objectKey,
       this.options.signedUrlTtlSeconds,
+      parsed.downloadName,
     );
     return {
       objectKey: parsed.objectKey,
       url,
       expiresAtUtc: expiresAtUtc(this.options.signedUrlTtlSeconds),
     };
+  }
+
+  /**
+   * 校验对象 key 与可选下载名；名称仅用于响应头，禁止路径字符和控制字符进入签名。
+   * @param input 业务层从已验证 Artifact 生成的下载声明。
+   * @returns 规范化声明；非法输入在调用 S3 客户端前抛出稳定错误。
+   */
+  private parseDownloadRequest(
+    input: ObjectStorageDownloadRequest,
+  ): ObjectStorageDownloadRequest {
+    const parsed = downloadRequestSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ObjectStorageError(
+        "OBJECT_STORAGE_INVALID_INPUT",
+        "对象下载声明无效。",
+      );
+    }
+    return parsed.data.downloadName === undefined
+      ? { objectKey: parsed.data.objectKey }
+      : {
+          objectKey: parsed.data.objectKey,
+          downloadName: parsed.data.downloadName,
+        };
   }
 
   /**

@@ -21,6 +21,7 @@ import { hasExactJobLease } from "../../common/contracts/index.js";
 import type { DatabaseService } from "../../common/db/database.service.js";
 import { artifactUploadSessions } from "../../common/db/artifact-schema.js";
 import { artifacts, jobs, runs } from "../../common/db/schema.js";
+import { databaseUtcDate } from "../../common/db/mysql-datetime.js";
 import type { ObjectStorageEvidence } from "../../common/storage/object-storage.client.js";
 import type {
   ArtifactView,
@@ -327,6 +328,4 @@ function toSessionRecord(
  * @param value 数据库时间字段，不能来自 Worker 或客户端。
  * @returns 可用于同一事务内比较和 ViewModel 序列化的 Date。
  */
-function dateValue(value: Date | string): Date {
-  return value instanceof Date ? value : new Date(value);
-}
+const dateValue = databaseUtcDate;

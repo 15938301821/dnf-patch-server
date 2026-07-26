@@ -32,6 +32,9 @@ describe("ProfessionService style gates", () => {
     findById: vi.fn(),
     findOwnedById: vi.fn(),
     findStyle: vi.fn(),
+    findSkillsByIds: vi.fn(),
+    hasProduction: vi.fn(),
+    updateStyle: vi.fn(),
     submitStyleForReview: vi.fn(),
     getBuildContext: vi.fn(),
     replaceSkillCatalog: vi.fn(),
@@ -50,6 +53,8 @@ describe("ProfessionService style gates", () => {
     professions.findOwnedById.mockResolvedValue(profession());
     professions.list.mockResolvedValue([]);
     professions.findStyle.mockResolvedValue(completeStyle());
+    professions.findSkillsByIds.mockResolvedValue([]);
+    professions.hasProduction.mockResolvedValue(false);
     professions.submitStyleForReview.mockResolvedValue({
       ...completeStyle(),
       publishStatus: "pending",
@@ -153,6 +158,29 @@ describe("ProfessionService style gates", () => {
       styleId,
       ownerUserId,
     );
+  });
+
+  it("preserves review state when an identical style save is retried", async () => {
+    const current = { ...completeStyle(), publishStatus: "pending" as const };
+    professions.findStyle.mockResolvedValue(current);
+
+    await expect(
+      service.updateStyle(
+        professionId,
+        styleId,
+        {
+          name: current.name,
+          description: current.description,
+          themeDefinition: current.themeDefinition,
+          selectedSkillIds: current.selectedSkillIds,
+          skillPrompts: current.skillPrompts,
+        },
+        ownerUserId,
+      ),
+    ).resolves.toEqual(current);
+
+    expect(professions.hasProduction).not.toHaveBeenCalled();
+    expect(professions.updateStyle).not.toHaveBeenCalled();
   });
 
   it("reports missing profession prompts separately from resource evidence", async () => {

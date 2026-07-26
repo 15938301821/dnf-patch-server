@@ -1,5 +1,5 @@
 /**
- * @fileoverview 验证 Frame Guardrail 只能使用 Run 所属 Factory v2 的冻结策略，并验证 alpha 不变量；
+ * @fileoverview 验证 Frame Guardrail 只能使用 Run 所属 Factory v2/v3 的冻结策略，并验证 alpha 不变量；
  * 不连接数据库、不插入审计决策、不读取图片字节或调用 Worker。
  * @module modules/guardrail/frame-service.spec
  * @author AI生成
@@ -37,10 +37,34 @@ const factoryConfig = {
   deploymentAuthorized: false,
 };
 
+/** Factory v3 允许每个 Job contract 使用独立 profile，但 policy 仍必须由同一冻结配置精确绑定。 */
+const factoryConfigV3 = {
+  schemaVersion: 3 as const,
+  policyId: "policy-v2",
+  policySha256: "a".repeat(64),
+  allowedJobKinds: ["inventory", "profession"] as const,
+  jobContracts: [
+    {
+      kind: "inventory" as const,
+      schemaVersion: 1 as const,
+      profileId: "resource-profile",
+    },
+    {
+      kind: "profession" as const,
+      schemaVersion: 1 as const,
+      profileId: "aseprite-production-v1",
+    },
+  ],
+  arbitraryExecution: false,
+  deploymentAuthorized: false,
+};
+
 describe("validateFramePolicyBinding", () => {
   it.each([
     [factoryConfig, "matched"],
+    [factoryConfigV3, "matched"],
     [{ ...factoryConfig, policyId: "other-policy" }, "mismatch"],
+    [{ ...factoryConfigV3, policySha256: "B".repeat(64) }, "mismatch"],
     [{ ...factoryConfig, policySha256: "B".repeat(64) }, "mismatch"],
     [{ ...factoryConfig, schemaVersion: 1 }, "unavailable"],
     [{ invalid: true }, "unavailable"],

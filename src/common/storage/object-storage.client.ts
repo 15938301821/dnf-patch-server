@@ -106,6 +106,12 @@ export interface ObjectStorageObjectRequest {
   objectKey: string;
 }
 
+/** 业务层完成归属校验后提交的下载声明；文件名只影响响应下载语义，不参与对象定位。 */
+export interface ObjectStorageDownloadRequest extends ObjectStorageObjectRequest {
+  /** 已验证 Artifact 的逻辑名称；存在时签名为 attachment，不能包含路径或控制字符。 */
+  downloadName?: string;
+}
+
 /** 业务层申请上传授权的 DTO；声明证据最终仍需服务端重新读取验证。 */
 export interface ObjectStorageUploadRequest extends ObjectStorageObjectRequest {
   /** 上传对象声明的媒体类型，将绑定到签名 header。 */
@@ -212,8 +218,12 @@ export interface ObjectStorageClientPort {
     input: NormalizedObjectStorageUploadRequest,
     ttlSeconds: number,
   ): Promise<Pick<ObjectStorageUploadAuthorization, "requiredHeaders" | "url">>;
-  /** @returns 固定 key 的短期 GET URL；调用前业务层必须完成授权。 */
-  authorizeDownload(objectKey: string, ttlSeconds: number): Promise<string>;
+  /** @returns 固定 key 的短期 GET URL；可绑定已校验下载名，调用前业务层必须完成授权。 */
+  authorizeDownload(
+    objectKey: string,
+    ttlSeconds: number,
+    downloadName?: string,
+  ): Promise<string>;
   /** @returns 固定 key 的不可覆盖 PUT 完成后 resolve；写入证据仍需上层回读验证。 */
   write(
     input: NormalizedObjectStorageUploadRequest,
@@ -233,7 +243,7 @@ export interface ObjectStoragePort {
   ): Promise<ObjectStorageUploadAuthorization>;
   /** @returns 业务层已授权 key 的短期下载授权；URL 不代表公开访问。 */
   authorizeDownload(
-    input: ObjectStorageObjectRequest,
+    input: ObjectStorageDownloadRequest,
   ): Promise<ObjectStorageDownloadAuthorization>;
   /** @returns 服务端不可覆盖写入并完整回读后形成的证据。 */
   write(input: ObjectStorageWriteRequest): Promise<ObjectStorageEvidence>;

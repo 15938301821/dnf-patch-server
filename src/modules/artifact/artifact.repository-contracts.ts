@@ -203,6 +203,15 @@ export interface ArtifactRepositoryPort {
   findRunId(id: string): Promise<string | undefined>;
 
   /**
+   * 解析一个已 finalized Artifact 的内部对象引用，供已完成用户/领域授权的 Service 调用方下载。
+   *
+   * @param runId 上游领域已完成所有权检查的 Run UUID。
+   * @param artifactId 上游领域从固定聚合证据解析出的 Artifact UUID，不能来自任意对象 key。
+   * @returns 同 Run Artifact 的内部 objectKey；不存在或跨 Run 时返回 undefined。
+   */
+  findObjectKey(runId: string, artifactId: string): Promise<string | undefined>;
+
+  /**
    * 读取 Run 的脱敏 Artifact 元数据。
    *
    * @param runId 已解析的 Run UUID。

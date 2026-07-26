@@ -56,6 +56,37 @@ const parametersSchema = z
   })
   .strict();
 
+/**
+ * Provider wire schema 只表达结构化输出接口普遍支持的基础约束。tuple 长度、数值边界、
+ * 操作数量与唯一性仍由下方严格领域 schema 在任何持久化或 Artist 调用前二次校验。
+ */
+export const professionEngineerModelWireDecisionSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    palette: z
+      .object({
+        shadow: z.array(z.number()),
+        midtone: z.array(z.number()),
+        rim: z.array(z.number()),
+        core: z.array(z.number()),
+      })
+      .strict(),
+    parameters: z
+      .object({
+        sourceColorMix: z.number(),
+        coreThreshold: z.number(),
+        coreIntensity: z.number(),
+        rimThreshold: z.number(),
+        rimIntensity: z.number(),
+        phaseAmount: z.number(),
+        crackDensity: z.number(),
+        crackIntensity: z.number(),
+      })
+      .strict(),
+    optionalOperations: z.array(optionalOperationSchema),
+  })
+  .strict();
+
 /** Engineer 模型唯一允许返回的结构；不含安全状态、来源身份、本机路径或任意代码。 */
 export const professionEngineerModelDecisionSchema = z
   .object({
@@ -116,6 +147,9 @@ export const professionEngineerStylePlanSchema = z
 
 export type ProfessionEngineerModelDecision = z.infer<
   typeof professionEngineerModelDecisionSchema
+>;
+export type ProfessionEngineerModelWireDecision = z.infer<
+  typeof professionEngineerModelWireDecisionSchema
 >;
 export type ProfessionEngineerStylePlan = z.infer<
   typeof professionEngineerStylePlanSchema

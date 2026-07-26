@@ -12,6 +12,8 @@ import { AuthService } from "../auth/auth.service.js";
 import { PatchTaskController } from "./job.controller.js";
 import type {
   CreatePatchTaskInput,
+  PatchTaskArtifactDownloadView,
+  PatchTaskArtifactView,
   PatchTaskView,
 } from "./patch-task.contracts.js";
 import { PatchTaskService } from "./patch-task.service.js";
@@ -30,6 +32,19 @@ const task: PatchTaskView = {
   createdAt: "2026-07-21T00:00:00.000Z",
   artifactAvailable: false,
 };
+const artifact: PatchTaskArtifactView = {
+  artifactId: "55555555-5555-4555-8555-555555555555",
+  role: "candidate",
+  artifactName: "candidate.npk",
+  mediaType: "application/octet-stream",
+  byteLength: 200,
+  sha256: "A".repeat(64),
+};
+const download: PatchTaskArtifactDownloadView = {
+  ...artifact,
+  downloadUrl: "http://127.0.0.1:9000/download",
+  expiresAtUtc: "2026-07-25T12:05:00.000Z",
+};
 
 describe("PatchTaskController", () => {
   const create =
@@ -41,15 +56,22 @@ describe("PatchTaskController", () => {
       ) => Promise<PatchTaskView>
     >();
   const requireBrowserUser = vi.fn();
+  const findArtifacts = vi.fn().mockResolvedValue([artifact]);
+  const authorizeArtifactDownload = vi.fn().mockResolvedValue(download);
   let controller: PatchTaskController;
 
   beforeEach(async () => {
     vi.resetAllMocks();
     create.mockResolvedValue(task);
+    findArtifacts.mockResolvedValue([artifact]);
+    authorizeArtifactDownload.mockResolvedValue(download);
     requireBrowserUser.mockResolvedValue({ id: ownerUserId });
     const module = await Test.createTestingModule({
       providers: [
-        { provide: PatchTaskService, useValue: { create } },
+        {
+          provide: PatchTaskService,
+          useValue: { create, findArtifacts, authorizeArtifactDownload },
+        },
         { provide: AuthService, useValue: { requireBrowserUser } },
         {
           provide: PatchTaskController,
@@ -80,5 +102,29 @@ describe("PatchTaskController", () => {
     ).resolves.toEqual({ data: task });
     expect(requireBrowserUser).toHaveBeenCalledWith("Bearer access");
     expect(create).toHaveBeenCalledWith(input, "patch.request-1", ownerUserId);
+  });
+
+  it("passes the authenticated owner to the three-artifact metadata query", async () => {
+    await expect(
+      controller.artifacts(task.id, "Bearer access"),
+    ).resolves.toEqual({ data: [artifact] });
+    expect(requireBrowserUser).toHaveBeenCalledWith("Bearer access");
+    expect(findArtifacts).toHaveBeenCalledWith(task.id, ownerUserId);
+  });
+
+  it("authorizes a fixed role only after resolving the authenticated owner", async () => {
+    await expect(
+      controller.authorizeArtifactDownload(
+        task.id,
+        "candidate",
+        "Bearer access",
+      ),
+    ).resolves.toEqual({ data: download });
+    expect(requireBrowserUser).toHaveBeenCalledWith("Bearer access");
+    expect(authorizeArtifactDownload).toHaveBeenCalledWith(
+      task.id,
+      "candidate",
+      ownerUserId,
+    );
   });
 });

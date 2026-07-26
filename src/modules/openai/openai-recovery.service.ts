@@ -44,7 +44,7 @@ export class OpenAiRecoveryService
     private readonly config: ModelRecoveryConfigPort,
   ) {}
 
-  /** 启动时按 SDK 超时与重试上限计算最大窗口，超时记录统一标为 abandoned。 */
+  /** 启动时按协议 fallback、SDK 超时与重试上限计算最大窗口，超时记录统一标为 abandoned。 */
   async onApplicationBootstrap(): Promise<void> {
     this.destroyed = false;
     await this.recover();
@@ -65,7 +65,9 @@ export class OpenAiRecoveryService
       infer: true,
     });
     try {
-      await this.calls.abandonStale(timeoutMs * (maxRetries + 1));
+      // Gemini 图片调用可能先等待 OpenAI Images 返回 404，再进入完整 SDK 重试窗口；
+      // 回收时间必须覆盖这次固定协议探测，不能在有效图片请求仍运行时标记 abandoned。
+      await this.calls.abandonStale(timeoutMs * (maxRetries + 2));
     } catch {
       this.logger.error("MODEL_CALL_RECOVERY_FAILED");
       this.scheduleRetry();

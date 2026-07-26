@@ -20,7 +20,10 @@ import {
   safeDisplayNameSchema,
   sha256Schema,
 } from "../../common/contracts/index.js";
-import { allowedJobKindSchema } from "../guardrail/guardrail.contracts.js";
+import {
+  allowedJobKindSchema,
+  type AllowedJobKind,
+} from "../guardrail/guardrail.contracts.js";
 
 /** 限制 Factory 的 Job 白名单为无重复的受控 kind，不能据此声明所有 kind 都已有 Worker 实现。 */
 const allowedJobKindsSchema = z
@@ -42,6 +45,44 @@ const factoryConfigV1Schema = z
   })
   .strict();
 
+/** v2 Factory 的 Job contract；profileId 仍由历史顶层字段统一提供。 */
+const factoryJobContractV2Schema = z
+  .object({
+    kind: allowedJobKindSchema,
+    schemaVersion: z.literal(1),
+  })
+  .strict();
+
+/** v3 Factory 的 Job contract；每个 kind 独立冻结自己的本机工具 profile。 */
+const factoryJobContractV3Schema = factoryJobContractV2Schema.extend({
+  profileId: clientIdSchema,
+});
+
+/** 拒绝 Job 白名单与 contract 集合不一致，防止未登记契约的 kind 进入 Run。 */
+function validateJobContractKinds(
+  allowedJobKinds: readonly AllowedJobKind[],
+  jobContracts: ReadonlyArray<{ kind: AllowedJobKind }>,
+  context: z.RefinementCtx,
+): void {
+  const contractKinds = jobContracts.map((contract) => contract.kind);
+  if (new Set(contractKinds).size !== contractKinds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["jobContracts"],
+      message: "jobContracts 不能包含重复 kind。",
+    });
+  }
+  const expected = [...allowedJobKinds].sort();
+  const actual = [...contractKinds].sort();
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+    context.addIssue({
+      code: "custom",
+      path: ["jobContracts"],
+      message: "jobContracts 必须与 allowedJobKinds 完全对应。",
+    });
+  }
+}
+
 /**
  * 当前可创建 Run 的 v2 冻结配置。
  * policySha256 和 jobContracts 让 Service 能证明每个允许 Job kind 有对应的版本化声明式契约，
@@ -54,48 +95,52 @@ const factoryConfigV2Schema = z
     policyId: clientIdSchema,
     policySha256: sha256Schema,
     allowedJobKinds: allowedJobKindsSchema,
-    jobContracts: z
-      .array(
-        z
-          .object({
-            kind: allowedJobKindSchema,
-            schemaVersion: z.literal(1),
-          })
-          .strict(),
-      )
-      .min(1),
+    jobContracts: z.array(factoryJobContractV2Schema).min(1),
     arbitraryExecution: z.literal(false).default(false),
     deploymentAuthorized: z.literal(false).default(false),
   })
   .strict()
   .superRefine((value, context) => {
     // Job contract 必须与白名单一一对应，避免有允许 kind 缺少可验证 payload 契约或出现隐藏 kind。
-    const contractKinds = value.jobContracts.map((contract) => contract.kind);
-    if (new Set(contractKinds).size !== contractKinds.length) {
-      context.addIssue({
-        code: "custom",
-        path: ["jobContracts"],
-        message: "jobContracts 不能包含重复 kind。",
-      });
-    }
-    const expected = [...value.allowedJobKinds].sort();
-    const actual = [...contractKinds].sort();
-    if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-      context.addIssue({
-        code: "custom",
-        path: ["jobContracts"],
-        message: "jobContracts 必须与 allowedJobKinds 完全对应。",
-      });
-    }
+    validateJobContractKinds(
+      value.allowedJobKinds,
+      value.jobContracts,
+      context,
+    );
+  });
+
+/**
+ * 当前可创建多工具链 Run 的 v3 冻结配置。
+ * profileId 下沉到逐 kind contract，避免 Inventory 与 Profession 被迫共享同一个本机工具身份。
+ */
+const factoryConfigV3Schema = z
+  .object({
+    schemaVersion: z.literal(3),
+    policyId: clientIdSchema,
+    policySha256: sha256Schema,
+    allowedJobKinds: allowedJobKindsSchema,
+    jobContracts: z.array(factoryJobContractV3Schema).min(1),
+    arbitraryExecution: z.literal(false).default(false),
+    deploymentAuthorized: z.literal(false).default(false),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    validateJobContractKinds(
+      value.allowedJobKinds,
+      value.jobContracts,
+      context,
+    );
   });
 
 /**
  * Factory 配置的读取/写入入口 schema。
- * schemaVersion 是判别字段：v1 保留给历史读取，v2 才包含创建新 Run 所需的策略哈希和逐 kind 契约。
+ * SchemaVersion 是判别字段：v1 保留给历史读取，v2 保留单 profile 兼容；v3 为每个 Job kind
+ * 冻结独立 profile。只有 v2/v3 可进入新 Run 创建链路。
  */
 export const factoryConfigSchema = z.discriminatedUnion("schemaVersion", [
   factoryConfigV1Schema,
   factoryConfigV2Schema,
+  factoryConfigV3Schema,
 ]);
 
 /**
@@ -116,8 +161,52 @@ export const createFactorySchema = z
 /** 由 createFactorySchema 校验后的创建输入，不等于数据库持久化行。 */
 export type CreateFactoryInput = z.infer<typeof createFactorySchema>;
 
-/** Factory 的版本化声明式配置；v1 与 v2 的差异必须由调用方按 schemaVersion 处理。 */
+/** Factory 的版本化声明式配置；调用方必须按 schemaVersion 处理历史读取与可运行版本。 */
 export type FactoryConfig = z.infer<typeof factoryConfigSchema>;
+
+/** v2/v3 中解析后的单个 Job contract；profileId 始终与当前 kind 精确绑定。 */
+export interface ResolvedFactoryJobContract {
+  kind: AllowedJobKind;
+  schemaVersion: 1;
+  profileId: string;
+}
+
+/**
+ * 解析一个已冻结 Factory 中指定 Job kind 的版本与工具 profile。
+ * @param config 已由 factoryConfigSchema 校验的配置；v1 只读配置不会产生可运行 contract。
+ * @param kind 当前准备创建或复核的受控 Job kind。
+ * @returns 白名单与 contract 同时存在时返回统一结果，否则返回 undefined 并由调用方 fail-closed。
+ */
+export function resolveFactoryJobContract(
+  config: FactoryConfig,
+  kind: AllowedJobKind,
+): ResolvedFactoryJobContract | undefined {
+  if (config.schemaVersion === 1 || !config.allowedJobKinds.includes(kind)) {
+    return undefined;
+  }
+  if (config.schemaVersion === 2) {
+    const contract = config.jobContracts.find(
+      (candidate) => candidate.kind === kind,
+    );
+    return contract
+      ? {
+          kind,
+          schemaVersion: contract.schemaVersion,
+          profileId: config.profileId,
+        }
+      : undefined;
+  }
+  const contract = config.jobContracts.find(
+    (candidate) => candidate.kind === kind,
+  );
+  return contract
+    ? {
+        kind,
+        schemaVersion: contract.schemaVersion,
+        profileId: contract.profileId,
+      }
+    : undefined;
+}
 
 /**
  * 返回给浏览器和其他领域 Service 的脱敏 Factory ViewModel。

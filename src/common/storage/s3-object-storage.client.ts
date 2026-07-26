@@ -111,11 +111,24 @@ export class S3ObjectStorageClient implements ObjectStorageClientPort {
   /**
    * @param objectKey 业务层已授权且通过相对 key schema 的对象引用。
    * @param ttlSeconds 环境限制的签名有效秒数。
+   * @param downloadName 可选的安全逻辑名称；只绑定 attachment 响应头，不改变对象定位。
    * @returns 固定私有 bucket 的短期 GET URL；不改变对象 ACL。
    */
-  authorizeDownload(objectKey: string, ttlSeconds: number): Promise<string> {
+  authorizeDownload(
+    objectKey: string,
+    ttlSeconds: number,
+    downloadName?: string,
+  ): Promise<string> {
     return this.presigner.signGet(
-      new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        ...(downloadName
+          ? {
+              ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
+            }
+          : {}),
+      }),
       ttlSeconds,
     );
   }

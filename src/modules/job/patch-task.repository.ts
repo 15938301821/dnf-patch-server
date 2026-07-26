@@ -35,6 +35,7 @@ import { databaseNow } from "./job-run-event.repository-support.js";
 import { reportProfessionSkillProduction } from "./patch-task-skill-production.repository-support.js";
 import { resolveProfessionSkillExecution as resolveProfessionExecution } from "./profession-model-execution.repository-support.js";
 import { resolveProfessionCompletionInTransaction } from "./profession-completion.repository-support.js";
+import { findPatchTaskArtifacts } from "./patch-task-artifact.repository-support.js";
 import type {
   ProfessionProductionProgressInput,
   ProfessionProductionProgressView,
@@ -185,31 +186,17 @@ export class PatchTaskRepository {
     runId: string,
     ownerUserId: string,
   ): Promise<PatchTaskArtifactView | undefined> {
-    const [row] = await this.connection.database
-      .select({
-        artifactName: artifacts.logicalName,
-        mediaType: artifacts.mediaType,
-        byteLength: artifacts.byteLength,
-        sha256: artifacts.sha256,
-      })
-      .from(stylePackages)
-      .innerJoin(runs, eq(runs.id, stylePackages.runId))
-      .innerJoin(
-        artifacts,
-        and(
-          eq(artifacts.runId, stylePackages.runId),
-          eq(artifacts.id, stylePackages.packageArtifactId),
-        ),
-      )
-      .where(
-        and(
-          eq(stylePackages.runId, runId),
-          eq(stylePackages.status, "passed"),
-          eq(runs.ownerUserId, ownerUserId),
-        ),
-      )
-      .limit(1);
-    return row;
+    return (
+      await findPatchTaskArtifacts(this.connection, runId, ownerUserId)
+    )?.[0];
+  }
+
+  /** 读取当前用户已通过任务的 candidate、manifest 和 validation 三项固定角色元数据。 */
+  findArtifacts(
+    runId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskArtifactView[] | undefined> {
+    return findPatchTaskArtifacts(this.connection, runId, ownerUserId);
   }
 
   async resolveProfessionSkillExecution(

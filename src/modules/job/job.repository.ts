@@ -38,16 +38,27 @@ import {
   appendJobRunEvent,
   databaseNow,
   ensurePendingSharedFxReview,
-  type JobTransaction,
 } from "./job-run-event.repository-support.js";
 import { toJobView } from "./job.mapper.js";
-import { aggregateRunStatus } from "./run-status.js";
 import { validatePersistedJobIntegrity } from "./job-integrity.js";
 import { findSharedFxCompletionEvidenceForJob } from "./shared-fx-completion.repository-support.js";
 import {
-  closeProfessionPackageWithoutArtifact,
+  advanceProfessionPackageStage,
   prepareProfessionCompletion,
 } from "./job-profession-completion.repository-support.js";
+import {
+  closeStylePackageForTerminalJob,
+  prepareStylePackageCompletion,
+} from "./job-style-package-completion.repository-support.js";
+import {
+  finalizeRunIfComplete,
+  markRunRunning,
+} from "./job-run-status.repository-support.js";
+import {
+  surrenderJobAttempt,
+  type SurrenderJobResult,
+} from "./job-surrender.repository-support.js";
+import type { SurrenderJobInput } from "./job.contracts.js";
 
 interface ClaimJobResult {
   job: JobView;
@@ -62,6 +73,7 @@ interface CompleteJobResult {
   status:
     | LeaseMutationStatus
     | "profession-evidence-incomplete"
+    | "style-package-evidence-incomplete"
     | "shared-fx-evidence-incomplete"
     | "shared-fx-review-conflict";
   runEvent?: RunEventView;
@@ -96,7 +108,7 @@ export class JobRepository {
         .where(
           and(
             inArray(jobs.kind, capabilities),
-            sql`${jobs.dispatchReadyAt} is not null`,
+            sql`${jobs.dispatchReadyAt} <= CURRENT_TIMESTAMP(3)`,
             lt(jobs.attemptCount, jobs.maxAttempts),
             or(
               eq(jobs.status, "queued"),
@@ -170,6 +182,18 @@ export class JobRepository {
           .where(eq(jobs.id, candidate.id));
         const runEvents: RunEventView[] = [];
         if (run) {
+          await advanceProfessionPackageStage(
+            transaction,
+            candidate,
+            "blocked",
+            now,
+          );
+          await closeStylePackageForTerminalJob(
+            transaction,
+            candidate,
+            "blocked",
+            now,
+          );
           runEvents.push(
             await appendJobRunEvent(
               transaction,
@@ -272,6 +296,14 @@ export class JobRepository {
     });
   }
 
+  /** 以当前 fencing token 显式关闭瞬时失败 attempt，并委托事务 helper 重排或终结。 */
+  surrender(
+    jobId: string,
+    input: SurrenderJobInput,
+  ): Promise<SurrenderJobResult> {
+    return surrenderJobAttempt(this.connection, jobId, input);
+  }
+
   /** 以精确 lease 完成当前 attempt，必要时验证共享特效证据/审核并在全部 Job 终态后原子终结 Run。 */
   async complete(
     jobId: string,
@@ -329,8 +361,18 @@ export class JobRepository {
       if (professionCompletion.status === "evidence-incomplete") {
         return { status: "profession-evidence-incomplete" };
       }
+      const stylePackageCompletion = await prepareStylePackageCompletion(
+        transaction,
+        job,
+        input,
+        now,
+      );
+      if (stylePackageCompletion.status === "evidence-incomplete") {
+        return { status: "style-package-evidence-incomplete" };
+      }
       const resultSha256 =
         sharedFxCompletion?.independentValidationSha256 ??
+        stylePackageCompletion.resultSha256 ??
         professionCompletion.resultSha256 ??
         input.resultSha256?.toUpperCase();
       await transaction
@@ -358,12 +400,7 @@ export class JobRepository {
             eq(jobAttempts.attempt, job.attemptCount),
           ),
         );
-      await closeProfessionPackageWithoutArtifact(
-        transaction,
-        job,
-        input.status,
-        now,
-      );
+      await advanceProfessionPackageStage(transaction, job, input.status, now);
       if (sharedFxCompletion) {
         await appendJobRunEvent(
           transaction,
@@ -430,71 +467,12 @@ export class JobRepository {
           .where(eq(runs.id, job.runId))
           .limit(1)
           .for("update");
+        await advanceProfessionPackageStage(transaction, job, "failed", now);
+        await closeStylePackageForTerminalJob(transaction, job, "failed", now);
         const event = await finalizeRunIfComplete(transaction, job.runId, now);
         if (event) events.push(event);
       }
       return events;
     });
   }
-}
-
-/** 仅把仍 queued 的 Run 迁移为 running，并在同一事务追加首个 Worker 领取事件。 */
-async function markRunRunning(
-  transaction: JobTransaction,
-  runId: string,
-  now: Date,
-): Promise<RunEventView | undefined> {
-  const result = await transaction
-    .update(runs)
-    .set({ status: "running", currentStage: "worker", updatedAt: now })
-    .where(and(eq(runs.id, runId), eq(runs.status, "queued")));
-  if (result[0].affectedRows !== 1) return undefined;
-  return appendJobRunEvent(
-    transaction,
-    runId,
-    "info",
-    "worker",
-    "Worker 已领取首个任务，Run 进入执行状态。",
-    now,
-  );
-}
-
-/** 读取同一 Run 的全部 Job；只有全终态时按 failed > blocked > passed 优先级更新 Run 并追加事件。 */
-async function finalizeRunIfComplete(
-  transaction: JobTransaction,
-  runId: string,
-  now: Date,
-): Promise<RunEventView | undefined> {
-  const rows = await transaction
-    .select({ id: jobs.id, status: jobs.status })
-    .from(jobs)
-    .where(eq(jobs.runId, runId));
-  const status = aggregateRunStatus(rows.map((row) => row.status));
-  if (!status) return undefined;
-  const updateResult = await transaction
-    .update(runs)
-    .set({
-      status,
-      currentStage: status,
-      updatedAt: now,
-      finishedAt: now,
-    })
-    .where(
-      and(eq(runs.id, runId), inArray(runs.status, ["queued", "running"])),
-    );
-  if (updateResult[0].affectedRows !== 1) return undefined;
-  const level =
-    status === "failed" ? "error" : status === "blocked" ? "warning" : "info";
-  return appendJobRunEvent(
-    transaction,
-    runId,
-    level,
-    status,
-    status === "passed"
-      ? "Run 的全部 Worker 任务已通过。"
-      : status === "blocked"
-        ? "Run 的 Worker 任务已完成，但至少一个任务被阻断。"
-        : "Run 的 Worker 任务已完成，但至少一个任务失败。",
-    now,
-  );
 }

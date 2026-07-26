@@ -40,6 +40,12 @@ import { SharedFxTaskController } from "./shared-fx-task.controller.js";
 import { SharedFxTaskService } from "./shared-fx-task.service.js";
 import { SharedFxStageEvidenceRepository } from "./shared-fx-stage-evidence.repository.js";
 import { SharedFxStageEvidenceService } from "./shared-fx-stage-evidence.service.js";
+import { StylePackageContextController } from "./style-package-context.controller.js";
+import { StylePackageContextRepository } from "./style-package-context.repository.js";
+import { StylePackageContextService } from "./style-package-context.service.js";
+import { StylePackageProductionController } from "./style-package-production.controller.js";
+import { StylePackageProductionRepository } from "./style-package-production.repository.js";
+import { StylePackageProductionService } from "./style-package-production.service.js";
 
 @Module({
   imports: [
@@ -57,6 +63,8 @@ import { SharedFxStageEvidenceService } from "./shared-fx-stage-evidence.service
     JobController,
     ProfessionExecutionController,
     ProfessionSourceContextController,
+    StylePackageContextController,
+    StylePackageProductionController,
     SharedFxTaskController,
   ],
   providers: [
@@ -70,6 +78,10 @@ import { SharedFxStageEvidenceService } from "./shared-fx-stage-evidence.service
     ProfessionModelExecutionRepository,
     ProfessionSourceContextRepository,
     ProfessionSourceContextService,
+    StylePackageContextRepository,
+    StylePackageContextService,
+    StylePackageProductionRepository,
+    StylePackageProductionService,
     SharedFxStageEvidenceRepository,
     SharedFxStageEvidenceService,
     SharedFxTaskService,

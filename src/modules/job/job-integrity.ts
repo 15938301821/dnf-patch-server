@@ -9,6 +9,7 @@ import { sha256Schema } from "../../common/contracts/index.js";
 import { sha256Json } from "../../common/utils/canonical.js";
 import {
   factoryConfigSchema,
+  resolveFactoryJobContract,
   type FactoryConfig,
 } from "../factory/factory.contracts.js";
 import {
@@ -28,7 +29,7 @@ export interface PersistedJobIntegrityInput {
 /**
  * 只有数据库中的载荷、其哈希和 Factory 冻结契约全部一致时才允许下发 Worker。
  * @param input 数据库 JSON/字符串列，均按 unknown 处理。
- * @returns 数据完整且符合 Factory v2 声明式契约时返回 true。
+ * @returns 数据完整且符合 Factory v2/v3 声明式契约时返回 true。
  */
 export function validatePersistedJobIntegrity(
   input: PersistedJobIntegrityInput,
@@ -40,20 +41,17 @@ export function validatePersistedJobIntegrity(
   if (!kind.success || !payloadHash.success || !factoryHash.success) {
     return false;
   }
-  if (!config.success || config.data.schemaVersion !== 2) return false;
+  if (!config.success || config.data.schemaVersion === 1) return false;
   if (!hasValidFactoryHash(config.data, factoryHash.data)) return false;
 
-  const contract = config.data.jobContracts.find(
-    (candidate) => candidate.kind === kind.data,
-  );
+  const contract = resolveFactoryJobContract(config.data, kind.data);
   if (
     !contract ||
-    !config.data.allowedJobKinds.includes(kind.data) ||
     !hasValidPayload(
       input.payload,
       kind.data,
       contract.schemaVersion,
-      config.data.profileId,
+      contract.profileId,
     )
   ) {
     return false;
@@ -66,7 +64,7 @@ export function validatePersistedJobIntegrity(
 }
 
 function hasValidFactoryHash(
-  config: Extract<FactoryConfig, { schemaVersion: 2 }>,
+  config: Extract<FactoryConfig, { schemaVersion: 2 | 3 }>,
   persistedHash: string,
 ): boolean {
   try {

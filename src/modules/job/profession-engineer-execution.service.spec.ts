@@ -21,6 +21,7 @@ import {
   createProfessionEngineerStylePlan,
   encodeProfessionEngineerStylePlan,
   type ProfessionEngineerModelDecision,
+  type ProfessionEngineerModelWireDecision,
 } from "./profession-engineer-plan.js";
 import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
 import type { FrozenProfessionSkillExecutionContext } from "./profession-execution-context.js";
@@ -220,6 +221,44 @@ describe("ProfessionEngineerExecutionService", () => {
     expect(structured).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
     expect(readVerifiedBytes).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a wire-compatible model response violates domain constraints", async () => {
+    reserve.mockResolvedValue({
+      status: "execute",
+      executionId,
+      context: frozenContext(),
+    });
+    structured.mockImplementation(async (request, beforeEgress) => {
+      if (!beforeEgress) throw new Error("TEST_BEFORE_EGRESS_REQUIRED");
+      const record = modelRecord();
+      await beforeEgress(record);
+      const invalidDecision: ProfessionEngineerModelWireDecision = {
+        ...modelDecision(),
+        palette: { ...modelDecision().palette, shadow: [10, 22] },
+        parameters: { ...modelDecision().parameters, crackDensity: 0.5 },
+      };
+      return {
+        value: request.schema.parse(invalidDecision),
+        record: { ...record, status: "passed" },
+      };
+    });
+
+    await expect(
+      service.executeSkill(jobId, leaseInput()),
+    ).rejects.toMatchObject({
+      response: { code: "PROFESSION_ENGINEER_PLAN_INVALID" },
+    });
+    expect(fail).toHaveBeenCalledWith(
+      executionId,
+      leaseInput(),
+      "engineer-plan-v1",
+      "PROFESSION_ENGINEER_PLAN_INVALID",
+      false,
+      modelCallId,
+    );
+    expect(write).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
   });
 });
 

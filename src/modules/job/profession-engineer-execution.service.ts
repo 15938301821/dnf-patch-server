@@ -41,8 +41,9 @@ import {
   encodeProfessionEngineerStylePlan,
   maxProfessionEngineerPlanBytes,
   parseProfessionEngineerStylePlanBytes,
+  professionEngineerModelDecisionSchema,
   type EncodedProfessionEngineerStylePlan,
-  type ProfessionEngineerModelDecision,
+  type ProfessionEngineerModelWireDecision,
   type ProfessionEngineerStylePlan,
 } from "./profession-engineer-plan.js";
 import {
@@ -112,9 +113,9 @@ interface EngineerExecutionRepositoryPort {
 
 interface FixedEngineerModelPort {
   structured(
-    request: StructuredModelRequest<ProfessionEngineerModelDecision>,
+    request: StructuredModelRequest<ProfessionEngineerModelWireDecision>,
     beforeEgress?: ModelEgressGuard,
-  ): Promise<StructuredModelResult<ProfessionEngineerModelDecision>>;
+  ): Promise<StructuredModelResult<ProfessionEngineerModelWireDecision>>;
 }
 
 /** 仅由主 Profession 编排调用的 Engineer 业务 Service，不注册额外 Controller。 */
@@ -195,8 +196,11 @@ export class ProfessionEngineerExecutionService {
 
     let encoded: EncodedProfessionEngineerStylePlan;
     try {
+      const decision = professionEngineerModelDecisionSchema.parse(
+        result.value,
+      );
       encoded = encodeProfessionEngineerStylePlan(
-        createProfessionEngineerStylePlan(result.value),
+        createProfessionEngineerStylePlan(decision),
       );
     } catch {
       await this.failModelExecution(

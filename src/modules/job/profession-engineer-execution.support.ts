@@ -20,8 +20,8 @@ import {
 import { stableStringifyJcsV1 } from "../../common/utils/canonical.js";
 import type { StructuredModelRequest } from "../openai/openai.contracts.js";
 import {
-  professionEngineerModelDecisionSchema,
-  type ProfessionEngineerModelDecision,
+  professionEngineerModelWireDecisionSchema,
+  type ProfessionEngineerModelWireDecision,
 } from "./profession-engineer-plan.js";
 import type { FrozenProfessionSkillExecutionContext } from "./profession-execution-context.js";
 import type { ReserveProfessionModelExecutionResult } from "./profession-model-execution.js";
@@ -37,12 +37,12 @@ const engineerSchemaName = "profession_engineer_pixel_style_decision_v1";
  */
 export function createEngineerModelRequest(
   context: FrozenProfessionSkillExecutionContext,
-): StructuredModelRequest<ProfessionEngineerModelDecision> {
+): StructuredModelRequest<ProfessionEngineerModelWireDecision> {
   return {
     runId: context.runId,
     role: "engineer",
     schemaName: engineerSchemaName,
-    schema: professionEngineerModelDecisionSchema,
+    schema: professionEngineerModelWireDecisionSchema,
     instructions: [
       "Return only the bounded pixel-style decision required by the schema.",
       "Choose RGB palette bytes, bounded intensity parameters, and optional visual operations only.",

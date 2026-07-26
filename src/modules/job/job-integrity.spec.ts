@@ -62,4 +62,52 @@ describe("validatePersistedJobIntegrity", () => {
   ])("rejects tampered persisted data %j", (override) => {
     expect(validatePersistedJobIntegrity(persisted(override))).toBe(false);
   });
+
+  it("validates a Factory v3 Job against its own contract profile", () => {
+    const factoryConfigV3 = {
+      schemaVersion: 3 as const,
+      policyId: "runtime-policy",
+      policySha256: "a".repeat(64),
+      allowedJobKinds: ["inventory", "shared-fx"] as const,
+      jobContracts: [
+        {
+          kind: "inventory" as const,
+          schemaVersion: 1 as const,
+          profileId: "resource-profile",
+        },
+        {
+          kind: "shared-fx" as const,
+          schemaVersion: 1 as const,
+          profileId: "runtime-profile",
+        },
+      ],
+      arbitraryExecution: false,
+      deploymentAuthorized: false,
+    };
+
+    expect(
+      validatePersistedJobIntegrity(
+        persisted({
+          factoryConfig: factoryConfigV3,
+          factoryConfigSha256: sha256Json(factoryConfigV3),
+        }),
+      ),
+    ).toBe(true);
+    const drifted = {
+      ...factoryConfigV3,
+      jobContracts: factoryConfigV3.jobContracts.map((contract) =>
+        contract.kind === "shared-fx"
+          ? { ...contract, profileId: "other-profile" }
+          : contract,
+      ),
+    };
+    expect(
+      validatePersistedJobIntegrity(
+        persisted({
+          factoryConfig: drifted,
+          factoryConfigSha256: sha256Json(drifted),
+        }),
+      ),
+    ).toBe(false);
+  });
 });

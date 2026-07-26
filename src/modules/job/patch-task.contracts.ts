@@ -150,12 +150,29 @@ export interface PatchTaskView {
   artifactAvailable: boolean;
 }
 
+/** Package V3 固定输出角色 schema；HTTP path 只能从三种受控角色中选择。 */
+export const patchTaskArtifactRoleSchema = z.enum([
+  "candidate",
+  "manifest",
+  "validation",
+]);
+/** 由固定角色 schema 推导的浏览器 Package Artifact 角色。 */
+export type PatchTaskArtifactRole = z.infer<typeof patchTaskArtifactRoleSchema>;
+
 /** 浏览器可查看的最终产物摘要；不暴露内部对象 key、下载授权或正文。 */
 export interface PatchTaskArtifactView {
+  artifactId: string;
+  role: PatchTaskArtifactRole;
   artifactName: string;
   mediaType: string;
   byteLength: number;
   sha256: string;
+}
+
+/** 当前用户按固定角色取得的短期下载授权；URL 到期失效且不表示部署或兼容。 */
+export interface PatchTaskArtifactDownloadView extends PatchTaskArtifactView {
+  downloadUrl: string;
+  expiresAtUtc: string;
 }
 
 export interface PlannedPatchTaskSkill {

@@ -156,4 +156,37 @@ describe("environment configuration", () => {
       }),
     ).toThrow();
   });
+
+  it("requires the Package V3 profile and all three tool identities atomically", () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment(),
+        STYLE_PACKAGE_PROFILE_ID: "npk-package-v3",
+      }),
+    ).toThrow();
+
+    expect(
+      validateEnvironment({
+        ...validEnvironment(),
+        STYLE_PACKAGE_PROFILE_ID: "npk-package-v3",
+        STYLE_PACKAGE_PACKAGER_TOOL_ID: "npk-packager-v1",
+        STYLE_PACKAGE_PACKAGER_SHA256: "1".repeat(64),
+        STYLE_PACKAGE_VALIDATOR_TOOL_ID: "npk-validator-v1",
+        STYLE_PACKAGE_VALIDATOR_SHA256: "2".repeat(64),
+        STYLE_PACKAGE_DIRECTXTEX_TOOL_ID: "directxtex-v1",
+        STYLE_PACKAGE_TEXCONV_SHA256: "3".repeat(64),
+        STYLE_PACKAGE_TEXDIAG_SHA256: "4".repeat(64),
+        STYLE_PACKAGE_EXTRACTORSHARP_TOOL_ID: "extractorsharp-v1",
+        STYLE_PACKAGE_EXTRACTOR_CORE_SHA256: "5".repeat(64),
+        STYLE_PACKAGE_EXTRACTOR_JSON_SHA256: "6".repeat(64),
+        STYLE_PACKAGE_EXTRACTOR_ZLIB_SHA256: "7".repeat(64),
+      }),
+    ).toMatchObject({
+      STYLE_PACKAGE_PROFILE_ID: "npk-package-v3",
+      STYLE_PACKAGE_PACKAGER_TOOL_ID: "npk-packager-v1",
+      STYLE_PACKAGE_VALIDATOR_TOOL_ID: "npk-validator-v1",
+      STYLE_PACKAGE_DIRECTXTEX_TOOL_ID: "directxtex-v1",
+      STYLE_PACKAGE_EXTRACTORSHARP_TOOL_ID: "extractorsharp-v1",
+    });
+  });
 });

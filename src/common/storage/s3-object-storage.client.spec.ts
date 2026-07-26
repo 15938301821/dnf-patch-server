@@ -160,6 +160,29 @@ describe("S3ObjectStorageClient", () => {
     });
   });
 
+  it("binds a validated Unicode filename as an attachment response", async () => {
+    const commandClient = new FakeCommandClient();
+    const presigner = new FakePresigner();
+    const client = new S3ObjectStorageClient(
+      "dnf-patch-artifacts",
+      commandClient,
+      presigner,
+    );
+
+    await client.authorizeDownload(
+      "runs/run-id/validation",
+      120,
+      "独立验证.json",
+    );
+
+    expect(presigner.getCommands[0]?.input).toMatchObject({
+      Bucket: "dnf-patch-artifacts",
+      Key: "runs/run-id/validation",
+      ResponseContentDisposition:
+        "attachment; filename*=UTF-8''%E7%8B%AC%E7%AB%8B%E9%AA%8C%E8%AF%81.json",
+    });
+  });
+
   // 此场景只本地生成签名 URL；测试占位凭据不会发送，摘要必须留在签名 header 而非 query。
   it("keeps required upload metadata in signed headers", async () => {
     const client = createS3ObjectStorageClient({

@@ -6,14 +6,14 @@
  * @created 2026-07-23
  * @relatedPlan N/A - 用户直接需求
  *
- * 调用关系：RunService 读取 Factory v2 的 jobContracts 后调用 parseJobPayload；JobRepository claim 时的
+ * 调用关系：RunService 读取 Factory v2/v3 的 jobContracts 后调用 parseJobPayload；JobRepository claim 时的
  * 完整性检查也使用同一契约防止持久化 JSON 被绕过。Guardrail 的 declarativeParametersSchema 提供递归
  * 执行入口/路径拒绝语义。
  * 输入输出：输入是受控 kind、Factory 注册版本与未知 JSON；输出是对应的已解析联合类型，失败时抛出 Zod/
  * 注册错误，不返回 Worker 命令、工具路径、游戏资源或数据库信息。
  * 副作用：纯内存 schema 解析，无网络、数据库、对象存储、事件或进程副作用。
  * 安全边界：kind 在 enum 中出现不等于可任意解析；仅 schemaVersion=1 且本表显式注册的契约可接受。
- * `profession`、`shared-fx` 使用更具体的冻结 payload，其他 kind 只能使用有界声明式 v1 结构。
+ * `profession`、`shared-fx`、`npk-package` 使用更具体的冻结 payload，其他 kind 只能使用有界声明式 v1 结构。
  */
 import { z } from "zod";
 import { clientIdSchema } from "../../common/contracts/index.js";
@@ -23,6 +23,7 @@ import {
 } from "../guardrail/guardrail.contracts.js";
 import { styleSkillProductionJobPayloadV2Schema } from "./style-skill-production.contracts.js";
 import { sharedFxJobPayloadV1Schema } from "./shared-fx.contracts.js";
+import { stylePackageProductionJobPayloadV3Schema } from "./style-package-production.contracts.js";
 
 /**
  * 大多数受控 Job kind 共用的声明式 payload v1。
@@ -48,7 +49,8 @@ export type DeclarativeJobPayloadV1 = z.infer<
 export type RegisteredJobPayloadV1 =
   | DeclarativeJobPayloadV1
   | z.infer<typeof styleSkillProductionJobPayloadV2Schema>
-  | z.infer<typeof sharedFxJobPayloadV1Schema>;
+  | z.infer<typeof sharedFxJobPayloadV1Schema>
+  | z.infer<typeof stylePackageProductionJobPayloadV3Schema>;
 
 /**
  * 解析 Factory 已冻结的 Job payload。
@@ -73,15 +75,18 @@ export function parseJobPayload(
   if (kind === "shared-fx") {
     return sharedFxJobPayloadV1Schema.parse(payload);
   }
+  if (kind === "npk-package") {
+    return stylePackageProductionJobPayloadV3Schema.parse(payload);
+  }
   return registeredContracts[kind].parse(payload);
 }
 
 /**
- * 除 profession/shared-fx 外使用通用 v1 schema 的显式白名单。
+ * 除 profession/shared-fx/npk-package 外使用通用 v1 schema 的显式白名单。
  * 使用完整 Record 使新增 AllowedJobKind 时 TypeScript 强制维护者登记契约，而不会默认放行未知 kind。
  */
 const registeredContracts: Record<
-  Exclude<AllowedJobKind, "profession" | "shared-fx">,
+  Exclude<AllowedJobKind, "profession" | "shared-fx" | "npk-package">,
   typeof declarativeJobPayloadV1Schema
 > = {
   "context-freeze": declarativeJobPayloadV1Schema,
@@ -89,7 +94,6 @@ const registeredContracts: Record<
   "engineering-plan": declarativeJobPayloadV1Schema,
   "image-reference": declarativeJobPayloadV1Schema,
   "aseprite-adaptation": declarativeJobPayloadV1Schema,
-  "npk-package": declarativeJobPayloadV1Schema,
   "independent-validation": declarativeJobPayloadV1Schema,
   "manual-review": declarativeJobPayloadV1Schema,
   "bpk-package": declarativeJobPayloadV1Schema,

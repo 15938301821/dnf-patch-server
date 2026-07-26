@@ -65,6 +65,7 @@ function repositoryStub(
 ): ArtifactRepositoryPort {
   return {
     findRunId: vi.fn().mockResolvedValue(undefined),
+    findObjectKey: vi.fn().mockResolvedValue(undefined),
     listByRun: vi.fn().mockResolvedValue([]),
     reserveUpload: vi.fn().mockResolvedValue({
       status: "accepted",
@@ -125,6 +126,47 @@ function storageStub(
 }
 
 describe("ArtifactService upload lifecycle", () => {
+  it("authorizes a browser download only after rechecking Artifact-to-Run ownership", async () => {
+    const authorizeDownload = vi.fn().mockResolvedValue({
+      objectKey: `artifacts/${artifactId}`,
+      url: "http://127.0.0.1:9000/download",
+      expiresAtUtc: "2026-07-22T12:05:00.000Z",
+    });
+    const service = new ArtifactService(
+      repositoryStub({
+        findObjectKey: vi.fn().mockResolvedValue(`artifacts/${artifactId}`),
+      }),
+      storageStub({ authorizeDownload }),
+      { maxRunBytes: 10_737_418_240, sessionTtlSeconds: 300 },
+    );
+
+    await expect(
+      service.authorizeRunArtifactDownload(runId, artifactId, "candidate.npk"),
+    ).resolves.toEqual({
+      artifactId,
+      downloadUrl: "http://127.0.0.1:9000/download",
+      expiresAtUtc: "2026-07-22T12:05:00.000Z",
+    });
+    expect(authorizeDownload).toHaveBeenCalledWith({
+      objectKey: `artifacts/${artifactId}`,
+      downloadName: "candidate.npk",
+    });
+  });
+
+  it("does not contact object storage when a browser Artifact is outside the Run", async () => {
+    const authorizeDownload = vi.fn();
+    const service = new ArtifactService(
+      repositoryStub({ findObjectKey: vi.fn().mockResolvedValue(undefined) }),
+      storageStub({ authorizeDownload }),
+      { maxRunBytes: 10_737_418_240, sessionTtlSeconds: 300 },
+    );
+
+    await expect(
+      service.authorizeRunArtifactDownload(runId, artifactId, "candidate.npk"),
+    ).rejects.toMatchObject({ response: { code: "ARTIFACT_NOT_FOUND" } });
+    expect(authorizeDownload).not.toHaveBeenCalled();
+  });
+
   it("generates the object key and returns no bucket choice", async () => {
     let authorizedInput: ObjectStorageUploadRequest | undefined;
     const authorizeUpload = vi.fn((input: ObjectStorageUploadRequest) => {

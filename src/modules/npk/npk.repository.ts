@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import { hasExactJobLease } from "../../common/contracts/index.js";
 import { artifactUploadSessions } from "../../common/db/artifact-schema.js";
 import { DatabaseService } from "../../common/db/database.service.js";
+import { databaseUtcDate } from "../../common/db/mysql-datetime.js";
 import {
   artifacts,
   jobs,
@@ -490,6 +491,4 @@ function hasFrameManifest(
  * @param value 当前事务查询的数据库时间，不能换成 Worker 或服务进程本机时间。
  * @returns Date，用于 exact lease 时效判断。
  */
-function dateValue(value: Date | string): Date {
-  return value instanceof Date ? value : new Date(value);
-}
+const dateValue = databaseUtcDate;

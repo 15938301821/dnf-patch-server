@@ -185,6 +185,40 @@ describe("ResourceImportService", () => {
     });
   });
 
+  it("uses the Factory v3 inventory contract profile", async () => {
+    factories.get.mockResolvedValue({
+      ...factory(),
+      version: "3.0.0",
+      config: {
+        schemaVersion: 3,
+        policyId: "production-policy",
+        policySha256: "9".repeat(64),
+        allowedJobKinds: ["inventory", "profession"],
+        jobContracts: [
+          {
+            kind: "inventory",
+            schemaVersion: 1,
+            profileId: "resource-profile",
+          },
+          {
+            kind: "profession",
+            schemaVersion: 1,
+            profileId: "aseprite-production-v1",
+          },
+        ],
+        arbitraryExecution: false,
+        deploymentAuthorized: false,
+      },
+    });
+
+    await service.create();
+
+    const input = runs.create.mock.calls[0]?.[0];
+    expect(input).toBeDefined();
+    const payload = parseJobPayload("inventory", 1, input?.jobs[0]?.payload);
+    expect(payload.profileId).toBe("resource-profile");
+  });
+
   it("requires a same-Run frozen Inventory before reporting success", async () => {
     jobs.findLatestByProject.mockResolvedValue(job("passed"));
 

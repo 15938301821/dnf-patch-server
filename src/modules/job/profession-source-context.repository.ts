@@ -18,6 +18,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { sha256Schema } from "../../common/contracts/index.js";
 import { DatabaseService } from "../../common/db/database.service.js";
+import { databaseUtcDate } from "../../common/db/mysql-datetime.js";
 import {
   artifacts,
   jobs,
@@ -219,5 +220,5 @@ async function databaseNow(transaction: Transaction): Promise<Date> {
     .from(jobs)
     .limit(1);
   if (!row) throw new Error("DATABASE_TIME_UNAVAILABLE");
-  return row.value instanceof Date ? row.value : new Date(row.value);
+  return databaseUtcDate(row.value);
 }

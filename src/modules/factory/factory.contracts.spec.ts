@@ -14,7 +14,10 @@
  * 不授权创建新的 v1 Run。
  */
 import { describe, expect, it } from "vitest";
-import { factoryConfigSchema } from "./factory.contracts.js";
+import {
+  factoryConfigSchema,
+  resolveFactoryJobContract,
+} from "./factory.contracts.js";
 
 /** 固定 64 位摘要 fixture，只用于验证 schema 形状，不代表真实策略文件内容。 */
 const policySha256 = "A".repeat(64);
@@ -49,6 +52,56 @@ describe("factoryConfigSchema", () => {
         deploymentAuthorized: false,
       }).success,
     ).toBe(true);
+  });
+
+  it("按 Job kind 解析 Factory v3 的独立 profile", () => {
+    const result = factoryConfigSchema.safeParse({
+      schemaVersion: 3,
+      policyId: "policy-v3",
+      policySha256,
+      allowedJobKinds: ["inventory", "profession"],
+      jobContracts: [
+        {
+          kind: "inventory",
+          schemaVersion: 1,
+          profileId: "resource-profile",
+        },
+        {
+          kind: "profession",
+          schemaVersion: 1,
+          profileId: "aseprite-production-v1",
+        },
+      ],
+      arbitraryExecution: false,
+      deploymentAuthorized: false,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw result.error;
+    expect(resolveFactoryJobContract(result.data, "inventory")).toEqual({
+      kind: "inventory",
+      schemaVersion: 1,
+      profileId: "resource-profile",
+    });
+    expect(resolveFactoryJobContract(result.data, "profession")).toEqual({
+      kind: "profession",
+      schemaVersion: 1,
+      profileId: "aseprite-production-v1",
+    });
+  });
+
+  it("拒绝 Factory v3 中缺少独立 profile 的任务契约", () => {
+    expect(
+      factoryConfigSchema.safeParse({
+        schemaVersion: 3,
+        policyId: "policy-v3",
+        policySha256,
+        allowedJobKinds: ["inventory"],
+        jobContracts: [{ kind: "inventory", schemaVersion: 1 }],
+        arbitraryExecution: false,
+        deploymentAuthorized: false,
+      }).success,
+    ).toBe(false);
   });
 
   it("拒绝 jobContracts 与白名单不完全对应", () => {

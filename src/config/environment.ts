@@ -86,6 +86,13 @@ const objectStorageAccessKeySchema = z
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
 
+const packageToolIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/u);
+const packageToolSha256Schema = z.string().regex(/^[A-Fa-f0-9]{64}$/u);
+
 /**
  * 服务启动环境 schema；生产方是进程环境，消费方是 ConfigService 与基础设施 provider。
  * 每个字段都在任何 Controller 接收请求前完成运行时校验，未知环境变量可由进程保留但不会进入
@@ -248,6 +255,19 @@ export const environmentSchema = z
       .min(1)
       .max(100)
       .default(25),
+    /** Package V3 逻辑 profile；全部工具与依赖身份必须完整成组，缺失时新制作任务 fail-closed。 */
+    STYLE_PACKAGE_PROFILE_ID: packageToolIdSchema.optional(),
+    STYLE_PACKAGE_PACKAGER_TOOL_ID: packageToolIdSchema.optional(),
+    STYLE_PACKAGE_PACKAGER_SHA256: packageToolSha256Schema.optional(),
+    STYLE_PACKAGE_VALIDATOR_TOOL_ID: packageToolIdSchema.optional(),
+    STYLE_PACKAGE_VALIDATOR_SHA256: packageToolSha256Schema.optional(),
+    STYLE_PACKAGE_DIRECTXTEX_TOOL_ID: packageToolIdSchema.optional(),
+    STYLE_PACKAGE_TEXCONV_SHA256: packageToolSha256Schema.optional(),
+    STYLE_PACKAGE_TEXDIAG_SHA256: packageToolSha256Schema.optional(),
+    STYLE_PACKAGE_EXTRACTORSHARP_TOOL_ID: packageToolIdSchema.optional(),
+    STYLE_PACKAGE_EXTRACTOR_CORE_SHA256: packageToolSha256Schema.optional(),
+    STYLE_PACKAGE_EXTRACTOR_JSON_SHA256: packageToolSha256Schema.optional(),
+    STYLE_PACKAGE_EXTRACTOR_ZLIB_SHA256: packageToolSha256Schema.optional(),
   })
   .superRefine((value, context) => {
     // 步骤 1：隔离三类认证秘密，防止一个泄露值横向进入浏览器、普通 API 与 Worker 入口。
@@ -327,6 +347,31 @@ export const environmentSchema = z
         code: "custom",
         path: ["OBJECT_STORAGE_MAX_RUN_BYTES"],
         message: "单 Run 对象配额不能小于单对象上限。",
+      });
+    }
+    // 步骤 5：Package profile 只能完整配置，避免部分工具身份被误认为可执行能力。
+    const packageProfileValues = [
+      value.STYLE_PACKAGE_PROFILE_ID,
+      value.STYLE_PACKAGE_PACKAGER_TOOL_ID,
+      value.STYLE_PACKAGE_PACKAGER_SHA256,
+      value.STYLE_PACKAGE_VALIDATOR_TOOL_ID,
+      value.STYLE_PACKAGE_VALIDATOR_SHA256,
+      value.STYLE_PACKAGE_DIRECTXTEX_TOOL_ID,
+      value.STYLE_PACKAGE_TEXCONV_SHA256,
+      value.STYLE_PACKAGE_TEXDIAG_SHA256,
+      value.STYLE_PACKAGE_EXTRACTORSHARP_TOOL_ID,
+      value.STYLE_PACKAGE_EXTRACTOR_CORE_SHA256,
+      value.STYLE_PACKAGE_EXTRACTOR_JSON_SHA256,
+      value.STYLE_PACKAGE_EXTRACTOR_ZLIB_SHA256,
+    ];
+    if (
+      packageProfileValues.some((item) => item !== undefined) &&
+      packageProfileValues.some((item) => item === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["STYLE_PACKAGE_PROFILE_ID"],
+        message: "Package V3 profile 与全部工具及依赖身份必须完整成组配置。",
       });
     }
   });

@@ -122,7 +122,7 @@ export interface SharedFxPayloadContext {
 }
 
 /**
- * 根据已读取的 Project Snapshot 与 Factory v2 策略构建固定的共享特效声明式 Job。
+ * 根据已读取的 Project Snapshot 与 Factory v2/v3 策略构建固定的共享特效声明式 Job。
  * 缺少 manifest 哈希时拒绝构建，避免把未核验的资源映射交给 Worker。
  */
 export function createSharedFxJobPayload(

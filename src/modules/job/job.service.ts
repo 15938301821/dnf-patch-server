@@ -23,6 +23,7 @@ import type {
   CompleteJobInput,
   HeartbeatJobInput,
   JobView,
+  SurrenderJobInput,
 } from "./job.contracts.js";
 import { JobRepository } from "./job.repository.js";
 
@@ -80,12 +81,36 @@ export class JobService {
   }
 
   /**
+   * 显式交还当前瞬时失败的 attempt；只有精确有效 lease 可重排，不能等待 lease 自然过期。
+   * @returns 未耗尽时 requeued，耗尽时 failed；冲突统一映射为稳定 lease 错误。
+   */
+  async surrender(
+    jobId: string,
+    input: SurrenderJobInput,
+  ): Promise<"requeued" | "failed"> {
+    const result = await this.jobs.surrender(jobId, input);
+    if (result.status === "protocol-upgrade-required") {
+      throw new ConflictException({
+        code: "WORKER_PROTOCOL_UPGRADE_REQUIRED",
+        message: "交还任务必须提交 claim 返回的 leaseId。",
+      });
+    }
+    if (result.status === "lease-mismatch") {
+      throw new ConflictException({
+        code: "JOB_LEASE_MISMATCH",
+        message: "任务租约不存在、已过期或不属于当前 Worker。",
+      });
+    }
+    return result.status;
+  }
+
+  /**
    * 提交当前 Worker 的 Job 终态及结果/错误证据。
    * @param jobId 已校验 Job id。
    * @param input 已校验 Worker、lease、终态和结果 SHA-256 或稳定错误码。
    * @returns 无返回值；Repository 原子更新 Job、attempt，必要时终结 Run 并写权威事件/outbox。
-   * @throws WORKER_PROTOCOL_UPGRADE_REQUIRED、SHARED_FX_EVIDENCE_INCOMPLETE、SHARED_FX_REVIEW_CONFLICT 或
-   * JOB_COMPLETION_CONFLICT，当 lease/证据/审核不变量不成立时，且不应写入终态。
+   * @throws WORKER_PROTOCOL_UPGRADE_REQUIRED、SHARED_FX_EVIDENCE_INCOMPLETE、STYLE_PACKAGE_EVIDENCE_INCOMPLETE、
+   * SHARED_FX_REVIEW_CONFLICT 或 JOB_COMPLETION_CONFLICT，当 lease/证据/审核不变量不成立时，且不应写入终态。
    */
   async complete(jobId: string, input: CompleteJobInput): Promise<void> {
     const result = await this.jobs.complete(jobId, input);
@@ -111,6 +136,12 @@ export class JobService {
       throw new ConflictException({
         code: "PROFESSION_EVIDENCE_INCOMPLETE",
         message: "职业任务尚未形成全部冻结技能的完整生产证据。",
+      });
+    }
+    if (result.status === "style-package-evidence-incomplete") {
+      throw new ConflictException({
+        code: "STYLE_PACKAGE_EVIDENCE_INCOMPLETE",
+        message: "最终封包任务尚未封存当前轮次的完整输出证据。",
       });
     }
     if (result.status !== "accepted") {

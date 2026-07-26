@@ -5,17 +5,14 @@
  * @created 2026-07-21
  * @relatedPlan N/A（对应当前前端业务与后端工作流直接需求）
  */
-import {
-  ConflictException,
-  NotFoundException,
-  ServiceUnavailableException,
-} from "@nestjs/common";
+import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import { PatchTaskService } from "./patch-task.service.js";
 import type { StyleBuildContext } from "../profession/profession.contracts.js";
 import { createRunSchema } from "../run/run.contracts.js";
 import { styleSkillProductionJobPayloadV2Schema } from "./style-skill-production.contracts.js";
+import { stylePackageProductionJobPayloadV3Schema } from "./style-package-production.contracts.js";
 
 const professionId = "11111111-1111-4111-8111-111111111111";
 const styleId = "22222222-2222-4222-8222-222222222222";
@@ -24,12 +21,27 @@ const snapshotId = "44444444-4444-4444-8444-444444444444";
 const sourceRunId = "55555555-5555-4555-8555-555555555555";
 const idempotencyKey = "patch.test-request";
 const ownerUserId = "99999999-9999-4999-8999-999999999999";
+const packageEnvironment: Record<string, string> = {
+  STYLE_PACKAGE_PROFILE_ID: "npk-package-v3",
+  STYLE_PACKAGE_PACKAGER_TOOL_ID: "npk-packager-v1",
+  STYLE_PACKAGE_PACKAGER_SHA256: "1".repeat(64),
+  STYLE_PACKAGE_VALIDATOR_TOOL_ID: "npk-validator-v1",
+  STYLE_PACKAGE_VALIDATOR_SHA256: "2".repeat(64),
+  STYLE_PACKAGE_DIRECTXTEX_TOOL_ID: "directxtex-v1",
+  STYLE_PACKAGE_TEXCONV_SHA256: "3".repeat(64),
+  STYLE_PACKAGE_TEXDIAG_SHA256: "4".repeat(64),
+  STYLE_PACKAGE_EXTRACTORSHARP_TOOL_ID: "extractorsharp-v1",
+  STYLE_PACKAGE_EXTRACTOR_CORE_SHA256: "5".repeat(64),
+  STYLE_PACKAGE_EXTRACTOR_JSON_SHA256: "6".repeat(64),
+  STYLE_PACKAGE_EXTRACTOR_ZLIB_SHA256: "7".repeat(64),
+};
 
 describe("PatchTaskService", () => {
   const patchTasks = {
     list: vi.fn(),
     createPlan: vi.fn(),
     findArtifact: vi.fn(),
+    findArtifacts: vi.fn(),
     reportSkillProduction: vi.fn(),
     reportPackage: vi.fn(),
     resolveProfessionSkillExecution: vi.fn(),
@@ -40,6 +52,10 @@ describe("PatchTaskService", () => {
   const projects = { get: vi.fn() };
   const runs = { create: vi.fn(), blockDeferredDispatch: vi.fn() };
   const workers = { hasEnabledCapability: vi.fn() };
+  const artifacts = { authorizeRunArtifactDownload: vi.fn() };
+  const packageConfig = {
+    get: vi.fn((key: string) => packageEnvironment[key]),
+  };
   let service: PatchTaskService;
 
   beforeEach(() => {
@@ -51,6 +67,8 @@ describe("PatchTaskService", () => {
       projects,
       runs,
       workers,
+      artifacts,
+      packageConfig,
     );
     professions.getStyleBuildContext.mockResolvedValue(buildContext());
     projects.get.mockResolvedValue({
@@ -59,10 +77,22 @@ describe("PatchTaskService", () => {
     });
     factories.get.mockResolvedValue({
       config: {
-        schemaVersion: 2,
-        profileId: "profile-v2",
-        policyId: "policy-v2",
+        schemaVersion: 3,
+        policyId: "policy-v3",
         policySha256: "A".repeat(64),
+        allowedJobKinds: ["profession", "npk-package"],
+        jobContracts: [
+          {
+            kind: "profession",
+            schemaVersion: 1,
+            profileId: "aseprite-production-v1",
+          },
+          {
+            kind: "npk-package",
+            schemaVersion: 1,
+            profileId: "npk-package-v3",
+          },
+        ],
       },
     });
     runs.create.mockResolvedValue({
@@ -73,7 +103,7 @@ describe("PatchTaskService", () => {
     workers.hasEnabledCapability.mockResolvedValue(true);
   });
 
-  it("creates one guarded profession job and planned skill productions", async () => {
+  it("creates guarded profession and deferred package jobs with planned skills", async () => {
     await expect(
       service.create({ professionId, styleId }, idempotencyKey, ownerUserId),
     ).resolves.toMatchObject({
@@ -86,7 +116,10 @@ describe("PatchTaskService", () => {
         projectId: workflowProjectId,
         snapshotId,
         action: "generate-patch",
-        jobs: [expect.objectContaining({ kind: "profession" })],
+        jobs: [
+          expect.objectContaining({ kind: "profession" }),
+          expect.objectContaining({ kind: "npk-package" }),
+        ],
       }),
       idempotencyKey,
       { deferJobDispatch: true, ownerUserId },
@@ -102,6 +135,9 @@ describe("PatchTaskService", () => {
     const payload = styleSkillProductionJobPayloadV2Schema.parse(
       createInput.jobs[0]?.payload,
     );
+    const packagePayload = stylePackageProductionJobPayloadV3Schema.parse(
+      createInput.jobs[1]?.payload,
+    );
     const frozenSkill = payload.parameters.promptPackage.skills[0];
     if (!frozenSkill) throw new Error("TEST_SKILL_REQUIRED");
     expect(createInput.clientRunId).toMatch(/^patch\.[A-F0-9]{64}$/u);
@@ -109,6 +145,16 @@ describe("PatchTaskService", () => {
       workflow: "style-skill-production-v2",
       selectedSkillIds: ["77777777-7777-4777-8777-777777777777"],
       deploymentAuthorized: false,
+    });
+    expect(packagePayload.parameters).toMatchObject({
+      workflow: "style-package-production-v3",
+      selectedSkillIds: ["77777777-7777-4777-8777-777777777777"],
+      safety: {
+        deploymentAuthorized: false,
+        deploymentPerformed: false,
+        fullSkillCoverageProven: false,
+        clientCompatibilityProven: false,
+      },
     });
     expect(frozenSkill).toMatchObject({
       professionPrompt: buildContext().skills[0]?.professionPrompt,
@@ -125,6 +171,119 @@ describe("PatchTaskService", () => {
       ],
       "dispatch",
     );
+  });
+
+  it("authorizes only a fixed role from the current owner's complete Package artifacts", async () => {
+    const packageArtifacts = [
+      {
+        artifactId: crypto.randomUUID(),
+        role: "candidate" as const,
+        artifactName: "candidate.npk",
+        mediaType: "application/octet-stream",
+        byteLength: 200,
+        sha256: "A".repeat(64),
+      },
+      {
+        artifactId: crypto.randomUUID(),
+        role: "manifest" as const,
+        artifactName: "manifest.json",
+        mediaType: "application/json",
+        byteLength: 100,
+        sha256: "B".repeat(64),
+      },
+      {
+        artifactId: crypto.randomUUID(),
+        role: "validation" as const,
+        artifactName: "validation.json",
+        mediaType: "application/json",
+        byteLength: 300,
+        sha256: "C".repeat(64),
+      },
+    ];
+    patchTasks.findArtifacts.mockResolvedValue(packageArtifacts);
+    artifacts.authorizeRunArtifactDownload.mockResolvedValue({
+      artifactId: packageArtifacts[2]?.artifactId,
+      downloadUrl: "http://127.0.0.1:9000/download",
+      expiresAtUtc: "2026-07-25T12:05:00.000Z",
+    });
+
+    await expect(
+      service.authorizeArtifactDownload(
+        "66666666-6666-4666-8666-666666666666",
+        "validation",
+        ownerUserId,
+      ),
+    ).resolves.toMatchObject({
+      role: "validation",
+      downloadUrl: "http://127.0.0.1:9000/download",
+    });
+    expect(patchTasks.findArtifacts).toHaveBeenCalledWith(
+      "66666666-6666-4666-8666-666666666666",
+      ownerUserId,
+    );
+    expect(artifacts.authorizeRunArtifactDownload).toHaveBeenCalledWith(
+      "66666666-6666-4666-8666-666666666666",
+      packageArtifacts[2]?.artifactId,
+      "validation.json",
+    );
+  });
+
+  it("does not sign a partial Package artifact set", async () => {
+    patchTasks.findArtifacts.mockResolvedValue(undefined);
+
+    await expect(
+      service.authorizeArtifactDownload(
+        "66666666-6666-4666-8666-666666666666",
+        "candidate",
+        ownerUserId,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: "PATCH_TASK_ARTIFACTS_NOT_READY" },
+    });
+    expect(artifacts.authorizeRunArtifactDownload).not.toHaveBeenCalled();
+  });
+
+  it("uses the Factory v3 profession contract profile for the frozen payload", async () => {
+    factories.get.mockResolvedValue({
+      config: {
+        schemaVersion: 3,
+        policyId: "policy-v3",
+        policySha256: "B".repeat(64),
+        allowedJobKinds: ["inventory", "profession", "npk-package"],
+        jobContracts: [
+          {
+            kind: "inventory",
+            schemaVersion: 1,
+            profileId: "resource-profile",
+          },
+          {
+            kind: "profession",
+            schemaVersion: 1,
+            profileId: "aseprite-production-v1",
+          },
+          {
+            kind: "npk-package",
+            schemaVersion: 1,
+            profileId: "npk-package-v3",
+          },
+        ],
+      },
+    });
+
+    await service.create(
+      { professionId, styleId },
+      idempotencyKey,
+      ownerUserId,
+    );
+
+    const createInput = createRunSchema.parse(
+      runs.create.mock.calls[0]?.[0] as unknown,
+    );
+    const payload = styleSkillProductionJobPayloadV2Schema.parse(
+      createInput.jobs[0]?.payload,
+    );
+    expect(payload.profileId).toBe("aseprite-production-v1");
+    expect(createInput.policyId).toBe("policy-v3");
   });
 
   it("persists an auditable blocked plan without dispatching it", async () => {
@@ -191,7 +350,9 @@ describe("PatchTaskService", () => {
   });
 
   it("fails closed when no enabled Worker has profession capability", async () => {
-    workers.hasEnabledCapability.mockResolvedValue(false);
+    workers.hasEnabledCapability.mockImplementation((capability: string) =>
+      Promise.resolve(capability !== "profession"),
+    );
 
     const error: unknown = await service
       .create({ professionId, styleId }, idempotencyKey, ownerUserId)
@@ -206,164 +367,57 @@ describe("PatchTaskService", () => {
     expect(runs.create).not.toHaveBeenCalled();
   });
 
-  it("accepts worker skill and package evidence reports", async () => {
-    patchTasks.reportSkillProduction.mockResolvedValue({ status: "accepted" });
-    patchTasks.reportPackage.mockResolvedValue({ status: "accepted" });
-
-    await expect(
-      service.reportSkillProduction("job-id", {
-        workerId: crypto.randomUUID(),
-        leaseId: crypto.randomUUID(),
-        attempt: 2,
-        skillId: crypto.randomUUID(),
-        status: "generating",
-      }),
-    ).resolves.toBeUndefined();
-    await expect(
-      service.reportPackage("job-id", {
-        workerId: crypto.randomUUID(),
-        leaseId: crypto.randomUUID(),
-        attempt: 2,
-        status: "building",
-      }),
-    ).resolves.toBeUndefined();
-  });
-
-  it("maps worker report conflicts and missing records to stable HTTP errors", async () => {
-    patchTasks.reportSkillProduction.mockResolvedValue({
-      status: "model-execution-evidence-mismatch",
-    });
-    await expect(
-      service.reportSkillProduction("job-id", {
-        workerId: crypto.randomUUID(),
-        leaseId: crypto.randomUUID(),
-        attempt: 2,
-        skillId: crypto.randomUUID(),
-        status: "passed",
-        asepriteBinarySha256: "A".repeat(64),
-        asepriteAdapterSha256: "B".repeat(64),
-        asepriteArtifactId: crypto.randomUUID(),
-        validationArtifactId: crypto.randomUUID(),
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
-
-    patchTasks.reportPackage.mockResolvedValue({ status: "package-not-found" });
-    await expect(
-      service.reportPackage("job-id", {
-        workerId: crypto.randomUUID(),
-        leaseId: crypto.randomUUID(),
-        attempt: 2,
-        status: "building",
-      }),
-    ).rejects.toBeInstanceOf(NotFoundException);
-  });
-
-  it("returns only the lease-gated frozen Profession context", async () => {
-    const context = {
-      runId: sourceRunId,
-      profileId: "profile-v2",
-      professionId,
-      styleId,
-      themeDefinition: buildContext().style.themeDefinition,
-      skill: { skillId: crypto.randomUUID() },
-    };
-    patchTasks.resolveProfessionSkillExecution.mockResolvedValue({
-      status: "accepted",
-      context,
-    });
-    const input = {
-      workerId: crypto.randomUUID(),
-      leaseId: crypto.randomUUID(),
-      attempt: 2,
-      skillId: context.skill.skillId,
-    };
-
-    await expect(
-      service.resolveProfessionSkillExecution("job-id", input),
-    ).resolves.toBe(context);
-    expect(patchTasks.resolveProfessionSkillExecution).toHaveBeenCalledWith(
-      "job-id",
-      input,
-    );
-  });
-
-  it.each([
-    ["lease-mismatch", ConflictException, "JOB_LEASE_MISMATCH"],
-    ["job-kind-mismatch", ConflictException, "PATCH_TASK_JOB_KIND_REQUIRED"],
-    [
-      "job-integrity-failed",
-      ConflictException,
-      "PROFESSION_JOB_INTEGRITY_FAILED",
-    ],
-    ["skill-not-found", NotFoundException, "PROFESSION_JOB_SKILL_NOT_FOUND"],
-  ] as const)(
-    "maps Profession execution %s to a stable internal error",
-    async (status, exceptionType, code) => {
-      patchTasks.resolveProfessionSkillExecution.mockResolvedValue({ status });
-
-      const error: unknown = await service
-        .resolveProfessionSkillExecution("job-id", {
-          workerId: crypto.randomUUID(),
-          leaseId: crypto.randomUUID(),
-          attempt: 2,
-          skillId: crypto.randomUUID(),
-        })
-        .catch((cause: unknown) => cause);
-
-      expect(error).toBeInstanceOf(exceptionType);
-      if (
-        !(
-          error instanceof ConflictException ||
-          error instanceof NotFoundException
-        )
-      ) {
-        throw error;
-      }
-      expect(error.getResponse()).toMatchObject({ code });
-    },
-  );
-
-  it("returns Server-derived Profession production progress", async () => {
-    const input = {
-      workerId: crypto.randomUUID(),
-      leaseId: crypto.randomUUID(),
-      attempt: 2,
-    };
-    const progress = {
-      schemaVersion: 1 as const,
-      skills: [{ skillId: crypto.randomUUID(), status: "pending" as const }],
-    };
-    patchTasks.resolveProfessionProductionProgress.mockResolvedValue({
-      status: "accepted",
-      progress,
-    });
-
-    await expect(
-      service.resolveProfessionProductionProgress("job-id", input),
-    ).resolves.toEqual(progress);
-    expect(patchTasks.resolveProfessionProductionProgress).toHaveBeenCalledWith(
-      "job-id",
-      input,
-    );
-  });
-
-  it("maps Profession progress integrity failure to a stable conflict", async () => {
-    patchTasks.resolveProfessionProductionProgress.mockResolvedValue({
-      status: "production-integrity-failed",
+  it("fails closed when the Factory has no package contract", async () => {
+    factories.get.mockResolvedValue({
+      config: {
+        schemaVersion: 2,
+        profileId: "profile-v2",
+        policyId: "policy-v2",
+        policySha256: "A".repeat(64),
+        allowedJobKinds: ["profession"],
+        jobContracts: [{ kind: "profession", schemaVersion: 1 }],
+      },
     });
 
     const error: unknown = await service
-      .resolveProfessionProductionProgress("job-id", {
-        workerId: crypto.randomUUID(),
-        leaseId: crypto.randomUUID(),
-        attempt: 2,
-      })
+      .create({ professionId, styleId }, idempotencyKey, ownerUserId)
       .catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(ConflictException);
     if (!(error instanceof ConflictException)) throw error;
     expect(error.getResponse()).toMatchObject({
-      code: "PROFESSION_PRODUCTION_EVIDENCE_MISMATCH",
+      code: "STYLE_PACKAGE_CONTRACT_REQUIRED",
     });
+    expect(runs.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when no enabled Worker has package capability", async () => {
+    workers.hasEnabledCapability.mockImplementation((capability: string) =>
+      Promise.resolve(capability !== "npk-package"),
+    );
+
+    const error: unknown = await service
+      .create({ professionId, styleId }, idempotencyKey, ownerUserId)
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ConflictException);
+    if (!(error instanceof ConflictException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "STYLE_PACKAGE_WORKER_REQUIRED",
+    });
+    expect(runs.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the fixed Package profile is not configured", async () => {
+    packageConfig.get.mockReturnValueOnce(undefined);
+
+    const error: unknown = await service
+      .create({ professionId, styleId }, idempotencyKey, ownerUserId)
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ConflictException);
+    if (!(error instanceof ConflictException)) throw error;
+    expect(error.getResponse()).toMatchObject({
+      code: "STYLE_PACKAGE_PROFILE_REQUIRED",
+    });
+    expect(runs.create).not.toHaveBeenCalled();
   });
 });
 

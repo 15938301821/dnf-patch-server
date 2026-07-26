@@ -24,16 +24,16 @@ import type { JobTransaction } from "./job-run-event.repository-support.js";
  * @param transaction JobRepository 已建立的事务和 Job 行锁边界。
  * @param job 当前锁定 Job；attemptCount 为零时没有可关闭的领取记录。
  * @param now 从数据库读取的统一时间，供 attempt 与模型执行共享终结时间。
- * @param status 完整性失败使用 blocked，lease 过期使用 timed_out。
- * @param errorCode 与 status 对应的稳定原因，不包含数据库或 Worker 原始错误。
+ * @param status 完整性失败使用 blocked，lease 过期使用 timed_out，显式 surrender 使用 failed。
+ * @param errorCode 与 status 对应的稳定原因，不包含数据库、响应正文或 Worker 原始错误。
  * @returns 两组更新完成后 resolve；不会创建新 attempt 或直接重排 Job。
  */
 export async function closeJobAttempt(
   transaction: JobTransaction,
   job: typeof jobs.$inferSelect,
   now: Date,
-  status: "blocked" | "timed_out",
-  errorCode: "JOB_INTEGRITY_FAILED" | "LEASE_EXPIRED",
+  status: "blocked" | "failed" | "timed_out",
+  errorCode: string,
 ): Promise<void> {
   if (job.attemptCount === 0) return;
   await transaction

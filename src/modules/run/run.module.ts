@@ -11,7 +11,7 @@
  * OpenAI、NPK、职业等领域使用导出的 RunService/Gateway。
  * 输入输出：本文件只声明 Nest 依赖图，不解析 DTO、运行事务或发出业务事件。
  * 副作用：应用启动注册 controllers/providers/dispatcher；没有直接创建 Run、Job、outbox 或网络调用。
- * 安全边界：跨模块只使用公开 Module/Service，装配层不能绕过 Factory v2、Guardrail、Project/Snapshot、
+ * 安全边界：跨模块只使用公开 Module/Service，装配层不能绕过 Factory v2/v3、Guardrail、Project/Snapshot、
  * 事务性 outbox 或延迟 Job 派发补偿；Gateway 只通知，不能替代数据库权威状态。
  */
 import { Module } from "@nestjs/common";

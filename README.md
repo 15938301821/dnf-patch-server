@@ -150,15 +150,15 @@ Compose 不提供固定密码。启动前在本机环境或未提交的 `.env` �
 - `POST /v1/internal/jobs/:jobId/npk-inventories`：Worker 仅提交当前 exact lease、已 finalize 的 Inventory Artifact ID 和规范化元数据；Project 与 Run 从 Job 派生，Worker 不能自报归属。租约、`inventory` Job kind、Run/Project 及同 attempt 上传会话在一个事务中验证。
 - `GET|POST /v1/professions`、`GET /v1/professions/:id/skills|styles`、`POST|PUT /v1/professions/:id/styles`：前端职业、技能和主题元数据。
 - `POST /v1/jobs`、`GET /v1/jobs`、`GET /v1/jobs/:id/artifact`：前端制作任务兼容入口，内部映射为受 Guardrail 保护的 Run 与 profession Worker Job。artifact 端点返回最终包 Artifact 的相对存储引用、媒体类型、长度和哈希元数据，不让 NestJS 读取本机文件或游戏目录。
-- `GET /v1/resource-imports/overview`、`POST /v1/resource-imports/jobs`：前端资源导入状态与空请求体任务入口，保持 `{ data: ... }` 信封。POST 内部创建受 Factory v2、Guardrail、幂等和 Worker capability 约束的 `inventory` Run；只有同 Run 的 frozen Inventory 存在时才报告最近导入成功。
+- `GET /v1/resource-imports/overview`、`POST /v1/resource-imports/jobs`：前端资源导入状态与空请求体任务入口，保持 `{ data: ... }` 信封。POST 内部创建受 Factory v2/v3、Guardrail、幂等和 Worker capability 约束的 `inventory` Run；只有同 Run 的 frozen Inventory 存在时才报告最近导入成功。
 - `PUT /v1/internal/professions/:id/skill-catalog`、`POST /v1/internal/jobs/:id/skill-production|package`：仅 Worker 可用的职业技能目录导入、逐技能生产证据和主题包证据入口；仍需 Worker token、租约 owner 和 fencing token。当前 V2 Job 只冻结 `aseprite-cli`，没有封包器、独立验证器或 package provenance 契约，因此 package 入口固定返回 `STYLE_PACKAGE_CAPABILITY_NOT_FROZEN` 且零写入，不能用任意同 Run Artifact 冒充最终包。
 - Artifact、NPK、Image、Guardrail 与 OpenAI 模块提供各自受限记录接口；不提供通用 Prompt 或任意命令 API。
 
 ### Factory、Run 与幂等
 
 - Factory v1 记录仍可读取，但不能用于创建新 Run。
-- 可执行的 Factory v2 必须冻结 `policyId`、`policySha256`、`profileId`、`allowedJobKinds`，并为每个允许的 kind 提供一一对应的 `jobContracts` 版本。
-- 每个 Job 的 v1 载荷是严格声明式信封：`{ schemaVersion: 1, profileId, parameters }`。`profileId` 必须与 Factory 一致；`parameters` 仍会经过大小、深度、节点数和 Guardrail 任意执行字段检查。
+- 可执行的 Factory v2/v3 必须冻结 `policyId`、`policySha256`、`allowedJobKinds`，并为每个允许的 kind 提供一一对应的 `jobContracts` 版本。v2 保留顶层单一 `profileId`；v3 在每个 Job contract 中独立冻结 `profileId`，供 Inventory、Profession 和后续封包工具链使用不同身份。
+- 每个 Job 的 v1 载荷是严格声明式信封：`{ schemaVersion: 1, profileId, parameters }`。`profileId` 必须与当前 Job kind 的 Factory contract 一致；`parameters` 仍会经过大小、深度、节点数和 Guardrail 任意执行字段检查。
 - `POST /v1/runs` 必须携带合法的 `Idempotency-Key`。服务端对完整、已解析请求生成确定性 SHA-256 指纹；相同键和相同请求返回原 Run，相同键但请求发生任何语义变化返回 `409 IDEMPOTENCY_KEY_REUSED`。
 - 迁移前创建且没有服务器指纹的历史 Run 不会被不安全重放，返回 `409 IDEMPOTENCY_RECORD_LEGACY`。不同幂等键重复使用同一 `clientRunId` 返回 `409 CLIENT_RUN_ID_CONFLICT`。
 

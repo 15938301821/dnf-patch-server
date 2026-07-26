@@ -130,8 +130,8 @@ dnf-patch-server/
 
 ## 5. Factory、Run 与 Guardrail
 
-- 新 Run 只能使用绑定 `policyId`、`policySha256`、`profileId`、`allowedJobKinds` 和逐 kind `jobContracts` 的 Factory v2；Factory v1 只能读取，不能创建新 Run。
-- Job payload 必须是已注册、版本化、严格声明式契约。`profileId` 必须与 Factory 一致，parameters 仍需经过 JSON 预算和任意执行字段检查。
+- 新 Run 只能使用绑定 `policyId`、`policySha256`、`allowedJobKinds` 和逐 kind `jobContracts` 的 Factory v2/v3；Factory v1 只能读取，不能创建新 Run。v2 的顶层 `profileId` 供全部 Job 共用，v3 必须为每个 Job contract 独立冻结 `profileId`。
+- Job payload 必须是已注册、版本化、严格声明式契约。`profileId` 必须与当前 Job kind 的 Factory contract 一致，parameters 仍需经过 JSON 预算和任意执行字段检查。
 - Guardrail 只允许注册的 Job kind，并递归拒绝 command、executable、shell、script path、游戏路径或进程控制字段。
 - Frame Guardrail 只能基于来源哈希、几何尺寸、画布、锚点和 alpha 等可验证证据判定；不得按名称推断帧映射。
 - `POST /runs` 必须使用合法 `Idempotency-Key`。服务端对完整解析后的请求计算确定性 SHA-256 指纹：同键同请求返回原 Run，同键异请求返回冲突。
