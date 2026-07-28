@@ -16,6 +16,21 @@ describe("createWorkerInventorySchema", () => {
     expect(createWorkerInventorySchema.safeParse(input()).success).toBe(true);
   });
 
+  it("accepts a stable sourceId but rejects path-shaped identities", () => {
+    expect(
+      createWorkerInventorySchema.safeParse({
+        ...input(),
+        sourceId: "momentaryslash",
+      }).success,
+    ).toBe(true);
+    expect(
+      createWorkerInventorySchema.safeParse({
+        ...input(),
+        sourceId: "ImagePacks2/source.NPK",
+      }).success,
+    ).toBe(false);
+  });
+
   it.each([
     { leaseId: undefined },
     { inventoryArtifactId: undefined },

@@ -257,6 +257,8 @@ export class ProfessionService {
 
   /**
    * 只有同一 Project/Snapshot/Run 的 Inventory Entry 与帧清单证据齐备时，技能才会进入 build-ready。
+   * `entire-inventory` 要求完整条目数；`selected-entries` 允许 manifest 明确选出的非空子集，
+   * 但不会跳过任何 Entry 的 Inventory 归属、元数据哈希或帧清单校验。
    */
   async importSkillCatalog(
     professionId: string,
@@ -293,11 +295,12 @@ export class ProfessionService {
       if (
         inventory.projectId !== input.workflowProjectId ||
         inventory.runId !== input.sourceRunId ||
-        inventory.entryCount !== skill.sourceEntries.length
+        (skill.sourceScope === "entire-inventory" &&
+          inventory.entryCount !== skill.sourceEntries.length)
       ) {
         throw new ConflictException({
           code: "SKILL_INVENTORY_SCOPE_MISMATCH",
-          message: "技能源必须精确覆盖该 Run 冻结 Inventory 的全部条目。",
+          message: "技能源范围与该 Run 的冻结 Inventory 不一致。",
         });
       }
       if (

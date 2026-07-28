@@ -143,7 +143,7 @@ const importSkillSchema = z
     stableKey: clientIdSchema,
     displayName: safeDisplayNameSchema,
     promptStatus: skillPromptStatusSchema.default("candidate"),
-    sourceScope: z.literal("entire-inventory"),
+    sourceScope: z.enum(["entire-inventory", "selected-entries"]),
     sourceInventoryId: z.uuid(),
     sourceEntries: z
       .array(importSkillSourceEntrySchema)

@@ -6,6 +6,7 @@
  * @relatedPlan N/A（对应当前前后端结构化主题直接需求）
  */
 import { describe, expect, it } from "vitest";
+import { jobPayloadMaxBytes } from "../../common/contracts/index.js";
 import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import { parseJobPayload } from "./job-payload-contracts.js";
 import {
@@ -29,11 +30,60 @@ describe("style skill production V2 contract", () => {
     expect(() => parseJobPayload("profession", 1, payload)).toThrow();
   });
 
-  it("rejects a payload over the 64 KiB declarative budget", () => {
-    const payload = validPayload();
-    const skill = payload.parameters.promptPackage.skills[0];
-    if (!skill) throw new Error("TEST_SKILL_REQUIRED");
-    skill.professionPrompt.commonPrompt = "x".repeat(65_536);
+  // 31 个技术组件与 417 条 Entry 是剑魂现场基线；该测试只验证冻结 JSON 契约，不访问数据库或官方资源。
+  it("accepts 31 skills and 417 frozen entries above the generic JSON budget", () => {
+    const payload = fullComponentPayload();
+    const byteLength = Buffer.byteLength(JSON.stringify(payload), "utf8");
+
+    expect(byteLength).toBeGreaterThan(64 * 1024);
+    expect(byteLength).toBeLessThanOrEqual(jobPayloadMaxBytes);
+    expect(parseJobPayload("profession", 1, payload)).toEqual(payload);
+  });
+
+  it("rejects a structurally valid payload over the 256 KiB Job budget", () => {
+    const payload = fullComponentPayload();
+    for (const skill of payload.parameters.promptPackage.skills) {
+      skill.professionPrompt.commonPrompt = "x".repeat(8_000);
+      skill.professionPromptSha256 = sha256JcsV1(skill.professionPrompt);
+      skill.promptSha256 = sha256JcsV1(
+        createStyleSkillPromptComposition(
+          payload.parameters.promptPackage.themeDefinition,
+          skill,
+        ),
+      );
+    }
+    payload.parameters.promptPackageSha256 = sha256JcsV1(
+      payload.parameters.promptPackage,
+    );
+
+    expect(Buffer.byteLength(JSON.stringify(payload), "utf8")).toBeGreaterThan(
+      jobPayloadMaxBytes,
+    );
+    expect(() => parseJobPayload("profession", 1, payload)).toThrow();
+  });
+});
+
+function fullComponentPayload(): StyleSkillProductionJobPayloadV2 {
+  const payload = validPayload();
+  const template = payload.parameters.promptPackage.skills[0];
+  if (!template) throw new Error("TEST_SKILL_REQUIRED");
+  const skillCount = 31;
+  const entryCount = 417;
+  const baseEntryCount = Math.floor(entryCount / skillCount);
+  const extraEntryCount = entryCount % skillCount;
+  const skills = Array.from({ length: skillCount }, (_, skillIndex) => {
+    const skill = structuredClone(template);
+    skill.skillId = testUuid(skillIndex + 1);
+    skill.skillThemePrompt.skillId = skill.skillId;
+    const currentEntryCount =
+      baseEntryCount + (skillIndex < extraEntryCount ? 1 : 0);
+    skill.sourceEvidence.sourceEntries = Array.from(
+      { length: currentEntryCount },
+      (_, entryIndex) => ({
+        sourceInventoryEntryId: testUuid(1_000 + skillIndex * 500 + entryIndex),
+        sourceMetadataSha256: "B".repeat(64),
+      }),
+    );
     skill.professionPromptSha256 = sha256JcsV1(skill.professionPrompt);
     skill.promptSha256 = sha256JcsV1(
       createStyleSkillPromptComposition(
@@ -41,12 +91,21 @@ describe("style skill production V2 contract", () => {
         skill,
       ),
     );
-    payload.parameters.promptPackageSha256 = sha256JcsV1(
-      payload.parameters.promptPackage,
-    );
-    expect(() => parseJobPayload("profession", 1, payload)).toThrow();
+    return skill;
   });
-});
+  payload.parameters.selectedSkillIds = skills.map((skill) => skill.skillId);
+  payload.parameters.promptPackage.skills = skills;
+  payload.parameters.promptPackageSha256 = sha256JcsV1(
+    payload.parameters.promptPackage,
+  );
+  return payload;
+}
+
+function testUuid(index: number): string {
+  const prefix = index.toString(16).padStart(8, "0").slice(-8);
+  const suffix = index.toString(16).padStart(12, "0").slice(-12);
+  return `${prefix}-1111-4111-8111-${suffix}`;
+}
 
 function validPayload(): StyleSkillProductionJobPayloadV2 {
   const themeDefinition = {

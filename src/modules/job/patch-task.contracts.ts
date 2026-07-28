@@ -150,6 +150,124 @@ export interface PatchTaskView {
   artifactAvailable: boolean;
 }
 
+/** 浏览器详情页统一使用的阶段状态；unknown 表示历史证据不足，禁止前端自行猜测。 */
+export type PatchTaskStepStatus =
+  | "pending"
+  | "running"
+  | "passed"
+  | "failed"
+  | "blocked"
+  | "unknown";
+
+/** 任务详情固定的四个顶层工作流阶段。 */
+export type PatchTaskWorkflowStageKey =
+  | "planning"
+  | "skill-production"
+  | "package-validation"
+  | "complete";
+
+/** 顶层工作流的脱敏状态，不暴露 Job、lease 或 Worker 身份。 */
+export interface PatchTaskWorkflowStageView {
+  key: PatchTaskWorkflowStageKey;
+  status: PatchTaskStepStatus;
+}
+
+/** 单技能固定生产链；模型阶段与本机工具阶段都只能由服务端证据映射。 */
+export type PatchTaskSkillStageKey =
+  | "engineer-plan"
+  | "reference-image"
+  | "aseprite-adaptation"
+  | "runtime-validation";
+
+/** 单技能一个固定阶段的浏览器 ViewModel。 */
+export interface PatchTaskSkillStageView {
+  key: PatchTaskSkillStageKey;
+  status: PatchTaskStepStatus;
+}
+
+/** 任务详情中的单技能进度；参考图标记只说明可申请预览，不包含 Artifact ID 或 URL。 */
+export interface PatchTaskSkillProgressView {
+  skillId: string;
+  displayName: string;
+  status: PatchTaskStepStatus;
+  stages: PatchTaskSkillStageView[];
+  errorCode?: string;
+  referenceImageAvailable: boolean;
+}
+
+/** 浏览器可见的固定模型角色；unknown 只用于数据库异常的保守展示。 */
+export type PatchTaskModelRole =
+  | "orchestrator"
+  | "engineer"
+  | "artist"
+  | "unknown";
+
+/** 模型调用的脱敏状态；unknown 防止未知数据库值被误显示为成功。 */
+export type PatchTaskModelCallStatus =
+  | "running"
+  | "passed"
+  | "failed"
+  | "blocked"
+  | "abandoned"
+  | "unknown";
+
+/** 最近一次模型调用趋势样本；nullable 计量表示 Provider 未提供可靠 usage。 */
+export interface PatchTaskModelCallSampleView {
+  id: string;
+  role: PatchTaskModelRole;
+  model: string;
+  status: PatchTaskModelCallStatus;
+  createdAt: string;
+  finishedAt?: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  providerLatencyMs: number | null;
+  outputTokensPerSecond: number | null;
+}
+
+/** 按角色和模型聚合的吞吐分组，用于详情页图例与对比。 */
+export interface PatchTaskModelGroupView {
+  role: PatchTaskModelRole;
+  model: string;
+  calls: number;
+  measuredCalls: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  averageOutputTokensPerSecond: number | null;
+  averageProviderLatencyMs: number | null;
+}
+
+/** 一次制作任务的模型吞吐摘要；计量覆盖率与成功率使用不同分母，不能混用。 */
+export interface PatchTaskModelThroughputView {
+  totalCalls: number;
+  egressCalls: number;
+  runningCalls: number;
+  measuredCalls: number;
+  successRate: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  averageOutputTokensPerSecond: number | null;
+  averageProviderLatencyMs: number | null;
+  groups: PatchTaskModelGroupView[];
+  recentCalls: PatchTaskModelCallSampleView[];
+}
+
+/** 浏览器任务详情完整 ViewModel；不包含 Prompt、模型凭据、Worker 租约、对象 key 或短期 URL。 */
+export interface PatchTaskDetailView extends PatchTaskView {
+  updatedAt: string;
+  finishedAt?: string;
+  currentStage: PatchTaskWorkflowStageKey;
+  totalSkills: number;
+  passedSkills: number;
+  workflow: PatchTaskWorkflowStageView[];
+  skills: PatchTaskSkillProgressView[];
+  packageStatus: "queued" | "building" | "passed" | "failed" | "blocked";
+  modelThroughput: PatchTaskModelThroughputView;
+}
+
 /** Package V3 固定输出角色 schema；HTTP path 只能从三种受控角色中选择。 */
 export const patchTaskArtifactRoleSchema = z.enum([
   "candidate",
@@ -171,6 +289,25 @@ export interface PatchTaskArtifactView {
 
 /** 当前用户按固定角色取得的短期下载授权；URL 到期失效且不表示部署或兼容。 */
 export interface PatchTaskArtifactDownloadView extends PatchTaskArtifactView {
+  downloadUrl: string;
+  expiresAtUtc: string;
+}
+
+/**
+ * 当前任务技能的固定模型参考图元数据；由服务端从 reference-image-v1 证据解析，
+ * 浏览器不能通过此结构选择任意 Artifact。
+ */
+export interface PatchTaskReferenceImageView {
+  artifactId: string;
+  skillId: string;
+  artifactName: string;
+  mediaType: "image/png";
+  byteLength: number;
+  sha256: string;
+}
+
+/** 固定技能参考图的短期读取授权；URL 到期失效且不得进入持久化状态。 */
+export interface PatchTaskReferenceImageDownloadView extends PatchTaskReferenceImageView {
   downloadUrl: string;
   expiresAtUtc: string;
 }

@@ -16,7 +16,7 @@
 import { Injectable } from "@nestjs/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { sha256Schema } from "../../common/contracts/index.js";
+import { clientIdSchema, sha256Schema } from "../../common/contracts/index.js";
 import { DatabaseService } from "../../common/db/database.service.js";
 import { databaseUtcDate } from "../../common/db/mysql-datetime.js";
 import {
@@ -39,6 +39,7 @@ const sourceFrameManifestProvenanceSchema = z
   .object({
     schemaVersion: z.literal(1),
     kind: z.literal("source-frame-manifest"),
+    sourceId: clientIdSchema,
     sourceSha256: sha256Schema,
     toolSha256: sha256Schema,
     jobPayloadSha256: sha256Schema,
@@ -97,6 +98,7 @@ export class ProfessionSourceContextRepository {
         .select({
           runId: npkInventories.runId,
           inventoryId: npkInventories.id,
+          sourceId: npkInventories.sourceId,
           sourceByteLength: npkInventories.sourceLength,
           sourceSha256: npkInventories.sourceSha256,
           manifestArtifactId: artifacts.id,
@@ -126,7 +128,7 @@ export class ProfessionSourceContextRepository {
           ),
         )
         .limit(1);
-      if (!source) return { status: "source-evidence-mismatch" };
+      if (!source?.sourceId) return { status: "source-evidence-mismatch" };
       const provenance = sourceFrameManifestProvenanceSchema.safeParse(
         source.manifestProvenance,
       );
@@ -135,6 +137,7 @@ export class ProfessionSourceContextRepository {
         source.manifestArtifactId !== expected.sourceFrameManifestArtifactId ||
         source.manifestLogicalName !== "source-frame-manifest.json" ||
         source.manifestMediaType !== "application/json" ||
+        provenance.data.sourceId !== source.sourceId ||
         provenance.data.sourceSha256.toUpperCase() !==
           source.sourceSha256.toUpperCase()
       ) {
@@ -185,11 +188,12 @@ export class ProfessionSourceContextRepository {
 
       // 第四步：数据库映射再次通过公开 ViewModel schema；路径或大小预算异常不能越过 Repository。
       const context = professionSkillSourceContextViewSchema.safeParse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         skillId: input.skillId,
         source: {
           runId: source.runId,
           inventoryId: source.inventoryId,
+          sourceId: source.sourceId,
           byteLength: source.sourceByteLength,
           sha256: source.sourceSha256.toUpperCase(),
         },

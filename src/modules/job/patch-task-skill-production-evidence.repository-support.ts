@@ -14,7 +14,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { sha256Schema } from "../../common/contracts/index.js";
+import { clientIdSchema, sha256Schema } from "../../common/contracts/index.js";
 import { artifactUploadSessions } from "../../common/db/artifact-schema.js";
 import type { DatabaseService } from "../../common/db/database.service.js";
 import { professionSkillModelExecutions } from "../../common/db/profession-model-execution-schema.js";
@@ -36,6 +36,7 @@ const sourceManifestProvenanceSchema = z
   .object({
     schemaVersion: z.literal(1),
     kind: z.literal("source-frame-manifest"),
+    sourceId: clientIdSchema,
     sourceSha256: sha256Schema,
     toolSha256: sha256Schema,
     jobPayloadSha256: sha256Schema,
@@ -250,6 +251,7 @@ async function resolveSourceEvidence(
     .select({
       runId: npkInventories.runId,
       inventoryId: npkInventories.id,
+      sourceId: npkInventories.sourceId,
       sourceSha256: npkInventories.sourceSha256,
       manifestArtifactId: artifacts.id,
       manifestLogicalName: artifacts.logicalName,
@@ -282,10 +284,12 @@ async function resolveSourceEvidence(
   );
   if (
     !source ||
+    !source.sourceId ||
     !provenance.success ||
     source.manifestArtifactId !== expected.sourceFrameManifestArtifactId ||
     source.manifestLogicalName !== "source-frame-manifest.json" ||
     source.manifestMediaType !== "application/json" ||
+    provenance.data.sourceId !== source.sourceId ||
     provenance.data.sourceSha256.toUpperCase() !==
       source.sourceSha256.toUpperCase()
   ) {

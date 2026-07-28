@@ -12,6 +12,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 import sharp from "sharp";
 import { z } from "zod";
 import type { Environment } from "../../config/environment.js";
+import type { ModelUsage } from "./openai.contracts.js";
 
 const maxImageBytes = 32 * 1024 * 1024;
 const maxEncodedImageLength = 4 * Math.ceil(maxImageBytes / 3);
@@ -20,6 +21,27 @@ const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const jpegSignature = Buffer.from([255, 216, 255]);
 const geminiImageModelPattern = /^gemini-[a-z0-9._-]*image[a-z0-9._-]*$/iu;
 const geminiImageMediaTypeSchema = z.enum(["image/png", "image/jpeg"]);
+const tokenCountSchema = z.number().int().min(0).max(4_294_967_295);
+
+const openAiUsageSchema = z
+  .object({
+    input_tokens: tokenCountSchema,
+    output_tokens: tokenCountSchema,
+    total_tokens: tokenCountSchema,
+  })
+  .loose();
+
+const geminiUsageSchema = z
+  .object({
+    usageMetadata: z
+      .object({
+        promptTokenCount: tokenCountSchema,
+        candidatesTokenCount: tokenCountSchema,
+        totalTokenCount: tokenCountSchema,
+      })
+      .loose(),
+  })
+  .loose();
 
 const geminiInlineImageSchema = z
   .object({
@@ -67,15 +89,28 @@ export interface ImageProviderRequest {
   prompt: string;
 }
 
+/** 结构化模型调用的已校验结果；usage 缺失时调用方必须显示为未计量。 */
+export interface StructuredProviderResult<T> {
+  responseId: string;
+  value: T;
+  usage?: ModelUsage;
+}
+
+/** 图片模型调用的已校验 PNG 与可选计量；图片字节仍只能短暂存在于服务进程内存。 */
+export interface ImageProviderResult {
+  bytes: Uint8Array;
+  usage?: ModelUsage;
+}
+
 export interface OpenAiProviderPort {
   structured<T>(
     request: StructuredProviderRequest<T>,
     configuration: OpenAiCallConfiguration,
-  ): Promise<{ responseId: string; value: T }>;
+  ): Promise<StructuredProviderResult<T>>;
   image(
     request: ImageProviderRequest,
     configuration: OpenAiCallConfiguration,
-  ): Promise<Uint8Array>;
+  ): Promise<ImageProviderResult>;
 }
 
 @Injectable()
@@ -96,7 +131,7 @@ export class OpenAiProvider implements OpenAiProviderPort {
   async structured<T>(
     request: StructuredProviderRequest<T>,
     configuration: OpenAiCallConfiguration,
-  ): Promise<{ responseId: string; value: T }> {
+  ): Promise<StructuredProviderResult<T>> {
     const client = this.client(configuration);
     const response = await client.responses.parse({
       model: request.model,
@@ -109,6 +144,7 @@ export class OpenAiProvider implements OpenAiProviderPort {
     return {
       responseId: response.id,
       value: request.schema.parse(response.output_parsed),
+      ...optionalUsage(normalizeOpenAiUsage(response.usage)),
     };
   }
 
@@ -116,7 +152,7 @@ export class OpenAiProvider implements OpenAiProviderPort {
   async image(
     request: ImageProviderRequest,
     configuration: OpenAiCallConfiguration,
-  ): Promise<Uint8Array> {
+  ): Promise<ImageProviderResult> {
     const client = this.client(configuration);
     try {
       const response = await client.images.generate({
@@ -128,7 +164,10 @@ export class OpenAiProvider implements OpenAiProviderPort {
         background: "opaque",
         output_format: "png",
       });
-      return decodePngPayload(response.data?.[0]?.b64_json);
+      return {
+        bytes: decodePngPayload(response.data?.[0]?.b64_json),
+        ...optionalUsage(normalizeOpenAiUsage(response.usage)),
+      };
     } catch (error) {
       // 只有确认缺少 OpenAI Images 路由的 Gemini 图片模型才切换固定协议；认证、限流和
       // Provider 失败必须原样上抛，避免把真实故障伪装为另一种模型请求。
@@ -150,7 +189,7 @@ export class OpenAiProvider implements OpenAiProviderPort {
     client: OpenAI,
     request: ImageProviderRequest,
     baseUrl: string,
-  ): Promise<Uint8Array> {
+  ): Promise<ImageProviderResult> {
     const response = await client.post<unknown>(
       buildGeminiImageUrl(baseUrl, request.model),
       {
@@ -163,7 +202,10 @@ export class OpenAiProvider implements OpenAiProviderPort {
         },
       },
     );
-    return decodeGeminiImagePayload(extractGeminiImage(response));
+    return {
+      bytes: await decodeGeminiImagePayload(extractGeminiImage(response)),
+      ...optionalUsage(normalizeGeminiUsage(response)),
+    };
   }
 
   private client(configuration: OpenAiCallConfiguration): OpenAI {
@@ -174,6 +216,35 @@ export class OpenAiProvider implements OpenAiProviderPort {
       maxRetries: this.maxRetries,
     });
   }
+}
+
+/** OpenAI Responses/Images 共用 snake_case usage；畸形遥测被忽略，不能推翻已校验业务结果。 */
+function normalizeOpenAiUsage(value: unknown): ModelUsage | undefined {
+  const parsed = openAiUsageSchema.safeParse(value);
+  return parsed.success
+    ? {
+        inputTokens: parsed.data.input_tokens,
+        outputTokens: parsed.data.output_tokens,
+        totalTokens: parsed.data.total_tokens,
+      }
+    : undefined;
+}
+
+/** Gemini 原生图片协议使用 usageMetadata；缺项或越界时保持未计量。 */
+function normalizeGeminiUsage(value: unknown): ModelUsage | undefined {
+  const parsed = geminiUsageSchema.safeParse(value);
+  return parsed.success
+    ? {
+        inputTokens: parsed.data.usageMetadata.promptTokenCount,
+        outputTokens: parsed.data.usageMetadata.candidatesTokenCount,
+        totalTokens: parsed.data.usageMetadata.totalTokenCount,
+      }
+    : undefined;
+}
+
+/** 只在计量完整时添加 usage 属性，避免 `usage: undefined` 被误当成已采集字段。 */
+function optionalUsage(usage: ModelUsage | undefined): { usage?: ModelUsage } {
+  return usage ? { usage } : {};
 }
 
 /** 从已校验的同源 OpenAI `/v1` 地址派生固定 Gemini 混合路由，不接受响应或调用方提供路径。 */

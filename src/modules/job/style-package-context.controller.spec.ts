@@ -92,6 +92,7 @@ function validEnvelope(): StylePackageContextEnvelopeV3 {
     skills: [
       {
         skillId: "77777777-7777-4777-8777-777777777777",
+        sourceSha256: "3".repeat(64),
         promptSha256: "4".repeat(64),
         productionAttempt: 1,
         projectBundle: {

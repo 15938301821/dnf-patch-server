@@ -27,6 +27,9 @@ import type {
   PatchTaskArtifactDownloadView,
   PatchTaskArtifactRole,
   PatchTaskArtifactView,
+  PatchTaskDetailView,
+  PatchTaskReferenceImageDownloadView,
+  PatchTaskReferenceImageView,
   PatchTaskReportResult,
   PatchTaskView,
   PlannedPatchTaskSkill,
@@ -59,6 +62,15 @@ import {
 
 interface PatchTaskRepositoryPort {
   list(ownerUserId: string): Promise<PatchTaskView[]>;
+  findDetail(
+    runId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskDetailView | undefined>;
+  findReferenceImage(
+    runId: string,
+    skillId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskReferenceImageView | undefined>;
   createPlan(
     pack: Parameters<PatchTaskRepository["createPlan"]>[0],
     skills: PlannedPatchTaskSkill[],
@@ -160,6 +172,67 @@ export class PatchTaskService {
 
   list(ownerUserId: string): Promise<PatchTaskView[]> {
     return this.patchTasks.list(ownerUserId);
+  }
+
+  /**
+   * 读取当前浏览器用户拥有的一项制作任务详情。
+   *
+   * @param runId Controller path 中已校验的 Run UUID。
+   * @param ownerUserId 从浏览器 Access Token 解析的稳定用户 ID，不能来自 query/body。
+   * @returns 阶段、技能与模型吞吐的脱敏 ViewModel，不包含内部租约或对象引用。
+   * @throws PATCH_TASK_NOT_FOUND 当任务不存在或不属于当前用户时统一抛出，防止跨用户枚举。
+   */
+  async findDetail(
+    runId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskDetailView> {
+    const detail = await this.patchTasks.findDetail(runId, ownerUserId);
+    if (!detail) {
+      throw new NotFoundException({
+        code: "PATCH_TASK_NOT_FOUND",
+        message: "制作任务不存在或当前用户无权查看。",
+      });
+    }
+    return detail;
+  }
+
+  /**
+   * 为当前用户任务中的固定技能参考图签发短期读取授权。
+   *
+   * @param runId Controller path 中已校验的任务 UUID。
+   * @param skillId Controller path 中已校验的技能 UUID；浏览器不能提交 Artifact ID。
+   * @param ownerUserId 从浏览器 Access Token 解析的稳定用户 ID。
+   * @returns PNG 元数据与短期 URL；不证明图片已用于 runtime 像素或最终补丁。
+   * @throws PATCH_TASK_REFERENCE_IMAGE_NOT_READY 当所有权、当前 attempt、固定 stage 或 PNG 证据不完整。
+   */
+  async authorizeReferenceImageDownload(
+    runId: string,
+    skillId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskReferenceImageDownloadView> {
+    // 第一步：按任务、技能和用户固定语义解析图片，证据不完整时禁止接触对象存储。
+    const image = await this.patchTasks.findReferenceImage(
+      runId,
+      skillId,
+      ownerUserId,
+    );
+    if (!image) {
+      throw new NotFoundException({
+        code: "PATCH_TASK_REFERENCE_IMAGE_NOT_READY",
+        message: "该技能的模型参考图尚未生成或当前用户无权查看。",
+      });
+    }
+    // 第二步：Artifact 领域再次确认图片属于同一 Run，之后才签发有限期对象存储 URL。
+    const authorization = await this.artifacts.authorizeRunArtifactDownload(
+      runId,
+      image.artifactId,
+      image.artifactName,
+    );
+    return {
+      ...image,
+      downloadUrl: authorization.downloadUrl,
+      expiresAtUtc: authorization.expiresAtUtc,
+    };
   }
 
   async create(

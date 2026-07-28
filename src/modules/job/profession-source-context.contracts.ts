@@ -13,6 +13,7 @@
  */
 import { z } from "zod";
 import {
+  clientIdSchema,
   repositoryRelativePathSchema,
   sha256Schema,
 } from "../../common/contracts/index.js";
@@ -56,12 +57,13 @@ const professionSkillSourceEntryViewSchema = z
  */
 export const professionSkillSourceContextViewSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     skillId: z.uuid(),
     source: z
       .object({
         runId: z.uuid(),
         inventoryId: z.uuid(),
+        sourceId: clientIdSchema,
         byteLength: z.number().int().positive().max(4_294_967_295),
         sha256: uppercaseSha256Schema,
       })

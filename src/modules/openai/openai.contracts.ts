@@ -32,6 +32,19 @@ export type ModelCallStatus =
   | "abandoned";
 
 /**
+ * Provider 返回并经服务端运行时校验的 Token 计量；缺失表示该端点未提供可靠 usage，不能估算为零。
+ * 三个值只描述一次模型请求，不包含价格、配额、Prompt 原文或响应正文。
+ */
+export interface ModelUsage {
+  /** Provider 声明的输入 Token 数，包含其协议定义的缓存或图片输入。 */
+  inputTokens: number;
+  /** Provider 声明的输出 Token 数，图片端点可按其协议返回图片 Token。 */
+  outputTokens: number;
+  /** Provider 声明的总 Token 数；服务端不根据输入输出自行补算。 */
+  totalTokens: number;
+}
+
+/**
  * 结构化模型调用的服务内输入。
  * 由固定业务流程构造，OpenAiService 在模型出站前结合 Run 所有权和用户配置进行授权；不是 HTTP DTO，
  * 也不携带 API Key、Worker token、lease 或任意 Provider 参数。
@@ -107,6 +120,10 @@ export interface ModelCallView {
   modelEgressPerformed: boolean;
   /** 稳定失败或阻断码；不携带 Provider 原始错误、堆栈或敏感配置细节。 */
   errorCode?: string;
+  /** Provider 返回并经运行时校验的 Token 计量；缺失表示未计量，不能解释为零。 */
+  usage?: ModelUsage;
+  /** 实际 Provider 调用的单调时钟耗时，单位毫秒；未发生出站时不存在。 */
+  providerLatencyMs?: number;
   /** 服务端创建审计记录的 UTC 时间字符串，不是 Provider 接收时间。 */
   createdAtUtc: string;
   /** 服务端写入终态的 UTC 时间字符串；不存在时调用仍可能由恢复器处理。 */

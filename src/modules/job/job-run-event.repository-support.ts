@@ -8,13 +8,9 @@
 import { max, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { DatabaseService } from "../../common/db/database.service.js";
+import { manualReviews } from "../../common/db/manual-review-schema.js";
 import { databaseUtcDate } from "../../common/db/mysql-datetime.js";
-import {
-  jobs,
-  manualReviews,
-  outboxEvents,
-  runEvents,
-} from "../../common/db/schema.js";
+import { jobs, outboxEvents, runEvents } from "../../common/db/schema.js";
 import type { RunEventView } from "../run/run.contracts.js";
 
 export type JobTransaction = Parameters<

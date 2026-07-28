@@ -243,6 +243,7 @@ const packageInputArtifactV3Schema = z
 const stylePackageSkillInputV3Schema = z
   .object({
     skillId: z.uuid(),
+    sourceSha256: sha256Schema,
     promptSha256: sha256Schema,
     productionAttempt: stylePackageAttemptV3Schema,
     projectBundle: packageInputArtifactV3Schema,

@@ -63,7 +63,7 @@ describe("factoryConfigSchema", () => {
       jobContracts: [
         {
           kind: "inventory",
-          schemaVersion: 1,
+          schemaVersion: 2,
           profileId: "resource-profile",
         },
         {
@@ -80,7 +80,7 @@ describe("factoryConfigSchema", () => {
     if (!result.success) throw result.error;
     expect(resolveFactoryJobContract(result.data, "inventory")).toEqual({
       kind: "inventory",
-      schemaVersion: 1,
+      schemaVersion: 2,
       profileId: "resource-profile",
     });
     expect(resolveFactoryJobContract(result.data, "profession")).toEqual({
@@ -98,6 +98,26 @@ describe("factoryConfigSchema", () => {
         policySha256,
         allowedJobKinds: ["inventory"],
         jobContracts: [{ kind: "inventory", schemaVersion: 1 }],
+        arbitraryExecution: false,
+        deploymentAuthorized: false,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("拒绝为尚未注册 v2 payload 的非 Inventory kind 提升版本", () => {
+    expect(
+      factoryConfigSchema.safeParse({
+        schemaVersion: 3,
+        policyId: "policy-v3",
+        policySha256,
+        allowedJobKinds: ["profession"],
+        jobContracts: [
+          {
+            kind: "profession",
+            schemaVersion: 2,
+            profileId: "aseprite-production-v1",
+          },
+        ],
         arbitraryExecution: false,
         deploymentAuthorized: false,
       }).success,

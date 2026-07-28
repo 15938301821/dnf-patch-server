@@ -54,6 +54,7 @@ export type SkillProductionReportScenario =
   | "accepted"
   | "old-attempt"
   | "artist-old-attempt"
+  | "source-id-mismatch"
   | "projects-not-finalized"
   | "validation-projects-role";
 
@@ -109,13 +110,20 @@ function acceptedRows(
     validation.sessionProvenance = projectsProvenance();
     validation.artifactProvenance = projectsProvenance();
   }
+  const source = sourceEvidenceRow();
+  if (scenario === "source-id-mismatch") {
+    source.manifestProvenance = {
+      ...(source.manifestProvenance as Record<string, unknown>),
+      sourceId: "another-source",
+    };
+  }
   return [
     [leasedJob(payload)],
     [{ value: skillProductionFixture.now }],
     [production(payload)],
     [engineerExecution(payload)],
     [artist],
-    [sourceEvidenceRow()],
+    [source],
     [projects],
     [validation],
   ];
@@ -206,6 +214,7 @@ function sourceEvidenceRow(): Record<string, unknown> {
   return {
     runId: skillProductionFixture.sourceRunId,
     inventoryId: skillProductionFixture.sourceInventoryId,
+    sourceId: "momentaryslash",
     sourceSha256: "A".repeat(64),
     manifestArtifactId: skillProductionFixture.sourceManifestArtifactId,
     manifestLogicalName: "source-frame-manifest.json",
@@ -214,6 +223,7 @@ function sourceEvidenceRow(): Record<string, unknown> {
     manifestProvenance: {
       schemaVersion: 1,
       kind: "source-frame-manifest",
+      sourceId: "momentaryslash",
       sourceSha256: "A".repeat(64),
       toolSha256: "C".repeat(64),
       jobPayloadSha256: "D".repeat(64),

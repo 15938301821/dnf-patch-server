@@ -180,6 +180,14 @@ export class NpkService {
   }
 
   /**
+   * 查询同一 producing Run 的全部 frozen Inventory，供多来源导入执行一一对应校验。
+   * 空数组不能降级为读取任意 Worker 文件或历史 Inventory。
+   */
+  findAllByRun(projectId: string, runId: string): Promise<InventoryView[]> {
+    return this.inventories.findAllByRun(projectId, runId);
+  }
+
+  /**
    * 按 ID 查询 frozen Inventory 摘要，供跨模块核对整个 Inventory 的条目数量和证据身份。
    * @throws INVENTORY_NOT_FOUND 当记录不存在或未处于 frozen 状态。
    */

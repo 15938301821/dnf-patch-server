@@ -32,7 +32,10 @@ describe("OpenAiProvider image protocol", () => {
 
   it("OpenAI Images 成功时返回经过签名校验的 PNG", async () => {
     const fetchMock = stubFetch(
-      jsonResponse({ data: [{ b64_json: pngBase64 }] }),
+      jsonResponse({
+        data: [{ b64_json: pngBase64 }],
+        usage: { input_tokens: 120, output_tokens: 80, total_tokens: 200 },
+      }),
     );
 
     const result = await provider().image(
@@ -40,7 +43,10 @@ describe("OpenAiProvider image protocol", () => {
       configuration,
     );
 
-    expect(result).toEqual(pngBytes);
+    expect(result).toEqual({
+      bytes: pngBytes,
+      usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(requestUrl(fetchMock.mock.calls[0]?.[0])).toBe(
       "https://models.example.com/v1/images/generations",
@@ -66,6 +72,11 @@ describe("OpenAiProvider image protocol", () => {
             },
           },
         ],
+        usageMetadata: {
+          promptTokenCount: 90,
+          candidatesTokenCount: 60,
+          totalTokenCount: 150,
+        },
       }),
     );
 
@@ -77,7 +88,10 @@ describe("OpenAiProvider image protocol", () => {
       configuration,
     );
 
-    expect(result).toEqual(pngBytes);
+    expect(result).toEqual({
+      bytes: pngBytes,
+      usage: { inputTokens: 90, outputTokens: 60, totalTokens: 150 },
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const fallbackCall = fetchMock.mock.calls[1];
     expect(requestUrl(fallbackCall?.[0])).toBe(
@@ -134,12 +148,30 @@ describe("OpenAiProvider image protocol", () => {
       configuration,
     );
 
-    expect(Buffer.from(result).subarray(0, 8)).toEqual(pngBytes.subarray(0, 8));
-    await expect(sharp(result).metadata()).resolves.toMatchObject({
+    expect(Buffer.from(result.bytes).subarray(0, 8)).toEqual(
+      pngBytes.subarray(0, 8),
+    );
+    await expect(sharp(result.bytes).metadata()).resolves.toMatchObject({
       format: "png",
       width: 3,
       height: 2,
     });
+  });
+
+  it("OpenAI Images 的畸形 usage 不影响已验证 PNG 并保持未计量", async () => {
+    stubFetch(
+      jsonResponse({
+        data: [{ b64_json: pngBase64 }],
+        usage: { input_tokens: 12, output_tokens: -1, total_tokens: 11 },
+      }),
+    );
+
+    await expect(
+      provider().image(
+        { model: "gpt-image-1", prompt: "bounded prompt" },
+        configuration,
+      ),
+    ).resolves.toEqual({ bytes: pngBytes });
   });
 
   it("Gemini fallback 拒绝声明为 JPEG 的畸形字节", async () => {

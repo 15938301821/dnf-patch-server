@@ -31,6 +31,7 @@ const environment = {
   DATABASE_URL: `mysql://runtime-probe@${host}:${String(databasePort)}/dnf_patch`,
   DATABASE_POOL_SIZE: "1",
   DNF_REPOSITORY_ROOT: "../dnf-patch",
+  RESOURCE_IMPORT_SERVER_MIRROR_ENABLED: "false",
   CLIENT_SHARED_TOKEN: clientToken,
   WORKER_SHARED_TOKEN: workerToken,
   BROWSER_SESSION_SECRET: browserSessionSecret,
@@ -51,6 +52,9 @@ const environment = {
 };
 delete environment.OBJECT_STORAGE_ACCESS_KEY;
 delete environment.OBJECT_STORAGE_SECRET_KEY;
+delete environment.RESOURCE_IMPORT_PROJECT_ID;
+delete environment.RESOURCE_IMPORT_SNAPSHOT_ID;
+delete environment.RESOURCE_IMPORT_SOURCE_CATALOG_JSON;
 
 const child = spawn(process.execPath, [resolve("dist/main.js")], {
   cwd: process.cwd(),

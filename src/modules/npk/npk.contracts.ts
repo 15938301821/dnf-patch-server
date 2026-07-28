@@ -17,6 +17,7 @@
  */
 import { z } from "zod";
 import {
+  clientIdSchema,
   repositoryRelativePathSchema,
   sha256Schema,
 } from "../../common/contracts/index.js";
@@ -93,6 +94,7 @@ export const createWorkerInventorySchema = createInventorySchema
     attempt: z.number().int().min(1).max(10),
     inventoryArtifactId: z.uuid(),
     sourceFrameManifestArtifactId: z.uuid(),
+    sourceId: clientIdSchema.optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -124,6 +126,8 @@ export interface InventoryView {
   id: string;
   projectId: string;
   runId: string;
+  /** Inventory v2 的稳定来源身份；历史及 v1 记录为空，不能按 label 补猜。 */
+  sourceId?: string;
   sourceLabel: string;
   sourceLength: number;
   sourceSha256: string;

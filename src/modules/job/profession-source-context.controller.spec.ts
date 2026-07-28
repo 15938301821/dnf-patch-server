@@ -24,11 +24,12 @@ const input: RequestProfessionSkillExecutionInput = {
   skillId: "44444444-4444-4444-8444-444444444444",
 };
 const context = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   skillId: input.skillId,
   source: {
     runId: "55555555-5555-4555-8555-555555555555",
     inventoryId: "66666666-6666-4666-8666-666666666666",
+    sourceId: "momentaryslash",
     byteLength: 100,
     sha256: "A".repeat(64),
   },

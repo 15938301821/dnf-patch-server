@@ -18,6 +18,8 @@ import {
 import { stylePackages } from "../../common/db/style-package-schema.js";
 import type {
   PatchTaskArtifactView,
+  PatchTaskDetailView,
+  PatchTaskReferenceImageView,
   PatchTaskReportResult,
   PatchTaskView,
   PlannedPatchTaskPackage,
@@ -40,6 +42,8 @@ import type {
   ProfessionProductionProgressInput,
   ProfessionProductionProgressView,
 } from "./profession-production-progress.contracts.js";
+import { findPatchTaskDetail } from "./patch-task-detail.repository-support.js";
+import { findPatchTaskReferenceImage } from "./patch-task-reference-image.repository-support.js";
 
 @Injectable()
 export class PatchTaskRepository {
@@ -180,6 +184,28 @@ export class PatchTaskRepository {
       ...(row.artifactName ? { artifactName: row.artifactName } : {}),
       artifactAvailable: row.packageArtifactId !== null,
     }));
+  }
+
+  /** 读取当前用户拥有的制作任务详情；跨用户或不存在时返回 undefined，不泄露可见性差异。 */
+  findDetail(
+    runId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskDetailView | undefined> {
+    return findPatchTaskDetail(this.connection, runId, ownerUserId);
+  }
+
+  /** 按任务与技能固定语义读取当前 attempt 参考图；调用方不能传入任意 Artifact ID。 */
+  findReferenceImage(
+    runId: string,
+    skillId: string,
+    ownerUserId: string,
+  ): Promise<PatchTaskReferenceImageView | undefined> {
+    return findPatchTaskReferenceImage(
+      this.connection,
+      runId,
+      skillId,
+      ownerUserId,
+    );
   }
 
   async findArtifact(

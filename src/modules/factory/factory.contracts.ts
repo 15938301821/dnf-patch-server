@@ -45,18 +45,41 @@ const factoryConfigV1Schema = z
   })
   .strict();
 
+/**
+ * 校验逐 kind Job contract 版本；当前只有 inventory 显式注册 v2 多来源 payload。
+ * 其他 kind 继续固定为 v1，避免仅提高版本号却没有对应 Server/Worker 解析器。
+ */
+function validateJobContractVersion(
+  value: { kind: AllowedJobKind; schemaVersion: 1 | 2 },
+  context: z.RefinementCtx,
+): void {
+  if (value.schemaVersion === 2 && value.kind !== "inventory") {
+    context.addIssue({
+      code: "custom",
+      path: ["schemaVersion"],
+      message: "仅 inventory Job 注册了 schemaVersion 2。",
+    });
+  }
+}
+
 /** v2 Factory 的 Job contract；profileId 仍由历史顶层字段统一提供。 */
 const factoryJobContractV2Schema = z
   .object({
     kind: allowedJobKindSchema,
-    schemaVersion: z.literal(1),
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
   })
-  .strict();
+  .strict()
+  .superRefine(validateJobContractVersion);
 
 /** v3 Factory 的 Job contract；每个 kind 独立冻结自己的本机工具 profile。 */
-const factoryJobContractV3Schema = factoryJobContractV2Schema.extend({
-  profileId: clientIdSchema,
-});
+const factoryJobContractV3Schema = z
+  .object({
+    kind: allowedJobKindSchema,
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
+    profileId: clientIdSchema,
+  })
+  .strict()
+  .superRefine(validateJobContractVersion);
 
 /** 拒绝 Job 白名单与 contract 集合不一致，防止未登记契约的 kind 进入 Run。 */
 function validateJobContractKinds(
@@ -167,7 +190,7 @@ export type FactoryConfig = z.infer<typeof factoryConfigSchema>;
 /** v2/v3 中解析后的单个 Job contract；profileId 始终与当前 kind 精确绑定。 */
 export interface ResolvedFactoryJobContract {
   kind: AllowedJobKind;
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   profileId: string;
 }
 

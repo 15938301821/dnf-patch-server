@@ -16,7 +16,7 @@
  * `profession`、`shared-fx`、`npk-package` 使用更具体的冻结 payload，其他 kind 只能使用有界声明式 v1 结构。
  */
 import { z } from "zod";
-import { clientIdSchema } from "../../common/contracts/index.js";
+import { clientIdSchema, sha256Schema } from "../../common/contracts/index.js";
 import {
   declarativeParametersSchema,
   type AllowedJobKind,
@@ -43,14 +43,52 @@ export type DeclarativeJobPayloadV1 = z.infer<
 >;
 
 /**
+ * 多来源资源导入使用的显式 Inventory payload v2。
+ * Server 为每个注册来源创建一个 Job；Worker 只按 sourceId 选择本机注册表项，并再次比较摘要。
+ * 本结构不接受路径、命令或开放式 parameters，避免浏览器或 Server 获得本机文件选择能力。
+ */
+const inventoryJobPayloadV2Schema = z
+  .object({
+    schemaVersion: z.literal(2),
+    profileId: clientIdSchema,
+    sourceId: clientIdSchema,
+    sourceSha256: sha256Schema,
+    parameters: z
+      .object({
+        workflow: z.literal("resource-inventory-import-v2"),
+        mode: z.literal("server-mirror"),
+        projectId: z.uuid(),
+        snapshotId: z.uuid(),
+        snapshotEvidence: z
+          .object({
+            rootRulesSha256: sha256Schema,
+            promptTreeSha256: sha256Schema,
+            toolCatalogSha256: sha256Schema,
+            manifestSha256: sha256Schema.optional(),
+          })
+          .strict(),
+        deploymentAuthorized: z.literal(false),
+      })
+      .strict(),
+  })
+  .strict();
+
+/** 已验证的多来源 Inventory v2 payload；sourceId 是逻辑身份，不是文件路径。 */
+export type InventoryJobPayloadV2 = z.infer<typeof inventoryJobPayloadV2Schema>;
+
+/**
  * 当前注册表能返回的所有 payload 联合类型。
  * 名称中的 V1 指 Factory contract 的注册版本；其中 profession 的业务 payload 自身可包含更细的版本字段。
  */
-export type RegisteredJobPayloadV1 =
+export type RegisteredJobPayload =
   | DeclarativeJobPayloadV1
+  | InventoryJobPayloadV2
   | z.infer<typeof styleSkillProductionJobPayloadV2Schema>
   | z.infer<typeof sharedFxJobPayloadV1Schema>
   | z.infer<typeof stylePackageProductionJobPayloadV3Schema>;
+
+/** @deprecated 使用 RegisteredJobPayload；保留名称以兼容现有类型导入。 */
+export type RegisteredJobPayloadV1 = RegisteredJobPayload;
 
 /**
  * 解析 Factory 已冻结的 Job payload。
@@ -65,7 +103,10 @@ export function parseJobPayload(
   kind: AllowedJobKind,
   schemaVersion: number,
   payload: unknown,
-): RegisteredJobPayloadV1 {
+): RegisteredJobPayload {
+  if (kind === "inventory" && schemaVersion === 2) {
+    return inventoryJobPayloadV2Schema.parse(payload);
+  }
   if (schemaVersion !== 1) {
     throw new Error("JOB_PAYLOAD_CONTRACT_NOT_REGISTERED");
   }

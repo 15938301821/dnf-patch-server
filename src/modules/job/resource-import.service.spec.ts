@@ -7,6 +7,7 @@
  */
 import { ConflictException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ResourceImportSourceCatalog } from "../../config/resource-import-source-catalog.js";
 import type { FactoryView } from "../factory/factory.contracts.js";
 import type { InventoryView } from "../npk/npk.contracts.js";
 import type {
@@ -22,6 +23,7 @@ const projectId = "11111111-1111-4111-8111-111111111111";
 const snapshotId = "22222222-2222-4222-8222-222222222222";
 const runId = "33333333-3333-4333-8333-333333333333";
 const jobId = "44444444-4444-4444-8444-444444444444";
+const secondJobId = "55555555-5555-4555-8555-555555555555";
 const timestamp = "2026-07-21T00:00:00.000Z";
 
 interface ResourceImportJobStateFixture {
@@ -33,31 +35,27 @@ interface ResourceImportJobStateFixture {
 }
 
 describe("ResourceImportService", () => {
-  const configValues = new Map<string, boolean | string>();
+  const configValues = new Map<
+    string,
+    boolean | string | ResourceImportSourceCatalog
+  >();
   const config = {
-    get: vi.fn((key: string): boolean | string | undefined =>
-      configValues.get(key),
+    get: vi.fn(
+      (
+        key: string,
+      ): boolean | string | ResourceImportSourceCatalog | undefined =>
+        configValues.get(key),
     ),
   };
   const jobs = {
-    findLatestByProject:
-      vi.fn<
-        (
-          projectId: string,
-        ) => Promise<ResourceImportJobStateFixture | undefined>
-      >(),
+    findLatestRunByProject:
+      vi.fn<(projectId: string) => Promise<ResourceImportJobStateFixture[]>>(),
     findByRun:
-      vi.fn<
-        (runId: string) => Promise<ResourceImportJobStateFixture | undefined>
-      >(),
+      vi.fn<(runId: string) => Promise<ResourceImportJobStateFixture[]>>(),
   };
   const inventories = {
-    findLatest:
-      vi.fn<(projectId: string) => Promise<InventoryView | undefined>>(),
-    findByRun:
-      vi.fn<
-        (projectId: string, runId: string) => Promise<InventoryView | undefined>
-      >(),
+    findAllByRun:
+      vi.fn<(projectId: string, runId: string) => Promise<InventoryView[]>>(),
   };
   const workers = {
     hasEnabledCapability:
@@ -85,8 +83,12 @@ describe("ResourceImportService", () => {
     configValues.set("RESOURCE_IMPORT_SERVER_MIRROR_ENABLED", true);
     configValues.set("RESOURCE_IMPORT_PROJECT_ID", projectId);
     configValues.set("RESOURCE_IMPORT_SNAPSHOT_ID", snapshotId);
-    config.get.mockImplementation((key: string): boolean | string | undefined =>
-      configValues.get(key),
+    configValues.set("RESOURCE_IMPORT_SOURCE_CATALOG_JSON", sourceCatalog());
+    config.get.mockImplementation(
+      (
+        key: string,
+      ): boolean | string | ResourceImportSourceCatalog | undefined =>
+        configValues.get(key),
     );
     projects.get.mockResolvedValue({
       id: projectId,
@@ -101,10 +103,9 @@ describe("ResourceImportService", () => {
     projects.getSnapshot.mockResolvedValue(snapshot());
     factories.get.mockResolvedValue(factory());
     workers.hasEnabledCapability.mockResolvedValue(true);
-    jobs.findLatestByProject.mockResolvedValue(undefined);
-    jobs.findByRun.mockResolvedValue(job("queued"));
-    inventories.findLatest.mockResolvedValue(undefined);
-    inventories.findByRun.mockResolvedValue(undefined);
+    jobs.findLatestRunByProject.mockResolvedValue([]);
+    jobs.findByRun.mockResolvedValue(batchJobs("queued"));
+    inventories.findAllByRun.mockResolvedValue([]);
     runs.create.mockResolvedValue(run());
     service = new ResourceImportService(
       config,
@@ -130,8 +131,11 @@ describe("ResourceImportService", () => {
     expect(runs.create).not.toHaveBeenCalled();
   });
 
-  it("reuses an active inventory job", async () => {
-    jobs.findLatestByProject.mockResolvedValue(job("leased"));
+  it("reuses an active inventory batch", async () => {
+    jobs.findLatestRunByProject.mockResolvedValue([
+      job("leased", jobId),
+      job("queued", secondJobId),
+    ]);
 
     await expect(service.create()).resolves.toEqual({
       id: jobId,
@@ -142,17 +146,14 @@ describe("ResourceImportService", () => {
     expect(runs.create).not.toHaveBeenCalled();
   });
 
-  it("shows the latest frozen Inventory before the first import job", async () => {
-    inventories.findLatest.mockResolvedValue(inventory());
-
-    await expect(service.overview()).resolves.toMatchObject({
-      status: "idle",
-      resourceVersion: "E".repeat(64),
-      lastImportedAt: timestamp,
-    });
+  it("shows the configured source count before the first import batch", async () => {
+    const overview = await service.overview();
+    expect(overview.status).toBe("idle");
+    expect(overview.message).toContain("2 个官方来源");
+    expect(inventories.findAllByRun).not.toHaveBeenCalled();
   });
 
-  it("creates one guarded inventory Run with immutable safety defaults", async () => {
+  it("creates one guarded multi-source Run with immutable safety defaults", async () => {
     await expect(service.create()).resolves.toMatchObject({
       id: jobId,
       status: "queued",
@@ -171,18 +172,21 @@ describe("ResourceImportService", () => {
       fullSkillCoverageProven: false,
       clientCompatibilityProven: false,
     });
-    expect(input.jobs).toHaveLength(1);
+    expect(input.jobs).toHaveLength(2);
     expect(input.jobs[0]?.kind).toBe("inventory");
-    const payload = parseJobPayload("inventory", 1, input.jobs[0]?.payload);
+    const payload = parseJobPayload("inventory", 2, input.jobs[0]?.payload);
     expect(payload).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       profileId: "resource-profile",
+      sourceId: "momentaryslash",
+      sourceSha256: "E".repeat(64),
       parameters: {
-        workflow: "resource-inventory-import-v1",
+        workflow: "resource-inventory-import-v2",
         mode: "server-mirror",
         deploymentAuthorized: false,
       },
     });
+    expect(JSON.stringify(input.jobs)).not.toContain("ImagePacks2");
   });
 
   it("uses the Factory v3 inventory contract profile", async () => {
@@ -197,7 +201,7 @@ describe("ResourceImportService", () => {
         jobContracts: [
           {
             kind: "inventory",
-            schemaVersion: 1,
+            schemaVersion: 2,
             profileId: "resource-profile",
           },
           {
@@ -215,25 +219,29 @@ describe("ResourceImportService", () => {
 
     const input = runs.create.mock.calls[0]?.[0];
     expect(input).toBeDefined();
-    const payload = parseJobPayload("inventory", 1, input?.jobs[0]?.payload);
+    const payload = parseJobPayload("inventory", 2, input?.jobs[0]?.payload);
     expect(payload.profileId).toBe("resource-profile");
   });
 
-  it("requires a same-Run frozen Inventory before reporting success", async () => {
-    jobs.findLatestByProject.mockResolvedValue(job("passed"));
+  it("requires every same-Run source Inventory before reporting success", async () => {
+    jobs.findLatestRunByProject.mockResolvedValue(batchJobs("passed"));
 
     await expect(service.overview()).resolves.toMatchObject({
       status: "failed",
-      lastJobId: jobId,
+      lastJobId: secondJobId,
     });
 
-    inventories.findByRun.mockResolvedValue(inventory());
-    await expect(service.overview()).resolves.toMatchObject({
+    inventories.findAllByRun.mockResolvedValue([
+      inventory("momentaryslash", "E".repeat(64), "inventory-first"),
+      inventory("illusionslash", "F".repeat(64), "inventory-second"),
+    ]);
+    const overview = await service.overview();
+    expect(overview).toMatchObject({
       status: "idle",
-      resourceVersion: "E".repeat(64),
       lastImportedAt: timestamp,
-      lastJobId: jobId,
+      lastJobId: secondJobId,
     });
+    expect(overview.resourceVersion).toMatch(/^[A-F0-9]{64}$/u);
   });
 });
 
@@ -253,14 +261,21 @@ describe("createResourceImportJobSchema", () => {
 
 function job(
   status: ResourceImportJobStateFixture["status"],
+  id = jobId,
 ): ResourceImportJobStateFixture {
   return {
-    id: jobId,
+    id,
     runId,
     status,
     createdAtUtc: timestamp,
     updatedAtUtc: timestamp,
   };
+}
+
+function batchJobs(
+  status: ResourceImportJobStateFixture["status"],
+): ResourceImportJobStateFixture[] {
+  return [job(status, jobId), job(status, secondJobId)];
 }
 
 function snapshot(): ProjectSnapshotView {
@@ -277,17 +292,32 @@ function snapshot(): ProjectSnapshotView {
   };
 }
 
-function inventory(): InventoryView {
+function inventory(
+  sourceId: string,
+  sourceSha256: string,
+  id: string,
+): InventoryView {
   return {
-    id: "inventory-id",
+    id,
     projectId,
     runId,
+    sourceId,
     sourceLabel: "verified server mirror",
     sourceLength: 1,
-    sourceSha256: "E".repeat(64),
+    sourceSha256,
     status: "frozen",
     entryCount: 1,
     createdAtUtc: timestamp,
+  };
+}
+
+function sourceCatalog(): ResourceImportSourceCatalog {
+  return {
+    schemaVersion: 1,
+    sources: [
+      { sourceId: "momentaryslash", sourceSha256: "E".repeat(64) },
+      { sourceId: "illusionslash", sourceSha256: "F".repeat(64) },
+    ],
   };
 }
 
@@ -302,7 +332,7 @@ function factory(): FactoryView {
       policyId: "resource-policy",
       policySha256: "F".repeat(64),
       allowedJobKinds: ["inventory" as const],
-      jobContracts: [{ kind: "inventory" as const, schemaVersion: 1 as const }],
+      jobContracts: [{ kind: "inventory" as const, schemaVersion: 2 as const }],
       arbitraryExecution: false as const,
       deploymentAuthorized: false as const,
     },

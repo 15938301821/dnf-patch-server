@@ -14,6 +14,7 @@ import type {
   CreatePatchTaskInput,
   PatchTaskArtifactDownloadView,
   PatchTaskArtifactView,
+  PatchTaskDetailView,
   PatchTaskView,
 } from "./patch-task.contracts.js";
 import { PatchTaskService } from "./patch-task.service.js";
@@ -23,6 +24,7 @@ const input: CreatePatchTaskInput = {
   styleId: "22222222-2222-4222-8222-222222222222",
 };
 const ownerUserId = "44444444-4444-4444-8444-444444444444";
+const skillId = "77777777-7777-4777-8777-777777777777";
 const task: PatchTaskView = {
   id: "33333333-3333-4333-8333-333333333333",
   professionName: "剑魂",
@@ -45,6 +47,45 @@ const download: PatchTaskArtifactDownloadView = {
   downloadUrl: "http://127.0.0.1:9000/download",
   expiresAtUtc: "2026-07-25T12:05:00.000Z",
 };
+const detail: PatchTaskDetailView = {
+  ...task,
+  updatedAt: "2026-07-21T00:01:00.000Z",
+  currentStage: "planning",
+  totalSkills: 1,
+  passedSkills: 0,
+  workflow: [
+    { key: "planning", status: "running" },
+    { key: "skill-production", status: "pending" },
+    { key: "package-validation", status: "pending" },
+    { key: "complete", status: "pending" },
+  ],
+  skills: [],
+  packageStatus: "queued",
+  modelThroughput: {
+    totalCalls: 0,
+    egressCalls: 0,
+    runningCalls: 0,
+    measuredCalls: 0,
+    successRate: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    averageOutputTokensPerSecond: null,
+    averageProviderLatencyMs: null,
+    groups: [],
+    recentCalls: [],
+  },
+};
+const referenceDownload = {
+  artifactId: "88888888-8888-4888-8888-888888888888",
+  skillId,
+  artifactName: "reference.png",
+  mediaType: "image/png" as const,
+  byteLength: 512,
+  sha256: "D".repeat(64),
+  downloadUrl: "http://127.0.0.1:9000/reference",
+  expiresAtUtc: "2026-07-28T00:05:00.000Z",
+};
 
 describe("PatchTaskController", () => {
   const create =
@@ -56,21 +97,33 @@ describe("PatchTaskController", () => {
       ) => Promise<PatchTaskView>
     >();
   const requireBrowserUser = vi.fn();
+  const findDetail = vi.fn().mockResolvedValue(detail);
   const findArtifacts = vi.fn().mockResolvedValue([artifact]);
   const authorizeArtifactDownload = vi.fn().mockResolvedValue(download);
+  const authorizeReferenceImageDownload = vi
+    .fn()
+    .mockResolvedValue(referenceDownload);
   let controller: PatchTaskController;
 
   beforeEach(async () => {
     vi.resetAllMocks();
     create.mockResolvedValue(task);
+    findDetail.mockResolvedValue(detail);
     findArtifacts.mockResolvedValue([artifact]);
     authorizeArtifactDownload.mockResolvedValue(download);
+    authorizeReferenceImageDownload.mockResolvedValue(referenceDownload);
     requireBrowserUser.mockResolvedValue({ id: ownerUserId });
     const module = await Test.createTestingModule({
       providers: [
         {
           provide: PatchTaskService,
-          useValue: { create, findArtifacts, authorizeArtifactDownload },
+          useValue: {
+            create,
+            findDetail,
+            findArtifacts,
+            authorizeArtifactDownload,
+            authorizeReferenceImageDownload,
+          },
         },
         { provide: AuthService, useValue: { requireBrowserUser } },
         {
@@ -112,6 +165,14 @@ describe("PatchTaskController", () => {
     expect(findArtifacts).toHaveBeenCalledWith(task.id, ownerUserId);
   });
 
+  it("passes the authenticated owner to the task detail query", async () => {
+    await expect(controller.detail(task.id, "Bearer access")).resolves.toEqual({
+      data: detail,
+    });
+    expect(requireBrowserUser).toHaveBeenCalledWith("Bearer access");
+    expect(findDetail).toHaveBeenCalledWith(task.id, ownerUserId);
+  });
+
   it("authorizes a fixed role only after resolving the authenticated owner", async () => {
     await expect(
       controller.authorizeArtifactDownload(
@@ -124,6 +185,22 @@ describe("PatchTaskController", () => {
     expect(authorizeArtifactDownload).toHaveBeenCalledWith(
       task.id,
       "candidate",
+      ownerUserId,
+    );
+  });
+
+  it("authorizes a reference image by task and skill after resolving the owner", async () => {
+    await expect(
+      controller.authorizeReferenceImageDownload(
+        task.id,
+        skillId,
+        "Bearer access",
+      ),
+    ).resolves.toEqual({ data: referenceDownload });
+    expect(requireBrowserUser).toHaveBeenCalledWith("Bearer access");
+    expect(authorizeReferenceImageDownload).toHaveBeenCalledWith(
+      task.id,
+      skillId,
       ownerUserId,
     );
   });

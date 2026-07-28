@@ -107,8 +107,49 @@ describe("environment configuration", () => {
         RESOURCE_IMPORT_SERVER_MIRROR_ENABLED: "true",
         RESOURCE_IMPORT_PROJECT_ID: "11111111-1111-4111-8111-111111111111",
         RESOURCE_IMPORT_SNAPSHOT_ID: "22222222-2222-4222-8222-222222222222",
+        RESOURCE_IMPORT_SOURCE_CATALOG_JSON: JSON.stringify({
+          schemaVersion: 1,
+          sources: [
+            { sourceId: "momentaryslash", sourceSha256: "A".repeat(64) },
+          ],
+        }),
       }).RESOURCE_IMPORT_SERVER_MIRROR_ENABLED,
     ).toBe(true);
+  });
+
+  it("parses a path-free unique resource import source catalog", () => {
+    const parsed = validateEnvironment({
+      ...validEnvironment(),
+      RESOURCE_IMPORT_SOURCE_CATALOG_JSON: JSON.stringify({
+        schemaVersion: 1,
+        sources: [
+          { sourceId: "first", sourceSha256: "a".repeat(64) },
+          { sourceId: "second", sourceSha256: "b".repeat(64) },
+        ],
+      }),
+    });
+    expect(parsed.RESOURCE_IMPORT_SOURCE_CATALOG_JSON).toEqual({
+      schemaVersion: 1,
+      sources: [
+        { sourceId: "first", sourceSha256: "A".repeat(64) },
+        { sourceId: "second", sourceSha256: "B".repeat(64) },
+      ],
+    });
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment(),
+        RESOURCE_IMPORT_SOURCE_CATALOG_JSON: JSON.stringify({
+          schemaVersion: 1,
+          sources: [
+            {
+              sourceId: "first",
+              sourceSha256: "A".repeat(64),
+              sourceRelativePath: "ImagePacks2/source.NPK",
+            },
+          ],
+        }),
+      }),
+    ).toThrow();
   });
 
   // 禁用态无需凭据；启用后 Access/Secret Key 必须同时存在。

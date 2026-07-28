@@ -72,6 +72,19 @@ describe("reportProfessionSkillProduction", () => {
     expect(harness.update).not.toHaveBeenCalled();
   });
 
+  it("rejects source manifest provenance bound to another logical source", async () => {
+    const harness = createSkillProductionReportHarness("source-id-mismatch");
+
+    await expect(
+      reportProfessionSkillProduction(
+        harness.connection,
+        skillProductionFixture.jobId,
+        harness.input,
+      ),
+    ).resolves.toEqual({ status: "skill-production-evidence-mismatch" });
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
   it("rejects a non-finalized projects upload without reading validation evidence", async () => {
     const harness = createSkillProductionReportHarness(
       "projects-not-finalized",

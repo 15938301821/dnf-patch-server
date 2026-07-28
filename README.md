@@ -94,13 +94,14 @@ Run outbox 使用以下服务端参数：
 
 浏览器资源导入入口使用以下服务端上下文：
 
-| 变量                                    | 默认值  | 用途                                                         |
-| --------------------------------------- | ------- | ------------------------------------------------------------ |
-| `RESOURCE_IMPORT_SERVER_MIRROR_ENABLED` | `false` | 显式确认受控 Worker 已配置只读资源镜像；服务端不接收其路径。 |
-| `RESOURCE_IMPORT_PROJECT_ID`            | 无      | 资源 Inventory 所属的已登记 Project UUID。                   |
-| `RESOURCE_IMPORT_SNAPSHOT_ID`           | 无      | 本次导入绑定的已冻结 Snapshot UUID。                         |
+| 变量                                    | 默认值  | 用途                                                          |
+| --------------------------------------- | ------- | ------------------------------------------------------------- |
+| `RESOURCE_IMPORT_SERVER_MIRROR_ENABLED` | `false` | 显式确认受控 Worker 已配置只读资源镜像；服务端不接收其路径。  |
+| `RESOURCE_IMPORT_PROJECT_ID`            | 无      | 资源 Inventory 所属的已登记 Project UUID。                    |
+| `RESOURCE_IMPORT_SNAPSHOT_ID`           | 无      | 本次导入绑定的已冻结 Snapshot UUID。                          |
+| `RESOURCE_IMPORT_SOURCE_CATALOG_JSON`   | 无      | 1 至 64 项 `sourceId + sourceSha256` 逻辑目录；拒绝路径字段。 |
 
-启用资源导入时必须同时配置两个 UUID，对应 Factory 必须启用 `inventory` v1 契约，并至少注册一个未禁用且声明 `inventory` capability 的 Worker。资源根路径只存在于仓库外受控 Worker 的本地配置中，不进入环境契约、Job payload、数据库、API 或日志。
+启用资源导入时必须同时配置两个 UUID 和逻辑来源目录，对应 Factory 必须启用 `inventory` v2 契约，并至少注册一个未禁用且声明 `inventory` capability 的 Worker。服务端为目录中每个来源创建一个 v2 Job；同 Run 只有收齐一一对应的 frozen Inventory 才报告成功。根启动器会从 Worker 的哈希钉扎注册表剥离路径并派生该目录，避免维护两份来源事实。资源根和相对路径只存在于受控 Worker 的本地配置中，不进入 Server `.env`、Job payload、数据库、API 或日志。
 
 当前 reaper 和 outbox dispatcher 均按单机、单 Nest 进程部署设计。启用多进程或多副本前，必须增加数据库级 leader/dispatcher 协调，不能依赖各进程本地定时器互斥。
 
@@ -159,6 +160,7 @@ Compose 不提供固定密码。启动前在本机环境或未提交的 `.env` �
 - Factory v1 记录仍可读取，但不能用于创建新 Run。
 - 可执行的 Factory v2/v3 必须冻结 `policyId`、`policySha256`、`allowedJobKinds`，并为每个允许的 kind 提供一一对应的 `jobContracts` 版本。v2 保留顶层单一 `profileId`；v3 在每个 Job contract 中独立冻结 `profileId`，供 Inventory、Profession 和后续封包工具链使用不同身份。
 - 每个 Job 的 v1 载荷是严格声明式信封：`{ schemaVersion: 1, profileId, parameters }`。`profileId` 必须与当前 Job kind 的 Factory contract 一致；`parameters` 仍会经过大小、深度、节点数和 Guardrail 任意执行字段检查。
+- Inventory v2 载荷只增加逻辑 `sourceId + sourceSha256`，并固定 `resource-inventory-import-v2` workflow；服务端不接受或派生任何本机路径。当前只有 Inventory 注册了 schemaVersion 2，其他 kind 提升版本会失败关闭。
 - `POST /v1/runs` 必须携带合法的 `Idempotency-Key`。服务端对完整、已解析请求生成确定性 SHA-256 指纹；相同键和相同请求返回原 Run，相同键但请求发生任何语义变化返回 `409 IDEMPOTENCY_KEY_REUSED`。
 - 迁移前创建且没有服务器指纹的历史 Run 不会被不安全重放，返回 `409 IDEMPOTENCY_RECORD_LEGACY`。不同幂等键重复使用同一 `clientRunId` 返回 `409 CLIENT_RUN_ID_CONFLICT`。
 

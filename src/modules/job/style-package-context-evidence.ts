@@ -148,6 +148,8 @@ export function resolveStylePackageSkillInputs(
       !projects ||
       !validation ||
       validation.provenance.kind !== "profession-aseprite-validation-v1" ||
+      sha256JcsV1(validation.provenance.source) !==
+        sha256JcsV1(projects.provenance.source) ||
       validation.provenance.asepriteProjects.artifactId !==
         projects.artifact.id ||
       validation.provenance.asepriteProjects.sha256 !==
@@ -157,6 +159,7 @@ export function resolveStylePackageSkillInputs(
     }
     skills.push({
       skillId: production.skillId,
+      sourceSha256: projects.provenance.source.sourceSha256,
       promptSha256: production.promptSha256.toUpperCase(),
       productionAttempt: production.attempt,
       projectBundle: artifactSummary(projects.artifact),

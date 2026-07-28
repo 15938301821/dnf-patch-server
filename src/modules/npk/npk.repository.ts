@@ -39,6 +39,11 @@ import {
   type InventoryView,
   type WorkerInventoryMutationResult,
 } from "./npk.contracts.js";
+import {
+  hasExpectedArtifactEvidence,
+  hasFrameManifest,
+  readInventorySourceBinding,
+} from "./npk-worker-evidence.js";
 
 /**
  * NpkService 依赖的数据访问契约，便于业务测试替换持久化层而不泄露 Drizzle 实现。
@@ -67,6 +72,8 @@ export interface NpkRepositoryPort {
     projectId: string,
     runId: string,
   ): Promise<InventoryView | undefined>;
+  /** 查询指定 Project+Run 的全部 frozen Inventory，供批量资源导入核对完整性。 */
+  findAllByRun(projectId: string, runId: string): Promise<InventoryView[]>;
   /** 按 ID 查询冻结 Inventory 摘要；归属由调用方继续比较。 */
   findById(inventoryId: string): Promise<InventoryView | undefined>;
   /** 查询指定 Inventory 下条目的最小归属/摘要证据，不返回资源正文。 */
@@ -126,6 +133,7 @@ export class NpkRepository implements NpkRepositoryPort {
         .select({
           runId: jobs.runId,
           kind: jobs.kind,
+          payload: jobs.payload,
           status: jobs.status,
           leaseOwnerId: jobs.leaseOwnerId,
           leaseId: jobs.leaseId,
@@ -138,12 +146,21 @@ export class NpkRepository implements NpkRepositoryPort {
         .limit(1)
         .for("update");
       if (!job) return { status: "lease-mismatch" };
-      const now = dateValue(job.now);
+      const now = databaseUtcDate(job.now);
       if (!hasExactJobLease(job, input, now)) {
         return { status: "lease-mismatch" };
       }
       if (job.kind !== "inventory") {
         return { status: "job-kind-mismatch" };
+      }
+      const sourceBinding = readInventorySourceBinding(job.payload);
+      if (
+        sourceBinding === undefined ||
+        sourceBinding.sourceId !== input.sourceId ||
+        (sourceBinding.sourceSha256 !== undefined &&
+          sourceBinding.sourceSha256 !== input.sourceSha256.toUpperCase())
+      ) {
+        return { status: "artifact-evidence-mismatch" };
       }
 
       const [run] = await transaction
@@ -203,12 +220,14 @@ export class NpkRepository implements NpkRepositoryPort {
           "inventory-evidence.json",
           "npk-inventory",
           input.sourceSha256,
+          sourceBinding.sourceId,
         ) ||
         !hasExpectedArtifactEvidence(
           frameManifestArtifact,
           "source-frame-manifest.json",
           "source-frame-manifest",
           input.sourceSha256,
+          sourceBinding.sourceId,
         )
       ) {
         return { status: "artifact-evidence-mismatch" };
@@ -228,7 +247,8 @@ export class NpkRepository implements NpkRepositoryPort {
       if (existing) {
         if (
           existing.sourceFrameManifestArtifactId !==
-          input.sourceFrameManifestArtifactId
+            input.sourceFrameManifestArtifactId ||
+          existing.sourceId !== (input.sourceId ?? null)
         ) {
           return { status: "artifact-evidence-mismatch" };
         }
@@ -299,6 +319,25 @@ export class NpkRepository implements NpkRepositoryPort {
       .orderBy(desc(npkInventories.createdAt))
       .limit(1);
     return row ? toInventoryView(row) : undefined;
+  }
+
+  /** 查询指定 Project 与 producing Run 的全部 frozen Inventory，按来源 ID 稳定排序。 */
+  async findAllByRun(
+    projectId: string,
+    runId: string,
+  ): Promise<InventoryView[]> {
+    const rows = await this.connection.database
+      .select()
+      .from(npkInventories)
+      .where(
+        and(
+          eq(npkInventories.projectId, projectId),
+          eq(npkInventories.runId, runId),
+          eq(npkInventories.status, "frozen"),
+        ),
+      )
+      .orderBy(npkInventories.sourceId, npkInventories.createdAt);
+    return rows.map(toInventoryView);
   }
 
   /** 按服务器 Inventory ID 查询冻结摘要，不返回条目路径、正文或对象定位。 */
@@ -383,10 +422,12 @@ async function insertInventory(
   input: CreateInventoryInput | CreateWorkerInventoryInput,
   createdAt: Date,
 ): Promise<InventoryView> {
+  const sourceId = hasFrameManifest(input) ? input.sourceId : undefined;
   await transaction.insert(npkInventories).values({
     id,
     projectId,
     runId,
+    ...(sourceId === undefined ? {} : { sourceId }),
     sourceLabel: input.sourceLabel,
     sourceLength: input.sourceLength,
     sourceSha256: input.sourceSha256.toUpperCase(),
@@ -414,6 +455,7 @@ async function insertInventory(
     id,
     projectId,
     runId,
+    sourceId: sourceId ?? null,
     sourceLabel: input.sourceLabel,
     sourceLength: input.sourceLength,
     sourceSha256: input.sourceSha256.toUpperCase(),
@@ -440,6 +482,7 @@ function toInventoryView(
     id: row.id,
     projectId: row.projectId,
     runId: row.runId,
+    ...(row.sourceId ? { sourceId: row.sourceId } : {}),
     sourceLabel: row.sourceLabel,
     sourceLength: row.sourceLength,
     sourceSha256: row.sourceSha256,
@@ -454,41 +497,3 @@ function toInventoryView(
     createdAtUtc: row.createdAt.toISOString(),
   };
 }
-
-/** 核对 finalized Artifact 的角色、源身份与媒体类型，防止任意同 Run 对象冒充 Inventory 证据。 */
-function hasExpectedArtifactEvidence(
-  artifact:
-    | {
-        logicalName: string;
-        mediaType: string;
-        provenance: Record<string, unknown>;
-      }
-    | undefined,
-  logicalName: string,
-  kind: string,
-  sourceSha256: string,
-): boolean {
-  return (
-    artifact?.logicalName === logicalName &&
-    artifact.mediaType === "application/json" &&
-    artifact.provenance.schemaVersion === 1 &&
-    artifact.provenance.kind === kind &&
-    typeof artifact.provenance.sourceSha256 === "string" &&
-    artifact.provenance.sourceSha256.toUpperCase() ===
-      sourceSha256.toUpperCase()
-  );
-}
-
-/** 区分普通创建 DTO 与强制携带源帧清单的 Worker DTO。 */
-function hasFrameManifest(
-  input: CreateInventoryInput | CreateWorkerInventoryInput,
-): input is CreateWorkerInventoryInput {
-  return "sourceFrameManifestArtifactId" in input;
-}
-
-/**
- * 将 MySQL 返回的 Date/字符串时间转换为可比较值。
- * @param value 当前事务查询的数据库时间，不能换成 Worker 或服务进程本机时间。
- * @returns Date，用于 exact lease 时效判断。
- */
-const dateValue = databaseUtcDate;

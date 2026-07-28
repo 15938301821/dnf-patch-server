@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import {
-  boundedJsonRecordSchema,
+  boundedJobPayloadRecordSchema,
   clientIdSchema,
   sha256Schema,
 } from "../../common/contracts/index.js";
@@ -160,10 +160,10 @@ export const styleSkillProductionJobPayloadV2Schema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (!boundedJsonRecordSchema.safeParse(value).success) {
+    if (!boundedJobPayloadRecordSchema.safeParse(value).success) {
       context.addIssue({
         code: "custom",
-        message: "主题技能生产 Job 不能超过声明式 JSON 预算。",
+        message: "主题技能生产 Job 不能超过 Job JSON 预算。",
       });
     }
     if (!declarativeParametersSchema.safeParse(value.parameters).success) {

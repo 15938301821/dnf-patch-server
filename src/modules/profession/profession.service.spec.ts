@@ -340,6 +340,44 @@ describe("ProfessionService style gates", () => {
     });
     expect(professions.replaceSkillCatalog).not.toHaveBeenCalled();
   });
+
+  it("imports an explicitly selected subset of a frozen Inventory", async () => {
+    const input = skillCatalogInput();
+    const [skill] = input.skills;
+    if (!skill) throw new Error("TEST_SKILL_REQUIRED");
+    input.skills[0] = {
+      ...skill,
+      sourceScope: "selected-entries",
+      sourceEntries: skill.sourceEntries.slice(0, 1),
+    };
+    professions.replaceSkillCatalog.mockResolvedValue([
+      { id: skillId, mappingStatus: "verified" },
+    ]);
+
+    await expect(
+      service.importSkillCatalog(professionId, input),
+    ).resolves.toMatchObject({
+      professionId,
+      sourceRunId,
+      importedSkillCount: 1,
+    });
+    expect(professions.replaceSkillCatalog).toHaveBeenCalledWith(
+      professionId,
+      projectId,
+      snapshotId,
+      [
+        expect.objectContaining({
+          sourceScope: "selected-entries",
+          sourceEntries: [
+            {
+              sourceInventoryEntryId: skillId,
+              sourceMetadataSha256: "B".repeat(64),
+            },
+          ],
+        }),
+      ],
+    );
+  });
 });
 
 function skillCatalogInput(): ImportProfessionSkillCatalogInput {

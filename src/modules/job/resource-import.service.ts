@@ -12,6 +12,10 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import {
+  resourceImportSourceCatalogSchema,
+  type ResourceImportSourceCatalog,
+} from "../../config/resource-import-source-catalog.js";
 import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import { resolveFactoryJobContract } from "../factory/factory.contracts.js";
 import { FactoryService } from "../factory/factory.service.js";
@@ -32,21 +36,21 @@ interface ResourceImportConfigPort {
     key:
       | "RESOURCE_IMPORT_SERVER_MIRROR_ENABLED"
       | "RESOURCE_IMPORT_PROJECT_ID"
-      | "RESOURCE_IMPORT_SNAPSHOT_ID",
-  ): boolean | string | undefined;
+      | "RESOURCE_IMPORT_SNAPSHOT_ID"
+      | "RESOURCE_IMPORT_SOURCE_CATALOG_JSON",
+  ): boolean | string | ResourceImportSourceCatalog | undefined;
 }
 
 interface ResourceImportJobRepositoryPort {
-  findLatestByProject(projectId: string): Promise<JobStateView | undefined>;
-  findByRun(runId: string): Promise<JobStateView | undefined>;
+  findLatestRunByProject(projectId: string): Promise<JobStateView[]>;
+  findByRun(runId: string): Promise<JobStateView[]>;
 }
 
 interface InventoryLookupPort {
-  findLatest(projectId: string): ReturnType<NpkService["findLatest"]>;
-  findByRun(
+  findAllByRun(
     projectId: string,
     runId: string,
-  ): ReturnType<NpkService["findByRun"]>;
+  ): ReturnType<NpkService["findAllByRun"]>;
 }
 
 interface WorkerCapabilityPort {
@@ -85,6 +89,7 @@ interface ResourceImportContext {
   snapshot: Awaited<ReturnType<ProjectService["getSnapshot"]>>;
   factoryConfig: RunnableFactoryConfig;
   inventoryProfileId: string;
+  sourceCatalog: ResourceImportSourceCatalog;
 }
 
 type ResourceImportContextResolution =
@@ -111,23 +116,23 @@ export class ResourceImportService {
     if (!resolution.ready) {
       return notConfiguredOverview(resolution.message);
     }
-    const { projectId } = resolution.context;
-    const latestJob = await this.jobs.findLatestByProject(projectId);
-    if (!latestJob) {
-      const latestInventory = await this.inventories.findLatest(projectId);
+    const { projectId, sourceCatalog } = resolution.context;
+    const latestJobs = await this.jobs.findLatestRunByProject(projectId);
+    if (latestJobs.length === 0) {
       return readyOverview(
         "idle",
-        latestInventory
-          ? "已找到项目最近的 frozen Inventory，尚无资源导入任务记录。"
-          : "受控资源导入上下文已就绪，尚未提交导入任务。",
-        latestInventory ? inventoryEvidence(latestInventory) : {},
+        `受控资源导入上下文已就绪，共 ${String(sourceCatalog.sources.length)} 个官方来源，尚未提交导入任务。`,
       );
     }
-    const [currentInventory, latestInventory] = await Promise.all([
-      this.inventories.findByRun(projectId, latestJob.runId),
-      this.inventories.findLatest(projectId),
-    ]);
-    return overviewFromEvidence(latestJob, currentInventory, latestInventory);
+    const runId = latestJobs[0]?.runId;
+    if (runId === undefined || latestJobs.some((job) => job.runId !== runId)) {
+      return readyOverview("failed", "资源导入批次 Job 归属不一致。");
+    }
+    const currentInventories = await this.inventories.findAllByRun(
+      projectId,
+      runId,
+    );
+    return overviewFromEvidence(latestJobs, currentInventories, sourceCatalog);
   }
 
   /** 创建固定的 server-mirror inventory Job；重复并发请求复用同一代 Run。 */
@@ -139,22 +144,26 @@ export class ResourceImportService {
         message: resolution.message,
       });
     }
-    const latestJob = await this.jobs.findLatestByProject(
+    const latestJobs = await this.jobs.findLatestRunByProject(
       resolution.context.projectId,
     );
-    if (latestJob?.status === "queued" || latestJob?.status === "leased") {
-      return toResourceImportJob(latestJob);
+    if (
+      latestJobs.some(
+        (job) => job.status === "queued" || job.status === "leased",
+      )
+    ) {
+      return toResourceImportJob(latestJobs);
     }
-    const generation = latestJob?.id ?? "initial";
+    const generation = latestJobs[0]?.runId ?? "initial";
     const run = await this.runs.create(
       createImportRunInput(resolution.context, generation),
       `resource-import.${generation}`,
     );
     const created = await this.jobs.findByRun(run.id);
-    if (!created) {
+    if (created.length !== resolution.context.sourceCatalog.sources.length) {
       throw new ConflictException({
         code: "RESOURCE_IMPORT_JOB_NOT_CREATED",
-        message: "资源导入任务未通过服务端门禁。",
+        message: "资源导入批次未完整通过服务端门禁。",
       });
     }
     return toResourceImportJob(created);
@@ -169,13 +178,17 @@ export class ResourceImportService {
     }
     const projectIdValue = this.config.get("RESOURCE_IMPORT_PROJECT_ID");
     const snapshotIdValue = this.config.get("RESOURCE_IMPORT_SNAPSHOT_ID");
+    const sourceCatalogResult = resourceImportSourceCatalogSchema.safeParse(
+      this.config.get("RESOURCE_IMPORT_SOURCE_CATALOG_JSON"),
+    );
     if (
       typeof projectIdValue !== "string" ||
-      typeof snapshotIdValue !== "string"
+      typeof snapshotIdValue !== "string" ||
+      !sourceCatalogResult.success
     ) {
       return {
         ready: false,
-        message: "服务端尚未配置资源导入 Project 与 Snapshot。",
+        message: "服务端尚未配置资源导入 Project、Snapshot 与逻辑来源目录。",
       };
     }
     const projectId = projectIdValue;
@@ -197,10 +210,10 @@ export class ResourceImportService {
         factory.config,
         "inventory",
       );
-      if (inventoryContract?.schemaVersion !== 1) {
+      if (inventoryContract?.schemaVersion !== 2) {
         return {
           ready: false,
-          message: "资源导入 Factory 未启用 inventory v1 契约。",
+          message: "资源导入 Factory 未启用 inventory v2 多来源契约。",
         };
       }
       if (!(await this.workers.hasEnabledCapability("inventory"))) {
@@ -217,6 +230,7 @@ export class ResourceImportService {
           snapshot,
           factoryConfig: factory.config,
           inventoryProfileId: inventoryContract.profileId,
+          sourceCatalog: sourceCatalogResult.data,
         },
       };
     } catch (error) {
@@ -235,31 +249,38 @@ function createImportRunInput(
   context: ResourceImportContext,
   generation: string,
 ): CreateRunInput {
-  const payload = {
-    schemaVersion: 1 as const,
-    profileId: context.inventoryProfileId,
-    parameters: {
-      workflow: "resource-inventory-import-v1",
-      mode: "server-mirror",
-      projectId: context.projectId,
-      snapshotId: context.snapshotId,
-      snapshotEvidence: {
-        rootRulesSha256: context.snapshot.rootRulesSha256,
-        promptTreeSha256: context.snapshot.promptTreeSha256,
-        toolCatalogSha256: context.snapshot.toolCatalogSha256,
-        ...(context.snapshot.manifestSha256
-          ? { manifestSha256: context.snapshot.manifestSha256 }
-          : {}),
-      },
-      deploymentAuthorized: false,
-    },
+  const snapshotEvidence = {
+    rootRulesSha256: context.snapshot.rootRulesSha256,
+    promptTreeSha256: context.snapshot.promptTreeSha256,
+    toolCatalogSha256: context.snapshot.toolCatalogSha256,
+    ...(context.snapshot.manifestSha256
+      ? { manifestSha256: context.snapshot.manifestSha256 }
+      : {}),
   };
+  const jobs = context.sourceCatalog.sources.map((source) => ({
+    kind: "inventory" as const,
+    payload: {
+      schemaVersion: 2 as const,
+      profileId: context.inventoryProfileId,
+      sourceId: source.sourceId,
+      sourceSha256: source.sourceSha256,
+      parameters: {
+        workflow: "resource-inventory-import-v2" as const,
+        mode: "server-mirror" as const,
+        projectId: context.projectId,
+        snapshotId: context.snapshotId,
+        snapshotEvidence,
+        deploymentAuthorized: false as const,
+      },
+    },
+    maxAttempts: 3,
+  }));
   const request = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     action: "import-resources",
     projectId: context.projectId,
     snapshotId: context.snapshotId,
-    payload,
+    sourceCatalogSha256: sha256JcsV1(context.sourceCatalog),
   };
   return {
     projectId: context.projectId,
@@ -273,52 +294,93 @@ function createImportRunInput(
     deploymentPerformed: false,
     fullSkillCoverageProven: false,
     clientCompatibilityProven: false,
-    jobs: [{ kind: "inventory", payload, maxAttempts: 3 }],
+    jobs,
     policyId: context.factoryConfig.policyId,
     policySha256: context.factoryConfig.policySha256,
   };
 }
 
 function overviewFromEvidence(
-  job: JobStateView,
-  currentInventory: Awaited<ReturnType<NpkService["findByRun"]>>,
-  latestInventory: Awaited<ReturnType<NpkService["findLatest"]>>,
+  jobs: readonly JobStateView[],
+  inventories: Awaited<ReturnType<NpkService["findAllByRun"]>>,
+  sourceCatalog: ResourceImportSourceCatalog,
 ): ResourceImportOverview {
-  const inventory = currentInventory ?? latestInventory;
-  const evidence = inventory ? inventoryEvidence(inventory) : {};
-  if (job.status === "queued") {
-    return readyOverview("queued", "资源导入任务正在等待 Worker 领取。", {
-      lastJobId: job.id,
-      ...evidence,
+  const lastJobId = jobs.at(-1)?.id;
+  if (jobs.length !== sourceCatalog.sources.length) {
+    return readyOverview("failed", "资源导入批次 Job 数量与来源目录不一致。", {
+      ...(lastJobId ? { lastJobId } : {}),
     });
   }
-  if (job.status === "leased") {
-    return readyOverview("running", "inventory Worker 正在生成资源清单证据。", {
-      lastJobId: job.id,
-      ...evidence,
-    });
+  if (jobs.some((job) => job.status === "leased")) {
+    return readyOverview(
+      "running",
+      `inventory Worker 正在处理 ${String(sourceCatalog.sources.length)} 个官方来源。`,
+      { ...(lastJobId ? { lastJobId } : {}) },
+    );
   }
-  if (job.status === "passed" && currentInventory) {
-    return readyOverview("idle", "最近一次资源导入已形成 frozen Inventory。", {
-      lastJobId: job.id,
-      ...evidence,
-    });
+  if (jobs.some((job) => job.status === "queued")) {
+    return readyOverview(
+      "queued",
+      `资源导入批次正在等待 Worker，共 ${String(sourceCatalog.sources.length)} 个官方来源。`,
+      { ...(lastJobId ? { lastJobId } : {}) },
+    );
+  }
+  const batch = inspectInventoryBatch(inventories, sourceCatalog);
+  if (jobs.every((job) => job.status === "passed") && batch.complete) {
+    return readyOverview(
+      "idle",
+      `最近一次资源导入已形成 ${String(inventories.length)} 个 frozen Inventory。`,
+      {
+        ...(lastJobId === undefined ? {} : { lastJobId }),
+        resourceVersion: sha256JcsV1(sourceCatalog),
+        ...(batch.lastImportedAt === undefined
+          ? {}
+          : { lastImportedAt: batch.lastImportedAt }),
+      },
+    );
   }
   return readyOverview(
     "failed",
-    job.status === "passed"
-      ? "资源任务已结束，但缺少同 Run 的 frozen Inventory 证据。"
-      : "最近一次资源导入任务失败或被安全门禁阻断。",
-    { lastJobId: job.id, ...evidence },
+    jobs.every((job) => job.status === "passed")
+      ? "资源任务已结束，但同 Run 的 frozen Inventory 未完整匹配来源目录。"
+      : "最近一次资源导入批次失败或被安全门禁阻断。",
+    { ...(lastJobId ? { lastJobId } : {}) },
   );
 }
 
-function inventoryEvidence(
-  inventory: NonNullable<Awaited<ReturnType<NpkService["findLatest"]>>>,
-): Pick<ResourceImportOverview, "resourceVersion" | "lastImportedAt"> {
+/** 核对来源 ID、摘要和数量，禁止用同 Run 任意一条 Inventory 冒充整批成功。 */
+function inspectInventoryBatch(
+  inventories: Awaited<ReturnType<NpkService["findAllByRun"]>>,
+  sourceCatalog: ResourceImportSourceCatalog,
+): { complete: boolean; lastImportedAt?: string } {
+  const expected = new Map(
+    sourceCatalog.sources.map((source) => [
+      source.sourceId,
+      source.sourceSha256.toUpperCase(),
+    ]),
+  );
+  const seen = new Set<string>();
+  let lastImportedAt: string | undefined;
+  for (const inventory of inventories) {
+    if (
+      inventory.sourceId === undefined ||
+      seen.has(inventory.sourceId) ||
+      expected.get(inventory.sourceId) !== inventory.sourceSha256.toUpperCase()
+    ) {
+      return { complete: false };
+    }
+    seen.add(inventory.sourceId);
+    if (
+      lastImportedAt === undefined ||
+      inventory.createdAtUtc > lastImportedAt
+    ) {
+      lastImportedAt = inventory.createdAtUtc;
+    }
+  }
   return {
-    resourceVersion: inventory.sourceSha256,
-    lastImportedAt: inventory.createdAtUtc,
+    complete:
+      inventories.length === expected.size && seen.size === expected.size,
+    ...(lastImportedAt === undefined ? {} : { lastImportedAt }),
   };
 }
 
@@ -350,16 +412,22 @@ function notConfiguredOverview(message: string): ResourceImportOverview {
   };
 }
 
-function toResourceImportJob(job: JobStateView): ResourceImportJob {
+function toResourceImportJob(jobs: readonly JobStateView[]): ResourceImportJob {
+  const job = jobs[0];
+  if (job === undefined) {
+    throw new ConflictException({
+      code: "RESOURCE_IMPORT_JOB_NOT_CREATED",
+      message: "资源导入批次没有可用 Job。",
+    });
+  }
   return {
     id: job.id,
     mode: "server-mirror",
-    status:
-      job.status === "queued"
+    status: jobs.some((candidate) => candidate.status === "leased")
+      ? "running"
+      : jobs.some((candidate) => candidate.status === "queued")
         ? "queued"
-        : job.status === "leased"
-          ? "running"
-          : "failed",
+        : "failed",
     createdAt: job.createdAtUtc,
   };
 }

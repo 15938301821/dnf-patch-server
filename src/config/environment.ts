@@ -15,6 +15,7 @@
  */
 import { z } from "zod";
 import { resolveOpenAiEndpoint } from "./openai-endpoint.js";
+import { resourceImportSourceCatalogJsonSchema } from "./resource-import-source-catalog.js";
 
 /** 限制 HTTP 监听到本机回环接口，避免服务因环境误配暴露到局域网或公网。 */
 const loopbackHostSchema = z.enum(["127.0.0.1", "::1", "localhost"]);
@@ -125,6 +126,9 @@ export const environmentSchema = z
     RESOURCE_IMPORT_PROJECT_ID: z.uuid().optional(),
     /** 镜像导入来源 Snapshot UUID；不能脱离同组 Project 单独授权导入。 */
     RESOURCE_IMPORT_SNAPSHOT_ID: z.uuid().optional(),
+    /** 仅含 sourceId 与 SHA-256 的多来源逻辑目录；严格拒绝本机路径和未知字段。 */
+    RESOURCE_IMPORT_SOURCE_CATALOG_JSON:
+      resourceImportSourceCatalogJsonSchema.optional(),
     /** 是否启用私有 Artifact 对象存储；关闭时不得构造 S3 客户端或默认凭据链。 */
     OBJECT_STORAGE_ENABLED: z
       .enum(["true", "false"])
@@ -295,12 +299,15 @@ export const environmentSchema = z
     // 步骤 2：镜像导入开关只能与固定 Project/Snapshot 组合启用，禁止凭目录名猜测归属。
     if (
       value.RESOURCE_IMPORT_SERVER_MIRROR_ENABLED &&
-      (!value.RESOURCE_IMPORT_PROJECT_ID || !value.RESOURCE_IMPORT_SNAPSHOT_ID)
+      (!value.RESOURCE_IMPORT_PROJECT_ID ||
+        !value.RESOURCE_IMPORT_SNAPSHOT_ID ||
+        !value.RESOURCE_IMPORT_SOURCE_CATALOG_JSON)
     ) {
       context.addIssue({
         code: "custom",
         path: ["RESOURCE_IMPORT_PROJECT_ID"],
-        message: "启用资源镜像导入时必须配置 Project 与 Snapshot UUID。",
+        message:
+          "启用资源镜像导入时必须配置 Project、Snapshot 与逻辑来源目录。",
       });
     }
     // 步骤 3：对象存储凭据必须成对、启用时必填，并与全部服务认证秘密保持不同。

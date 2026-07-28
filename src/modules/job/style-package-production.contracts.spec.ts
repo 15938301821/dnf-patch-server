@@ -100,6 +100,14 @@ describe("style package production V3 contracts", () => {
       stylePackageContextV3Schema.safeParse(repeatedEvidence).success,
     ).toBe(false);
 
+    const missingSource = validContext() as unknown as {
+      skills: Array<Record<string, unknown>>;
+    };
+    delete missingSource.skills[0]?.sourceSha256;
+    expect(stylePackageContextV3Schema.safeParse(missingSource).success).toBe(
+      false,
+    );
+
     const elevatedSafety = validContext() as unknown as Record<string, unknown>;
     elevatedSafety.safety = {
       deploymentAuthorized: true,
@@ -212,6 +220,7 @@ function validContext(): StylePackageContextV3 {
     skills: [
       {
         skillId: ids.skill,
+        sourceSha256: sha("3"),
         promptSha256: sha("4"),
         productionAttempt: 1,
         projectBundle: {

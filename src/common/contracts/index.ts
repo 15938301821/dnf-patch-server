@@ -12,9 +12,11 @@
 
 /** 导出 ID、哈希、有界 JSON、显示名与仓库相对路径的运行时输入边界。 */
 export {
+  boundedJobPayloadRecordSchema,
   boundedJsonRecordSchema,
   clientIdSchema,
   idSchema,
+  jobPayloadMaxBytes,
   repositoryRelativePathSchema,
   safeDisplayNameSchema,
   sha256Schema,

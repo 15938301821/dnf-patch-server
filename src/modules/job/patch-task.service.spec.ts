@@ -39,6 +39,8 @@ const packageEnvironment: Record<string, string> = {
 describe("PatchTaskService", () => {
   const patchTasks = {
     list: vi.fn(),
+    findDetail: vi.fn(),
+    findReferenceImage: vi.fn(),
     createPlan: vi.fn(),
     findArtifact: vi.fn(),
     findArtifacts: vi.fn(),
@@ -171,76 +173,6 @@ describe("PatchTaskService", () => {
       ],
       "dispatch",
     );
-  });
-
-  it("authorizes only a fixed role from the current owner's complete Package artifacts", async () => {
-    const packageArtifacts = [
-      {
-        artifactId: crypto.randomUUID(),
-        role: "candidate" as const,
-        artifactName: "candidate.npk",
-        mediaType: "application/octet-stream",
-        byteLength: 200,
-        sha256: "A".repeat(64),
-      },
-      {
-        artifactId: crypto.randomUUID(),
-        role: "manifest" as const,
-        artifactName: "manifest.json",
-        mediaType: "application/json",
-        byteLength: 100,
-        sha256: "B".repeat(64),
-      },
-      {
-        artifactId: crypto.randomUUID(),
-        role: "validation" as const,
-        artifactName: "validation.json",
-        mediaType: "application/json",
-        byteLength: 300,
-        sha256: "C".repeat(64),
-      },
-    ];
-    patchTasks.findArtifacts.mockResolvedValue(packageArtifacts);
-    artifacts.authorizeRunArtifactDownload.mockResolvedValue({
-      artifactId: packageArtifacts[2]?.artifactId,
-      downloadUrl: "http://127.0.0.1:9000/download",
-      expiresAtUtc: "2026-07-25T12:05:00.000Z",
-    });
-
-    await expect(
-      service.authorizeArtifactDownload(
-        "66666666-6666-4666-8666-666666666666",
-        "validation",
-        ownerUserId,
-      ),
-    ).resolves.toMatchObject({
-      role: "validation",
-      downloadUrl: "http://127.0.0.1:9000/download",
-    });
-    expect(patchTasks.findArtifacts).toHaveBeenCalledWith(
-      "66666666-6666-4666-8666-666666666666",
-      ownerUserId,
-    );
-    expect(artifacts.authorizeRunArtifactDownload).toHaveBeenCalledWith(
-      "66666666-6666-4666-8666-666666666666",
-      packageArtifacts[2]?.artifactId,
-      "validation.json",
-    );
-  });
-
-  it("does not sign a partial Package artifact set", async () => {
-    patchTasks.findArtifacts.mockResolvedValue(undefined);
-
-    await expect(
-      service.authorizeArtifactDownload(
-        "66666666-6666-4666-8666-666666666666",
-        "candidate",
-        ownerUserId,
-      ),
-    ).rejects.toMatchObject({
-      response: { code: "PATCH_TASK_ARTIFACTS_NOT_READY" },
-    });
-    expect(artifacts.authorizeRunArtifactDownload).not.toHaveBeenCalled();
   });
 
   it("uses the Factory v3 profession contract profile for the frozen payload", async () => {

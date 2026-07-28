@@ -9,13 +9,17 @@ import { Injectable } from "@nestjs/common";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { DatabaseService } from "../../common/db/database.service.js";
 import { modelCalls } from "../../common/db/schema.js";
-import type { ModelCallView } from "./openai.contracts.js";
+import type { ModelCallView, ModelUsage } from "./openai.contracts.js";
 
 export interface ModelCallCompletion {
   status: "passed" | "failed";
   responseSha256?: string;
   responseId?: string;
   errorCode?: string;
+  /** Provider 完整返回并经适配层校验的计量；缺失时数据库保持 NULL。 */
+  usage?: ModelUsage;
+  /** 实际 Provider 调用耗时，单位毫秒；失败请求也可记录，未出站时不得填写。 */
+  providerLatencyMs?: number;
 }
 
 export interface OpenAiRepositoryPort {
@@ -85,6 +89,16 @@ export class OpenAiRepository implements OpenAiRepositoryPort {
           : {}),
         ...(completion.responseId ? { responseId: completion.responseId } : {}),
         ...(completion.errorCode ? { errorCode: completion.errorCode } : {}),
+        ...(completion.usage
+          ? {
+              inputTokens: completion.usage.inputTokens,
+              outputTokens: completion.usage.outputTokens,
+              totalTokens: completion.usage.totalTokens,
+            }
+          : {}),
+        ...(completion.providerLatencyMs !== undefined
+          ? { providerLatencyMs: completion.providerLatencyMs }
+          : {}),
       })
       .where(and(eq(modelCalls.id, id), eq(modelCalls.status, "running")));
     return result[0].affectedRows === 1;

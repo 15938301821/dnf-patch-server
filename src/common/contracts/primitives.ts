@@ -12,6 +12,14 @@
  */
 import { z } from "zod";
 
+const boundedJsonRecordMaxBytes = 64 * 1024;
+/** Job 可携带最多 500 个技能及其冻结来源证据；仍低于 Fastify 默认请求体上限并受节点/深度约束。 */
+export const jobPayloadMaxBytes = 256 * 1024;
+const boundedJsonRecordBaseSchema = z.record(
+  z.string().min(1).max(128),
+  z.json(),
+);
+
 /** 校验由 API、数据库或内部契约生产的 UUID 标识，不推断实体归属。 */
 export const idSchema = z.uuid();
 /** 校验客户端生成的有界稳定 ID，供幂等或外部引用使用，禁止空段和任意符号。 */
@@ -26,23 +34,29 @@ export const sha256Schema = z.string().regex(/^[A-Fa-f0-9]{64}$/u);
  * 限制开放 JSON 记录的键长、UTF-8 编码体积、嵌套深度与节点数。
  * 生产方包括 HTTP DTO 与数据库 JSON，消费方只能在本 schema 成功后遍历该值。
  */
-export const boundedJsonRecordSchema = z
-  .record(z.string().min(1).max(128), z.json())
-  .superRefine((value, context) => {
-    // 先限制序列化体积，再限制结构复杂度，防止小字符串承载极深或海量节点。
-    const encoded = JSON.stringify(value);
-    if (Buffer.byteLength(encoded, "utf8") > 65_536) {
-      context.addIssue({
-        code: "custom",
-        message: "JSON 对象不能超过 64 KiB。",
-      });
-    }
-    if (exceedsJsonBudget(value, 16, 10_000)) {
-      context.addIssue({
-        code: "custom",
-        message: "JSON 对象层级或节点数量超过限制。",
-      });
-    }
+export const boundedJsonRecordSchema = boundedJsonRecordBaseSchema.superRefine(
+  (value, context) => {
+    addJsonBudgetIssues(
+      value,
+      context,
+      boundedJsonRecordMaxBytes,
+      "JSON 对象不能超过 64 KiB。",
+    );
+  },
+);
+
+/**
+ * Run/Job 边界使用的有界 JSON；比通用 provenance 预算大，用于容纳多技能的冻结 Entry 证据。
+ * 该 schema 不放宽节点数、嵌套深度或声明式安全检查，超过 256 KiB 仍会失败关闭。
+ */
+export const boundedJobPayloadRecordSchema =
+  boundedJsonRecordBaseSchema.superRefine((value, context) => {
+    addJsonBudgetIssues(
+      value,
+      context,
+      jobPayloadMaxBytes,
+      "Job JSON 不能超过 256 KiB。",
+    );
   });
 /** 校验可展示名称并拒绝路径保留字符和控制字符，避免日志、UI 与文件语义混淆。 */
 export const safeDisplayNameSchema = z
@@ -85,6 +99,25 @@ function hasUnsafeDisplayNameCharacter(value: string): boolean {
     const codePoint = character.codePointAt(0);
     return codePoint !== undefined && codePoint <= 0x1f;
   });
+}
+
+/** 为不同用途的 JSON 记录应用相同深度/节点限制和用途级字节上限。 */
+function addJsonBudgetIssues(
+  value: Record<string, unknown>,
+  context: z.RefinementCtx,
+  maxBytes: number,
+  byteMessage: string,
+): void {
+  // 先限制序列化体积，再限制结构复杂度，防止小字符串承载极深或海量节点。
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > maxBytes) {
+    context.addIssue({ code: "custom", message: byteMessage });
+  }
+  if (exceedsJsonBudget(value, 16, 10_000)) {
+    context.addIssue({
+      code: "custom",
+      message: "JSON 对象层级或节点数量超过限制。",
+    });
+  }
 }
 
 /**

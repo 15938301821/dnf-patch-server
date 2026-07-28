@@ -104,6 +104,7 @@ export class OpenAiService {
     if (guardedRecord.status === "failed") return { record: guardedRecord };
     const egressRecord = await this.beginEgress(record);
     if (egressRecord.status === "failed") return { record: egressRecord };
+    const providerStartedAt = performance.now();
     try {
       const response = await this.provider.structured(
         {
@@ -124,6 +125,8 @@ export class OpenAiService {
             id: response.responseId,
             output: response.value,
           }),
+          ...(response.usage ? { usage: response.usage } : {}),
+          providerLatencyMs: elapsedProviderMs(providerStartedAt),
         }),
       };
     } catch (error) {
@@ -131,6 +134,7 @@ export class OpenAiService {
         record: await this.finishRecord(egressRecord, {
           status: "failed",
           errorCode: classifyModelError(error),
+          providerLatencyMs: elapsedProviderMs(providerStartedAt),
         }),
       };
     }
@@ -169,8 +173,9 @@ export class OpenAiService {
     if (guardedRecord.status === "failed") return { record: guardedRecord };
     const egressRecord = await this.beginEgress(record);
     if (egressRecord.status === "failed") return { record: egressRecord };
+    const providerStartedAt = performance.now();
     try {
-      const bytes = await this.provider.image(
+      const response = await this.provider.image(
         {
           model: context.model,
           prompt: request.prompt,
@@ -178,10 +183,12 @@ export class OpenAiService {
         context.provider,
       );
       return {
-        bytes,
+        bytes: response.bytes,
         record: await this.finishRecord(egressRecord, {
           status: "passed",
-          responseSha256: sha256Bytes(bytes),
+          responseSha256: sha256Bytes(response.bytes),
+          ...(response.usage ? { usage: response.usage } : {}),
+          providerLatencyMs: elapsedProviderMs(providerStartedAt),
         }),
       };
     } catch (error) {
@@ -189,6 +196,7 @@ export class OpenAiService {
         record: await this.finishRecord(egressRecord, {
           status: "failed",
           errorCode: classifyModelError(error),
+          providerLatencyMs: elapsedProviderMs(providerStartedAt),
         }),
       };
     }
@@ -363,6 +371,14 @@ function configurationRoleFor(role: ModelRole): ConfigurationRole {
 
 function sha256Bytes(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex").toUpperCase();
+}
+
+/**
+ * 把单调时钟差转换为可持久化的正整数毫秒。
+ * 极快的测试替身也至少记为 1ms，避免后续吞吐计算出现除零；该值不包含数据库写入时间。
+ */
+function elapsedProviderMs(startedAt: number): number {
+  return Math.max(1, Math.ceil(performance.now() - startedAt));
 }
 
 function classifyModelError(error: unknown): string {

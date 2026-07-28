@@ -53,6 +53,8 @@ import {
   type PatchTaskArtifactDownloadView,
   type PatchTaskArtifactRole,
   type PatchTaskArtifactView,
+  type PatchTaskDetailView,
+  type PatchTaskReferenceImageDownloadView,
   type PatchTaskView,
   type ReportPatchTaskPackageInput,
   type ReportPatchTaskSkillProductionInput,
@@ -94,6 +96,44 @@ export class PatchTaskController {
   ): Promise<{ data: PatchTaskView[] }> {
     const user = await this.auth.requireBrowserUser(authorization);
     return { data: await this.patchTasks.list(user.id) };
+  }
+
+  /**
+   * 返回当前认证用户拥有的一项制作任务详情。
+   * @param id path 中经 UUID schema 校验的 Run/任务标识。
+   * @param authorization 浏览器 Bearer token；Service/Repository 继续执行稳定用户所有权检查。
+   * @returns `{ data }` 封装的阶段、技能与模型吞吐 ViewModel，不含 Prompt、租约、对象 key 或 URL。
+   */
+  @Get(":id")
+  async detail(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: PatchTaskDetailView }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return { data: await this.patchTasks.findDetail(id, user.id) };
+  }
+
+  /**
+   * 为当前用户任务中一个固定技能的模型参考图签发短期读取授权。
+   * @param id path 中已校验的任务 UUID。
+   * @param skillId path 中已校验的技能 UUID；接口不接受 Artifact ID 或对象 key。
+   * @param authorization 浏览器 Access Token；Service/Repository 继续复核 Run 所有权和当前 attempt。
+   * @returns PNG 元数据与有限期 URL；URL 不表示图片可直接作为游戏 runtime 帧。
+   */
+  @Post(":id/skills/:skillId/reference-image/download-authorization")
+  async authorizeReferenceImageDownload(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+    @Param("skillId", new ZodValidationPipe(idSchema)) skillId: string,
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: PatchTaskReferenceImageDownloadView }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return {
+      data: await this.patchTasks.authorizeReferenceImageDownload(
+        id,
+        skillId,
+        user.id,
+      ),
+    };
   }
 
   /**

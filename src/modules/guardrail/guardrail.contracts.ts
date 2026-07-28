@@ -16,7 +16,7 @@
  */
 import { z } from "zod";
 import {
-  boundedJsonRecordSchema,
+  boundedJobPayloadRecordSchema,
   clientIdSchema,
   sha256Schema,
 } from "../../common/contracts/index.js";
@@ -66,7 +66,7 @@ export const guardrailInputSchema = z
     policyId: clientIdSchema,
     policySha256: sha256Schema,
     jobKind: allowedJobKindSchema,
-    payload: boundedJsonRecordSchema,
+    payload: boundedJobPayloadRecordSchema,
     deploymentAuthorized: z.literal(false).default(false),
   })
   .strict();
@@ -102,16 +102,15 @@ export function containsUnsafeDeclarativeField(value: unknown): boolean {
  * 供版本化 Job contract 复用的有界声明式 parameters schema。
  * 除 JSON 大小/深度预算外，superRefine 还拒绝任意执行入口；解析成功不代表资源映射或 Worker 可用。
  */
-export const declarativeParametersSchema = boundedJsonRecordSchema.superRefine(
-  (value, context) => {
+export const declarativeParametersSchema =
+  boundedJobPayloadRecordSchema.superRefine((value, context) => {
     if (containsUnsafeDeclarativeField(value)) {
       context.addIssue({
         code: "custom",
         message: "任务参数不能包含执行入口或不安全路径。",
       });
     }
-  },
-);
+  });
 
 /**
  * GuardrailService 在内存中生成的确定性评估结果。

@@ -45,6 +45,7 @@ interface SourceContextRepositoryHarness {
 interface SourceRowFixture {
   runId: string;
   inventoryId: string;
+  sourceId: string | null;
   sourceByteLength: number;
   sourceSha256: string;
   manifestArtifactId: string;
@@ -55,6 +56,7 @@ interface SourceRowFixture {
   manifestProvenance: {
     schemaVersion: 1;
     kind: "source-frame-manifest";
+    sourceId: string;
     sourceSha256: string;
     toolSha256: string;
     jobPayloadSha256: string;
@@ -82,11 +84,12 @@ describe("ProfessionSourceContextRepository.resolveSkillSourceContext", () => {
     ).resolves.toEqual({
       status: "accepted",
       context: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         skillId,
         source: {
           runId: sourceRunId,
           inventoryId: sourceInventoryId,
+          sourceId: "momentaryslash",
           byteLength: 956_090,
           sha256: sourceSha256,
         },
@@ -135,6 +138,23 @@ describe("ProfessionSourceContextRepository.resolveSkillSourceContext", () => {
         manifestProvenance: {
           ...validSourceRow().manifestProvenance,
           sourceSha256: "F".repeat(64),
+        },
+      },
+    });
+
+    await expect(
+      harness.repository.resolveSkillSourceContext(jobId, request()),
+    ).resolves.toEqual({ status: "source-evidence-mismatch" });
+    expect(harness.select).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects a manifest Artifact bound to another logical source", async () => {
+    const harness = repositoryHarness({
+      sourceRow: {
+        ...validSourceRow(),
+        manifestProvenance: {
+          ...validSourceRow().manifestProvenance,
+          sourceId: "another-source",
         },
       },
     });
@@ -218,6 +238,7 @@ function validSourceRow(): SourceRowFixture {
   return {
     runId: sourceRunId,
     inventoryId: sourceInventoryId,
+    sourceId: "momentaryslash",
     sourceByteLength: 956_090,
     sourceSha256,
     manifestArtifactId,
@@ -228,6 +249,7 @@ function validSourceRow(): SourceRowFixture {
     manifestProvenance: {
       schemaVersion: 1,
       kind: "source-frame-manifest",
+      sourceId: "momentaryslash",
       sourceSha256,
       toolSha256,
       jobPayloadSha256: "1".repeat(64),

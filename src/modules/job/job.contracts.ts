@@ -15,7 +15,7 @@
  * failed/blocked 必须提供稳定错误码。leaseId 对首 attempt 可暂缺以兼容 v1，重试由 lease validator 强制升级。
  */
 import { z } from "zod";
-import { boundedJsonRecordSchema } from "../../common/contracts/index.js";
+import { boundedJobPayloadRecordSchema } from "../../common/contracts/index.js";
 import { allowedJobKindSchema } from "../guardrail/guardrail.contracts.js";
 
 /**
@@ -37,7 +37,7 @@ export const persistedJobStatusSchema = z.enum([
 export const createJobSchema = z
   .object({
     kind: allowedJobKindSchema,
-    payload: boundedJsonRecordSchema,
+    payload: boundedJobPayloadRecordSchema,
     maxAttempts: z.number().int().min(1).max(10).default(3),
   })
   .strict();

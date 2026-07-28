@@ -315,6 +315,8 @@ export const npkInventories = mysqlTable(
       .notNull()
       .references(() => projects.id, { onDelete: "restrict" }),
     runId: id("run_id").notNull(),
+    /** Inventory v2 稳定逻辑来源；历史/v1 为 null，不保存本机路径。 */
+    sourceId: varchar("source_id", { length: 120 }),
     sourceLabel: varchar("source_label", { length: 200 }).notNull(),
     sourceLength: int("source_length", { unsigned: true }).notNull(),
     sourceSha256: sha256("source_sha256").notNull(),
@@ -328,6 +330,10 @@ export const npkInventories = mysqlTable(
   (table) => [
     index("npk_inventories_project_idx").on(table.projectId),
     uniqueIndex("npk_inventories_run_id_uq").on(table.runId, table.id),
+    uniqueIndex("npk_inventories_run_source_uq").on(
+      table.runId,
+      table.sourceId,
+    ),
     foreignKey({
       columns: [table.projectId, table.runId],
       foreignColumns: [runs.projectId, runs.id],
@@ -388,6 +394,12 @@ export const modelCalls = mysqlTable(
     modelEgressPerformed: boolean("model_egress_performed")
       .notNull()
       .default(false),
+    /** Provider usage 三项必须成组存在；NULL 表示端点未提供可靠计量，不等于零 Token。 */
+    inputTokens: int("input_tokens", { unsigned: true }),
+    outputTokens: int("output_tokens", { unsigned: true }),
+    totalTokens: int("total_tokens", { unsigned: true }),
+    /** 只覆盖实际 Provider 网络调用，单位毫秒；不包含数据库与 Artifact 持久化。 */
+    providerLatencyMs: int("provider_latency_ms", { unsigned: true }),
     errorCode: varchar("error_code", { length: 80 }),
     createdAt: utc("created_at").notNull(),
     finishedAt: utc("finished_at"),
@@ -406,6 +418,14 @@ export const modelCalls = mysqlTable(
     check(
       "model_calls_finished_ck",
       sql`(${table.status} = 'running' and ${table.finishedAt} is null) or (${table.status} <> 'running' and ${table.finishedAt} is not null)`,
+    ),
+    check(
+      "model_calls_usage_ck",
+      sql`(${table.inputTokens} is null and ${table.outputTokens} is null and ${table.totalTokens} is null) or (${table.inputTokens} is not null and ${table.outputTokens} is not null and ${table.totalTokens} is not null)`,
+    ),
+    check(
+      "model_calls_latency_ck",
+      sql`${table.providerLatencyMs} is null or ${table.providerLatencyMs} > 0`,
     ),
   ],
 );
@@ -462,31 +482,4 @@ export const guardrailDecisions = mysqlTable(
     createdAt: utc("created_at").notNull(),
   },
   (table) => [index("guardrail_run_idx").on(table.runId)],
-);
-/** ManualReview 保存 Run 的人工审核状态与可选同 Run 证据；审核 Service 生产、发布流程消费，approved 不等于 deploymentAuthorized 或 clientCompatibilityProven。 */
-export const manualReviews = mysqlTable(
-  "manual_reviews",
-  {
-    id: id("id").primaryKey(),
-    runId: id("run_id")
-      .notNull()
-      .references(() => runs.id, { onDelete: "restrict" }),
-    status: varchar("status", { length: 32 }).notNull(),
-    reviewer: varchar("reviewer", { length: 160 }),
-    evidenceArtifactId: id("evidence_artifact_id"),
-    createdAt: utc("created_at").notNull(),
-    completedAt: utc("completed_at"),
-  },
-  (table) => [
-    uniqueIndex("manual_reviews_run_uq").on(table.runId),
-    foreignKey({
-      columns: [table.runId, table.evidenceArtifactId],
-      foreignColumns: [artifacts.runId, artifacts.id],
-      name: "manual_reviews_evidence_artifact_run_fk",
-    }).onDelete("restrict"),
-    check(
-      "manual_reviews_status_ck",
-      sql`${table.status} in ('pending', 'approved', 'rejected')`,
-    ),
-  ],
 );

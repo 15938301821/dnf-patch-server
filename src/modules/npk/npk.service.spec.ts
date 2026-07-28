@@ -21,6 +21,7 @@ describe("NpkService evidence ownership", () => {
     list: vi.fn(),
     findLatest: vi.fn(),
     findByRun: vi.fn(),
+    findAllByRun: vi.fn(),
     findById: vi.fn(),
     findEntryEvidence: vi.fn(),
   };

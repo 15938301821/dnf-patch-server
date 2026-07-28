@@ -16,6 +16,8 @@ const sourceRunId = "55555555-5555-4555-8555-555555555555";
 describe("PatchTaskService worker-facing execution", () => {
   const patchTasks = {
     list: vi.fn(),
+    findDetail: vi.fn(),
+    findReferenceImage: vi.fn(),
     createPlan: vi.fn(),
     findArtifact: vi.fn(),
     findArtifacts: vi.fn(),

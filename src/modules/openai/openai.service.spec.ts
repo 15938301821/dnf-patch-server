@@ -118,6 +118,7 @@ describe("OpenAiService model evidence", () => {
     provider.structured.mockResolvedValue({
       responseId: "response-1",
       value: { accepted: true },
+      usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150 },
     });
 
     const result = await service.structured(structuredRequest());
@@ -149,7 +150,20 @@ describe("OpenAiService model evidence", () => {
       status: "passed",
       modelEgressPerformed: true,
       responseId: "response-1",
+      usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150 },
     });
+    expect(result.record.providerLatencyMs).toBeGreaterThan(0);
+    expect(calls.finish).toHaveBeenCalledWith(
+      pending?.id,
+      expect.objectContaining({
+        usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150 },
+      }),
+      expect.any(Date),
+    );
+    const structuredFinish = calls.finish.mock.calls[0]?.[1] as
+      | ModelCallView
+      | undefined;
+    expect(structuredFinish?.providerLatencyMs).toBeGreaterThan(0);
     expect(result.value).toEqual({ accepted: true });
   });
 
@@ -189,6 +203,7 @@ describe("OpenAiService model evidence", () => {
       modelEgressPerformed: true,
       errorCode: "MODEL_PROVIDER_REQUEST_FAILED",
     });
+    expect(result.record.providerLatencyMs).toBeGreaterThan(0);
   });
 
   it("在图片出站前持久化执行绑定，门禁拒绝时零 Provider 调用", async () => {
@@ -219,7 +234,10 @@ describe("OpenAiService model evidence", () => {
 
   it("只有图片出站门禁接受后才标记 performed 并调用 Provider", async () => {
     const beforeEgress = vi.fn().mockResolvedValue("accepted");
-    provider.image.mockResolvedValue(Buffer.from("png"));
+    provider.image.mockResolvedValue({
+      bytes: Buffer.from("png"),
+      usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
+    });
 
     const result = await service.image(
       {
@@ -235,8 +253,13 @@ describe("OpenAiService model evidence", () => {
     expect(provider.image).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       bytes: Buffer.from("png"),
-      record: { status: "passed", modelEgressPerformed: true },
+      record: {
+        status: "passed",
+        modelEgressPerformed: true,
+        usage: { inputTokens: 80, outputTokens: 40, totalTokens: 120 },
+      },
     });
+    expect(result.record.providerLatencyMs).toBeGreaterThan(0);
   });
 });
 

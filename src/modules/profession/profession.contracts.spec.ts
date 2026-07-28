@@ -74,7 +74,49 @@ describe("profession style contracts", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts an explicitly selected Inventory Entry subset", () => {
+    const input = skillCatalogImport("selected-entries");
+
+    expect(
+      importProfessionSkillCatalogSchema.parse(input).skills[0],
+    ).toMatchObject({
+      sourceScope: "selected-entries",
+      promptStatus: "candidate",
+    });
+  });
+
+  it("rejects an unknown skill source scope", () => {
+    expect(
+      importProfessionSkillCatalogSchema.safeParse(
+        skillCatalogImport("unverified-scope"),
+      ).success,
+    ).toBe(false);
+  });
 });
+
+function skillCatalogImport(sourceScope: string): unknown {
+  return {
+    workflowProjectId: "22222222-2222-4222-8222-222222222222",
+    catalogSnapshotId: "33333333-3333-4333-8333-333333333333",
+    sourceRunId: "44444444-4444-4444-8444-444444444444",
+    skills: [
+      {
+        stableKey: "momentaryslash",
+        displayName: "momentaryslash",
+        sourceScope,
+        sourceInventoryId: "55555555-5555-4555-8555-555555555555",
+        sourceEntries: [
+          {
+            sourceInventoryEntryId: skillId,
+            sourceMetadataSha256: "B".repeat(64),
+          },
+        ],
+        sourceFrameManifestArtifactId: "66666666-6666-4666-8666-666666666666",
+      },
+    ],
+  };
+}
 
 function draft(): SaveProfessionStyleInput {
   return {
