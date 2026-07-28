@@ -9,9 +9,10 @@
  * payload/profile 摘要，把 Run/Package 重排为 queued，并追加 RunEvent/outbox。历史
  * job_attempts、style_package_attempt_evidences、Artifact 和上传会话均只读不改。
  *
- * 安全边界：必须证明四项安全位全 false、Profession 已 passed、Package 当前 blocked 且无
- * lease、1..N attempts 与 evidences 一一匹配、最新错误码匹配、无 Package 三产物输出、技能
- * evidence 完整。任一事实漂移都整体回滚；恢复不授权部署，也不证明全技能覆盖或客户端兼容。
+ * 安全边界：必须证明四项安全位全 false、Profession 已 passed、Package 当前 failed/blocked
+ * 且无 lease、1..N attempts 与 evidences 一一匹配、三段 profile epoch 和两次历史迁移事件
+ * 精确一致、最新错误码匹配、无 Package 三产物输出、技能 evidence 完整。任一事实漂移都
+ * 整体回滚；恢复不授权部署，也不证明全技能覆盖或客户端兼容。
  */
 import { randomUUID } from "node:crypto";
 import mysql from "mysql2/promise";
@@ -20,15 +21,16 @@ import {
   hasFalseSafety,
   jsonValue,
   mysqlUtcToIso,
+  parseCurrentProfileArguments,
   requiredDatabaseUrl,
   requireDatabaseTime,
   sha256JcsV1,
   sha256LegacyJson,
+  stableCodePattern,
   stableErrorCode,
+  targetMaxAttempts,
 } from "./recover-style-package-profile-support.mjs";
 
-const targetMaxAttempts = 10;
-const stableCodePattern = /^[A-Z][A-Z0-9_]{0,79}$/u;
 const packageLogicalNames = [
   "candidate.npk",
   "package-manifest.json",
@@ -43,7 +45,7 @@ try {
 }
 
 async function main() {
-  const input = parseArguments(process.argv.slice(2));
+  const input = parseCurrentProfileArguments(process.argv.slice(2));
   const database = await mysql.createConnection({
     uri: requiredDatabaseUrl(process.env.DATABASE_URL),
     dateStrings: true,
@@ -59,7 +61,7 @@ async function main() {
 /**
  * 锁定完整恢复边界并预演或提交迁移。
  * @param {import("mysql2/promise").Connection} database 当前 Server 数据库会话。
- * @param {{runId:string,expectedAttempt:number,expectedErrorCode:string,expectedProfileSha256:string,expectedInitialProfileSha256:string,packagerSha256:string,validatorSha256:string,apply:boolean}} input CLI 参数。
+ * @param {{runId:string,expectedAttempt:number,expectedErrorCode:string,expectedProfileSha256:string,expectedInitialProfileSha256:string,expectedIntermediateProfileSha256:string,packagerSha256:string,validatorSha256:string,apply:boolean}} input CLI 参数。
  */
 async function migrateCurrentProfile(database, input) {
   await database.beginTransaction();
@@ -70,13 +72,12 @@ async function migrateCurrentProfile(database, input) {
       [input.runId],
       "RUN_NOT_FOUND",
     );
-    requireRunSafety(run);
-
     const [jobRows] = await database.execute(
       "SELECT * FROM jobs WHERE run_id = ? ORDER BY kind FOR UPDATE",
       [input.runId],
     );
     const packageJob = requirePackageJob(jobRows, input.expectedAttempt);
+    requireRunSafety(run, packageJob.status);
     const packagePayload = requirePackagePayload(
       packageJob,
       input.expectedProfileSha256,
@@ -88,7 +89,7 @@ async function migrateCurrentProfile(database, input) {
       [input.runId],
       "STYLE_PACKAGE_NOT_FOUND",
     );
-    requireUnbuiltStylePackage(stylePackage, packagePayload);
+    requireUnbuiltStylePackage(stylePackage, packagePayload, packageJob.status);
 
     const [attempts] = await database.execute(
       "SELECT * FROM job_attempts WHERE job_id = ? ORDER BY attempt FOR UPDATE",
@@ -203,55 +204,13 @@ async function migrateCurrentProfile(database, input) {
   }
 }
 
-function parseArguments(arguments_) {
-  const apply = arguments_.includes("--apply");
-  const values = arguments_.filter((value) => value !== "--apply");
-  if (values.length !== 7) throw new Error("USAGE_INVALID");
-  const [
-    runId,
-    expectedAttemptText,
-    expectedErrorCode,
-    profileSha256,
-    initialProfileSha256,
-    packagerSha256,
-    validatorSha256,
-  ] = values;
-  const expectedAttempt = Number(expectedAttemptText);
-  if (!isUuid(runId)) throw new Error("RUN_ID_INVALID");
-  if (
-    !Number.isSafeInteger(expectedAttempt) ||
-    expectedAttempt < 2 ||
-    expectedAttempt >= targetMaxAttempts
-  ) {
-    throw new Error("EXPECTED_ATTEMPT_INVALID");
-  }
-  if (!stableCodePattern.test(expectedErrorCode)) {
-    throw new Error("EXPECTED_ERROR_CODE_INVALID");
-  }
-  for (const value of [profileSha256, initialProfileSha256, packagerSha256, validatorSha256]) {
-    if (!/^[A-F0-9]{64}$/iu.test(value)) throw new Error("SHA256_INVALID");
-  }
-  if (profileSha256.toUpperCase() === initialProfileSha256.toUpperCase()) {
-    throw new Error("PROFILE_SHA256_INVALID");
-  }
-  return {
-    runId: runId.toLowerCase(),
-    expectedAttempt,
-    expectedErrorCode,
-    expectedProfileSha256: profileSha256.toUpperCase(),
-    expectedInitialProfileSha256: initialProfileSha256.toUpperCase(),
-    packagerSha256: packagerSha256.toUpperCase(),
-    validatorSha256: validatorSha256.toUpperCase(),
-    apply,
-  };
-}
-
 function requirePackageJob(rows, expectedAttempt) {
   if (rows.length !== 2) throw new Error("RUN_JOB_CARDINALITY_INVALID");
   const professionJob = rows.find((row) => row.kind === "profession");
   const packageJob = rows.find((row) => row.kind === "npk-package");
   if (!professionJob || !packageJob) throw new Error("RUN_JOB_KINDS_INVALID");
-  if (professionJob.status !== "passed") throw new Error("PROFESSION_JOB_NOT_PASSED");
+  if (professionJob.status !== "passed")
+    throw new Error("PROFESSION_JOB_NOT_PASSED");
   const leaseEmpty = [
     packageJob.lease_owner_id,
     packageJob.lease_id,
@@ -259,7 +218,7 @@ function requirePackageJob(rows, expectedAttempt) {
   ].every((value) => value === null);
   const maxAttempts = Number(packageJob.max_attempts);
   if (
-    packageJob.status !== "blocked" ||
+    !["blocked", "failed"].includes(packageJob.status) ||
     Number(packageJob.attempt_count) !== expectedAttempt ||
     !Number.isSafeInteger(maxAttempts) ||
     maxAttempts < expectedAttempt ||
@@ -288,7 +247,8 @@ function requirePackagePayload(job, expectedProfileSha256) {
     !Array.isArray(parameters?.selectedSkillIds) ||
     parameters.selectedSkillIds.length < 1 ||
     parameters.selectedSkillIds.length > 500 ||
-    new Set(parameters.selectedSkillIds).size !== parameters.selectedSkillIds.length
+    new Set(parameters.selectedSkillIds).size !==
+      parameters.selectedSkillIds.length
   ) {
     throw new Error("PACKAGE_JOB_PAYLOAD_INVALID");
   }
@@ -305,9 +265,9 @@ function requirePackagePayload(job, expectedProfileSha256) {
   return payload;
 }
 
-function requireUnbuiltStylePackage(stylePackage, payload) {
+function requireUnbuiltStylePackage(stylePackage, payload, expectedStatus) {
   if (
-    stylePackage.status !== "blocked" ||
+    stylePackage.status !== expectedStatus ||
     stylePackage.package_artifact_id !== null ||
     stylePackage.manifest_sha256 !== null ||
     stylePackage.finished_at === null ||
@@ -332,7 +292,9 @@ function requirePreservedAttempts(packageJob, attempts, evidences, input) {
     const expectedEvidenceProfileSha256 =
       attemptNumber === 1
         ? input.expectedInitialProfileSha256
-        : input.expectedProfileSha256;
+        : attemptNumber === input.expectedAttempt
+          ? input.expectedProfileSha256
+          : input.expectedIntermediateProfileSha256;
     const blockedAttempt =
       attempt?.status === "blocked" &&
       stableCodePattern.test(attempt.error_code ?? "") &&
@@ -345,15 +307,22 @@ function requirePreservedAttempts(packageJob, attempts, evidences, input) {
       evidence?.status === "building" &&
       evidence.error_code === null &&
       evidence.finished_at === null;
+    const failedAttempt =
+      attempt?.status === "failed" &&
+      stableCodePattern.test(attempt.error_code ?? "") &&
+      evidence?.status === "failed" &&
+      evidence.error_code === attempt.error_code &&
+      evidence.finished_at !== null;
     if (
       Number(attempt?.attempt) !== attemptNumber ||
       attempt.finished_at === null ||
       Number(evidence?.attempt) !== attemptNumber ||
       evidence.job_id !== packageJob.id ||
-      (!blockedAttempt && !timedOutAttempt) ||
+      (!blockedAttempt && !timedOutAttempt && !failedAttempt) ||
       evidence.worker_id !== attempt.worker_id ||
       evidence.lease_id !== attempt.lease_id ||
-      evidence.package_profile_sha256.toUpperCase() !== expectedEvidenceProfileSha256 ||
+      evidence.package_profile_sha256.toUpperCase() !==
+        expectedEvidenceProfileSha256 ||
       hasAnyPackageOutput(evidence) ||
       !hasFalseSafety(jsonValue(evidence.safety))
     ) {
@@ -361,9 +330,9 @@ function requirePreservedAttempts(packageJob, attempts, evidences, input) {
     }
   }
   if (
-    attempts.at(-1).status !== "blocked" ||
+    attempts.at(-1).status !== packageJob.status ||
     attempts.at(-1).error_code !== input.expectedErrorCode ||
-    evidences.at(-1).status !== "blocked" ||
+    evidences.at(-1).status !== packageJob.status ||
     evidences.at(-1).error_code !== input.expectedErrorCode
   ) {
     throw new Error("PACKAGE_LATEST_ERROR_MISMATCH");
@@ -372,19 +341,49 @@ function requirePreservedAttempts(packageJob, attempts, evidences, input) {
 
 async function requirePriorProfileMigrationAudit(database, input) {
   const [rows] = await database.execute(
-    "SELECT level, stage, message FROM run_events WHERE run_id = ? AND message LIKE 'Package attempt 1%' FOR UPDATE",
+    "SELECT level, stage, message FROM run_events WHERE run_id = ? AND message LIKE '%工具 profile 从%' FOR UPDATE",
     [input.runId],
   );
-  const matches = rows.filter(
-    (row) =>
-      row.level === "warning" &&
-      row.stage === "queued" &&
-      row.message.includes(`profile 从 ${input.expectedInitialProfileSha256}`) &&
-      row.message.includes(`迁移到 ${input.expectedProfileSha256}`) &&
-      row.message.includes("已开放 attempt 2") &&
-      row.message.includes("部署保持禁用"),
+  const firstMigration = rows.filter((row) =>
+    isProfileMigrationEvent(
+      row,
+      input.expectedInitialProfileSha256,
+      input.expectedIntermediateProfileSha256,
+      2,
+    ),
   );
-  if (matches.length !== 1) throw new Error("PACKAGE_PROFILE_MIGRATION_AUDIT_INVALID");
+  const secondMigration = rows.filter((row) =>
+    isProfileMigrationEvent(
+      row,
+      input.expectedIntermediateProfileSha256,
+      input.expectedProfileSha256,
+      input.expectedAttempt,
+    ),
+  );
+  if (
+    rows.length !== 2 ||
+    firstMigration.length !== 1 ||
+    secondMigration.length !== 1
+  ) {
+    throw new Error("PACKAGE_PROFILE_MIGRATION_AUDIT_INVALID");
+  }
+}
+
+/** 历史事件必须同时绑定旧/新完整 SHA、开放轮次和部署禁用声明。 */
+function isProfileMigrationEvent(
+  row,
+  oldProfileSha256,
+  newProfileSha256,
+  nextAttempt,
+) {
+  return (
+    row.level === "warning" &&
+    row.stage === "queued" &&
+    row.message.includes(`profile 从 ${oldProfileSha256}`) &&
+    row.message.includes(`迁移到 ${newProfileSha256}`) &&
+    row.message.includes(`已开放 attempt ${nextAttempt}`) &&
+    row.message.includes("部署保持禁用")
+  );
 }
 
 function hasAnyPackageOutput(evidence) {
@@ -427,17 +426,22 @@ async function requirePassedSkills(database, runId, expectedSkillIds) {
     byId.size !== rows.length ||
     expectedSkillIds.some((skillId) => {
       const row = byId.get(skillId);
-      return !row || row.status !== "passed" || row.errorCode !== null || row.finishedAt === null;
+      return (
+        !row ||
+        row.status !== "passed" ||
+        row.errorCode !== null ||
+        row.finishedAt === null
+      );
     })
   ) {
     throw new Error("PACKAGE_SKILL_EVIDENCE_INCOMPLETE");
   }
 }
 
-function requireRunSafety(run) {
+function requireRunSafety(run, expectedStatus) {
   if (
-    run.status !== "blocked" ||
-    run.current_stage !== "blocked" ||
+    run.status !== expectedStatus ||
+    run.current_stage !== expectedStatus ||
     run.finished_at === null ||
     !hasFalseSafety({
       deploymentAuthorized: Boolean(run.deployment_authorized),
@@ -485,10 +489,4 @@ async function requireSingleRow(database, statement, parameters, errorCode) {
   const [rows] = await database.execute(statement, parameters);
   if (rows.length !== 1) throw new Error(errorCode);
   return rows[0];
-}
-
-function isUuid(value) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-    value,
-  );
 }

@@ -15,22 +15,22 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { clientIdSchema, sha256Schema } from "../../common/contracts/index.js";
-import { artifactUploadSessions } from "../../common/db/artifact-schema.js";
 import type { DatabaseService } from "../../common/db/database.service.js";
 import { professionSkillModelExecutions } from "../../common/db/profession-model-execution-schema.js";
 import { artifacts, npkInventories } from "../../common/db/schema.js";
-import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import type { ReportPatchTaskSkillProductionInput } from "./patch-task.contracts.js";
-import {
-  professionSkillOutputProvenanceSchema,
-  type ProfessionSkillOutputProvenance,
-} from "./profession-skill-output-evidence.js";
+import type { ProfessionSkillOutputProvenance } from "./profession-skill-output-evidence.js";
 import type { FrozenProfessionSkillExecutionContext } from "./profession-execution-context.js";
 import {
   classifyProfessionModelExecution,
   professionEngineerPlanStage,
   professionReferenceImageStage,
 } from "./profession-model-execution.js";
+import {
+  lockedFinalizedOutputArtifact,
+  resolveOutputProvenance,
+  type FinalizedOutputArtifact,
+} from "./patch-task-skill-production-artifact-evidence.repository-support.js";
 
 const sourceManifestProvenanceSchema = z
   .object({
@@ -65,12 +65,6 @@ interface SourceEvidence {
   frameManifestToolSha256: string;
 }
 
-interface FinalizedOutputArtifact {
-  uploadId: string;
-  artifactId: string;
-  sha256: string;
-}
-
 /** 当前 attempt 的 passed 证据结果；拒绝状态不暴露内部缺失行或跨 attempt 标识。 */
 export type ResolvePassedProductionEvidenceResult =
   | {
@@ -85,6 +79,8 @@ export type ResolvePassedProductionEvidenceResult =
       imageAttemptId: string;
       projects: FinalizedOutputArtifact;
       validation: FinalizedOutputArtifact;
+      sourcePreview: FinalizedOutputArtifact;
+      resultPreview: FinalizedOutputArtifact;
     };
 
 /**
@@ -150,12 +146,64 @@ export async function resolvePassedProductionEvidence(
     },
   );
   if (!validation) return { status: "artifact-evidence-mismatch" };
+  const sourceProvenance = await resolveOutputProvenance(
+    transaction,
+    input.sourcePreviewArtifactId,
+  );
+  if (
+    !sourceProvenance ||
+    sourceProvenance.kind !== "profession-source-frame-preview-v1"
+  ) {
+    return { status: "artifact-evidence-mismatch" };
+  }
+  const sourcePreview = await lockedFinalizedOutputArtifact(
+    transaction,
+    jobId,
+    runId,
+    input,
+    input.sourcePreviewArtifactId,
+    {
+      ...baseProvenance,
+      kind: "profession-source-frame-preview-v1",
+      frame: sourceProvenance.frame,
+      asepriteValidation: {
+        artifactId: validation.artifactId,
+        sha256: validation.sha256,
+      },
+    },
+    "image/png",
+  );
+  if (!sourcePreview) return { status: "artifact-evidence-mismatch" };
+  const resultPreview = await lockedFinalizedOutputArtifact(
+    transaction,
+    jobId,
+    runId,
+    input,
+    input.resultPreviewArtifactId,
+    {
+      ...baseProvenance,
+      kind: "profession-aseprite-result-preview-v1",
+      frame: sourceProvenance.frame,
+      asepriteValidation: {
+        artifactId: validation.artifactId,
+        sha256: validation.sha256,
+      },
+      sourcePreview: {
+        artifactId: sourcePreview.artifactId,
+        sha256: sourcePreview.sha256,
+      },
+    },
+    "image/png",
+  );
+  if (!resultPreview) return { status: "artifact-evidence-mismatch" };
   return {
     status: "accepted",
     modelCallId: modelEvidence.referenceImage.modelCallId,
     imageAttemptId: modelEvidence.referenceImage.imageAttemptId,
     projects,
     validation,
+    sourcePreview,
+    resultPreview,
   };
 }
 
@@ -339,95 +387,5 @@ function createBaseProvenance(
       fullSkillCoverageProven: false,
       clientCompatibilityProven: false,
     },
-  };
-}
-
-/** 锁定 Artifact 对应的唯一 finalized 会话，并同时核对两侧元数据、当前 lease 和固定 provenance。 */
-async function lockedFinalizedOutputArtifact(
-  transaction: Transaction,
-  jobId: string,
-  runId: string,
-  input: PassedReport,
-  artifactId: string,
-  expectedProvenance: ProfessionSkillOutputProvenance,
-): Promise<FinalizedOutputArtifact | undefined> {
-  const [row] = await transaction
-    .select({
-      uploadId: artifactUploadSessions.id,
-      sessionRunId: artifactUploadSessions.runId,
-      sessionJobId: artifactUploadSessions.jobId,
-      workerId: artifactUploadSessions.workerId,
-      leaseId: artifactUploadSessions.leaseId,
-      attempt: artifactUploadSessions.attempt,
-      objectKey: artifactUploadSessions.objectKey,
-      sessionLogicalName: artifactUploadSessions.logicalName,
-      sessionMediaType: artifactUploadSessions.mediaType,
-      expectedByteLength: artifactUploadSessions.expectedByteLength,
-      expectedSha256: artifactUploadSessions.expectedSha256,
-      sessionProvenance: artifactUploadSessions.provenance,
-      sessionStatus: artifactUploadSessions.status,
-      sessionArtifactId: artifactUploadSessions.artifactId,
-      finalizedAt: artifactUploadSessions.finalizedAt,
-      objectDeletedAt: artifactUploadSessions.objectDeletedAt,
-      artifactId: artifacts.id,
-      artifactRunId: artifacts.runId,
-      storageKey: artifacts.storageKey,
-      artifactLogicalName: artifacts.logicalName,
-      artifactMediaType: artifacts.mediaType,
-      artifactByteLength: artifacts.byteLength,
-      artifactSha256: artifacts.sha256,
-      artifactProvenance: artifacts.provenance,
-    })
-    .from(artifactUploadSessions)
-    .innerJoin(
-      artifacts,
-      and(
-        eq(artifacts.runId, artifactUploadSessions.runId),
-        eq(artifacts.id, artifactUploadSessions.artifactId),
-      ),
-    )
-    .where(eq(artifactUploadSessions.artifactId, artifactId))
-    .limit(1)
-    .for("update");
-  const sessionProvenance = professionSkillOutputProvenanceSchema.safeParse(
-    row?.sessionProvenance,
-  );
-  const artifactProvenance = professionSkillOutputProvenanceSchema.safeParse(
-    row?.artifactProvenance,
-  );
-  const expected =
-    professionSkillOutputProvenanceSchema.safeParse(expectedProvenance);
-  if (
-    !row ||
-    !sessionProvenance.success ||
-    !artifactProvenance.success ||
-    !expected.success ||
-    row.sessionRunId !== runId ||
-    row.artifactRunId !== runId ||
-    row.sessionJobId !== jobId ||
-    row.workerId !== input.workerId ||
-    row.leaseId !== input.leaseId ||
-    row.attempt !== input.attempt ||
-    row.sessionStatus !== "finalized" ||
-    row.sessionArtifactId !== artifactId ||
-    row.artifactId !== artifactId ||
-    row.finalizedAt === null ||
-    row.objectDeletedAt !== null ||
-    row.objectKey !== row.storageKey ||
-    row.sessionLogicalName !== row.artifactLogicalName ||
-    row.sessionMediaType !== "application/zip" ||
-    row.artifactMediaType !== "application/zip" ||
-    row.expectedByteLength <= 0 ||
-    row.expectedByteLength !== row.artifactByteLength ||
-    row.expectedSha256.toUpperCase() !== row.artifactSha256.toUpperCase() ||
-    sha256JcsV1(sessionProvenance.data) !== sha256JcsV1(expected.data) ||
-    sha256JcsV1(artifactProvenance.data) !== sha256JcsV1(expected.data)
-  ) {
-    return undefined;
-  }
-  return {
-    uploadId: row.uploadId,
-    artifactId: row.artifactId,
-    sha256: row.artifactSha256.toUpperCase(),
   };
 }

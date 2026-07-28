@@ -35,6 +35,7 @@ import { ProfessionSourceContextController } from "./profession-source-context.c
 import { ProfessionSourceContextRepository } from "./profession-source-context.repository.js";
 import { ProfessionSourceContextService } from "./profession-source-context.service.js";
 import { PatchTaskRepository } from "./patch-task.repository.js";
+import { PatchTaskArchiveService } from "./patch-task-archive.service.js";
 import { PatchTaskService } from "./patch-task.service.js";
 import { SharedFxTaskController } from "./shared-fx-task.controller.js";
 import { SharedFxTaskService } from "./shared-fx-task.service.js";
@@ -72,6 +73,7 @@ import { StylePackageProductionService } from "./style-package-production.servic
     JobService,
     JobReaperService,
     PatchTaskRepository,
+    PatchTaskArchiveService,
     PatchTaskService,
     ProfessionEngineerExecutionService,
     ProfessionExecutionService,

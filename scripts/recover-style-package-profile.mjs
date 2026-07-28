@@ -1,5 +1,5 @@
 /**
- * @fileoverview 为已证明受旧单来源 Packager 阻断的 Package Job 迁移工具 profile；保留旧
+ * @fileoverview 为已证明受旧 Packager profile 阻断或失败的 Package Job 迁移工具 profile；保留旧
  * JobAttempt 和 style_package_attempt_evidences，不删除、不伪造也不覆盖任何历史证据。
  * @module scripts/operations
  * @author AI生成
@@ -8,14 +8,15 @@
  *
  * 调用关系：维护者先执行 dry-run，再显式增加 `--apply`；脚本直连当前 Server MySQL，不调用
  * Worker、对象存储、模型或本机打包工具。输入是 Run UUID、预期旧 profile 摘要和新 Packager/
- * Validator SHA-256，输出是不含 payload、路径和凭据的迁移摘要。
+ * Validator SHA-256，以及预期稳定错误码，输出是不含 payload、路径和凭据的迁移摘要。
  *
  * 副作用：dry-run 在事务末尾回滚；apply 在一个事务中更新同一 npk-package Job 的冻结 payload
  * 与摘要，把 Run/Package 恢复为 queued，并追加权威 RunEvent/outbox。attempt_count 保持不变，
  * 下一次正常 claim 才创建新 lease 和 attempt。
  *
- * 安全边界：仅接受四项安全位全 false、Profession 已 passed、Package attempt 1 精确因旧归档来源
- * 不匹配而 blocked、无 Package 上传或三产物、Factory contract 仍冻结同一 profile 的 Run。任一
+ * 安全边界：仅接受四项安全位全 false、Profession 已 passed、Package attempt 1 精确命中恢复
+ * 白名单且 Run/Job/attempt/evidence/聚合终态一致、无 Package 上传或三产物、Factory contract
+ * 仍冻结同一 profile 的 Run。任一
  * 前置条件漂移均整体回滚；脚本不能授权部署、证明全技能覆盖或证明客户端兼容。
  */
 import { randomUUID } from "node:crypto";
@@ -33,7 +34,10 @@ import {
   stableErrorCode,
 } from "./recover-style-package-profile-support.mjs";
 
-const recoverableErrorCode = "STYLE_PACKAGE_INPUT_ARCHIVE_INVALID";
+const recoverableErrorCodes = new Set([
+  "STYLE_PACKAGE_INPUT_ARCHIVE_INVALID",
+  "STYLE_PACKAGE_PACKAGER_FAILED",
+]);
 const packageLogicalNames = [
   "candidate.npk",
   "package-manifest.json",
@@ -66,7 +70,7 @@ async function main() {
 /**
  * 锁定并复核完整证据链，随后预演或提交同一 Job 的 profile 迁移。
  * @param {import("mysql2/promise").Connection} database 当前 Server 数据库会话。
- * @param {{runId:string,expectedProfileSha256:string,packagerSha256:string,validatorSha256:string,apply:boolean}} input 已校验 CLI。
+ * @param {{runId:string,expectedErrorCode:string,expectedProfileSha256:string,packagerSha256:string,validatorSha256:string,apply:boolean}} input 已校验 CLI。
  */
 async function migrateProfile(database, input) {
   await database.beginTransaction();
@@ -77,13 +81,12 @@ async function migrateProfile(database, input) {
       [input.runId],
       "RUN_NOT_FOUND",
     );
-    requireRunSafety(run);
-
     const [jobRows] = await database.execute(
       "SELECT * FROM jobs WHERE run_id = ? ORDER BY kind FOR UPDATE",
       [input.runId],
     );
     const { packageJob } = requireJobs(jobRows);
+    requireRunSafety(run, packageJob.status);
     const packagePayload = requirePackagePayload(
       packageJob,
       input.expectedProfileSha256,
@@ -103,7 +106,7 @@ async function migrateProfile(database, input) {
       [input.runId],
       "STYLE_PACKAGE_NOT_FOUND",
     );
-    requireUnbuiltStylePackage(stylePackage, packagePayload);
+    requireUnbuiltStylePackage(stylePackage, packagePayload, packageJob.status);
 
     const attempt = await requireSingleRow(
       database,
@@ -154,6 +157,7 @@ async function migrateProfile(database, input) {
       input.runId,
       sequence,
       databaseTime,
+      input.expectedErrorCode,
       oldProfileSha256,
       newProfileSha256,
     );
@@ -217,7 +221,7 @@ async function migrateProfile(database, input) {
   }
 }
 
-/** 只允许一个 blocked Package 与一个已 passed Profession Job，且两者均无活动 lease。 */
+/** 只允许一个终态 Package 与一个已 passed Profession Job，且两者均无活动 lease。 */
 function requireJobs(rows) {
   if (rows.length !== 2) throw new Error("RUN_JOB_CARDINALITY_INVALID");
   const professionJob = rows.find((row) => row.kind === "profession");
@@ -232,7 +236,7 @@ function requireJobs(rows) {
     packageJob.lease_expires_at,
   ].every((value) => value === null);
   if (
-    packageJob.status !== "blocked" ||
+    !["blocked", "failed"].includes(packageJob.status) ||
     Number(packageJob.attempt_count) !== 1 ||
     Number(packageJob.max_attempts) < 2 ||
     Number(packageJob.max_attempts) > 10 ||
@@ -304,14 +308,17 @@ function requireFactoryContract(row, profileId) {
   }
 }
 
-/** 旧 attempt 与 evidence 只可读取；要求二者精确记录同一归档来源不匹配失败。 */
+/** 旧 attempt 与 evidence 只可读取；要求二者精确记录同一白名单错误和终态。 */
 function requireRecoverableAttempt(packageJob, attempt, evidence, input) {
+  if (!recoverableErrorCodes.has(input.expectedErrorCode)) {
+    throw new Error("PACKAGE_ERROR_NOT_RECOVERABLE");
+  }
   if (
-    attempt.status !== "blocked" ||
-    attempt.error_code !== recoverableErrorCode ||
+    attempt.status !== packageJob.status ||
+    attempt.error_code !== input.expectedErrorCode ||
     attempt.finished_at === null ||
-    evidence.status !== "blocked" ||
-    evidence.error_code !== recoverableErrorCode ||
+    evidence.status !== packageJob.status ||
+    evidence.error_code !== input.expectedErrorCode ||
     evidence.finished_at === null ||
     evidence.package_profile_sha256.toUpperCase() !==
       input.expectedProfileSha256 ||
@@ -336,10 +343,10 @@ function requireRecoverableAttempt(packageJob, attempt, evidence, input) {
   }
 }
 
-/** 聚合行不能已有 candidate/manifest，且职业与 payload 的冻结范围必须一致。 */
-function requireUnbuiltStylePackage(stylePackage, payload) {
+/** 聚合行不能已有 candidate/manifest，且职业、风格和终态必须与冻结 Job 一致。 */
+function requireUnbuiltStylePackage(stylePackage, payload, expectedStatus) {
   if (
-    stylePackage.status !== "blocked" ||
+    stylePackage.status !== expectedStatus ||
     stylePackage.package_artifact_id !== null ||
     stylePackage.manifest_sha256 !== null ||
     stylePackage.finished_at === null ||
@@ -390,11 +397,11 @@ async function requirePassedSkills(database, runId, expectedSkillIds) {
   }
 }
 
-/** blocked Run 必须是当前旧 Package 导致，四项不可提升状态均保持 false。 */
-function requireRunSafety(run) {
+/** Run 必须与当前旧 Package 同终态，四项不可提升状态均保持 false。 */
+function requireRunSafety(run, expectedStatus) {
   if (
-    run.status !== "blocked" ||
-    run.current_stage !== "blocked" ||
+    run.status !== expectedStatus ||
+    run.current_stage !== expectedStatus ||
     run.finished_at === null ||
     !hasFalseSafety({
       deploymentAuthorized: Boolean(run.deployment_authorized),
@@ -412,6 +419,7 @@ function profileMigrationEvent(
   runId,
   sequence,
   databaseTime,
+  expectedErrorCode,
   oldProfileSha256,
   newProfileSha256,
 ) {
@@ -420,7 +428,7 @@ function profileMigrationEvent(
     sequence,
     level: "warning",
     stage: "queued",
-    message: `Package attempt 1 及其阻断证据已保留；官方多来源模型修复后，工具 profile 从 ${oldProfileSha256} 迁移到 ${newProfileSha256}，已开放 attempt 2。部署保持禁用。`,
+    message: `Package attempt 1 及其 ${expectedErrorCode} 终态证据已保留；工具 profile 从 ${oldProfileSha256} 迁移到 ${newProfileSha256}，已开放 attempt 2。部署保持禁用。`,
     createdAtUtc: mysqlUtcToIso(databaseTime),
   };
 }

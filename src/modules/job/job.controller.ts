@@ -21,8 +21,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   Post,
   UseGuards,
@@ -47,6 +50,7 @@ import { AuthService } from "../auth/auth.service.js";
 import {
   createPatchTaskSchema,
   patchTaskArtifactRoleSchema,
+  patchTaskSkillPreviewRoleSchema,
   reportPatchTaskPackageSchema,
   reportPatchTaskSkillProductionSchema,
   type CreatePatchTaskInput,
@@ -55,11 +59,14 @@ import {
   type PatchTaskArtifactView,
   type PatchTaskDetailView,
   type PatchTaskReferenceImageDownloadView,
+  type PatchTaskSkillPreviewDownloadView,
+  type PatchTaskSkillPreviewRole,
   type PatchTaskView,
   type ReportPatchTaskPackageInput,
   type ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
 import { PatchTaskService } from "./patch-task.service.js";
+import { PatchTaskArchiveService } from "./patch-task-archive.service.js";
 import {
   recordSharedFxStageEvidenceSchema,
   type RecordSharedFxStageEvidenceInput,
@@ -82,6 +89,7 @@ export class PatchTaskController {
    */
   constructor(
     private readonly patchTasks: PatchTaskService,
+    private readonly patchTaskArchive: PatchTaskArchiveService,
     private readonly auth: AuthService,
   ) {}
 
@@ -96,6 +104,23 @@ export class PatchTaskController {
   ): Promise<{ data: PatchTaskView[] }> {
     const user = await this.auth.requireBrowserUser(authorization);
     return { data: await this.patchTasks.list(user.id) };
+  }
+
+  /**
+   * 将当前认证用户拥有的终态 PatchTask 从默认列表软归档。
+   * @param id path 中经 UUID schema 校验的 Run/任务标识。
+   * @param authorization 浏览器 Bearer token；认证后仍由 Repository 复核稳定用户所有权。
+   * @returns 204 且无正文；只表示列表归档，不表示取消任务或删除任何执行与 Artifact 证据。
+   * @throws PATCH_TASK_NOT_FOUND 或 PATCH_TASK_ACTIVE，由归档 Service 做稳定映射。
+   */
+  @Delete(":id")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async archive(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<void> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    await this.patchTaskArchive.archive(id, user.id);
   }
 
   /**
@@ -131,6 +156,30 @@ export class PatchTaskController {
       data: await this.patchTasks.authorizeReferenceImageDownload(
         id,
         skillId,
+        user.id,
+      ),
+    };
+  }
+
+  /**
+   * 为当前用户任务中一个技能的固定预览角色签发短期读取授权。
+   * @param role 只允许 source-frame、reference-image、aseprite-result；不接受 Artifact ID 或文件名。
+   * @returns PNG 元数据、同帧公开字段与有限期 URL；历史任务缺图时返回统一未就绪错误。
+   */
+  @Post(":id/skills/:skillId/previews/:role/download-authorization")
+  async authorizeSkillPreviewDownload(
+    @Param("id", new ZodValidationPipe(idSchema)) id: string,
+    @Param("skillId", new ZodValidationPipe(idSchema)) skillId: string,
+    @Param("role", new ZodValidationPipe(patchTaskSkillPreviewRoleSchema))
+    role: PatchTaskSkillPreviewRole,
+    @Headers("authorization") authorization: string | undefined,
+  ): Promise<{ data: PatchTaskSkillPreviewDownloadView }> {
+    const user = await this.auth.requireBrowserUser(authorization);
+    return {
+      data: await this.patchTasks.authorizeSkillPreviewDownload(
+        id,
+        skillId,
+        role,
         user.id,
       ),
     };

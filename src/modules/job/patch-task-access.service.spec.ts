@@ -23,6 +23,7 @@ describe("PatchTaskService owner-scoped browser access", () => {
     list: vi.fn(),
     findDetail: vi.fn(),
     findReferenceImage: vi.fn(),
+    findSkillPreview: vi.fn(),
     createPlan: vi.fn(),
     findArtifact: vi.fn(),
     findArtifacts: vi.fn(),
@@ -126,6 +127,70 @@ describe("PatchTaskService owner-scoped browser access", () => {
       ),
     ).rejects.toMatchObject({
       response: { code: "PATCH_TASK_REFERENCE_IMAGE_NOT_READY" },
+    });
+    expect(artifacts.authorizeRunArtifactDownload).not.toHaveBeenCalled();
+  });
+
+  it("authorizes only the requested fixed preview role", async () => {
+    const preview = {
+      artifactId: "12121212-1212-4212-8212-121212121212",
+      skillId: referenceSkillId,
+      role: "aseprite-result" as const,
+      artifactName: "profession-aseprite-result-preview.png",
+      mediaType: "image/png" as const,
+      byteLength: 640,
+      sha256: "B".repeat(64),
+      frame: {
+        entryIndex: 0,
+        frameIndex: 3,
+        internalPath: "sprite/effect/a.img",
+        width: 16,
+        height: 12,
+        canvasWidth: 32,
+        canvasHeight: 24,
+        x: 2,
+        y: -1,
+      },
+    };
+    patchTasks.findSkillPreview.mockResolvedValue(preview);
+    artifacts.authorizeRunArtifactDownload.mockResolvedValue({
+      artifactId: preview.artifactId,
+      downloadUrl: "http://127.0.0.1:9000/result",
+      expiresAtUtc: "2026-07-28T00:05:00.000Z",
+    });
+
+    await expect(
+      service.authorizeSkillPreviewDownload(
+        runId,
+        referenceSkillId,
+        "aseprite-result",
+        ownerUserId,
+      ),
+    ).resolves.toEqual({
+      ...preview,
+      downloadUrl: "http://127.0.0.1:9000/result",
+      expiresAtUtc: "2026-07-28T00:05:00.000Z",
+    });
+    expect(patchTasks.findSkillPreview).toHaveBeenCalledWith(
+      runId,
+      referenceSkillId,
+      "aseprite-result",
+      ownerUserId,
+    );
+  });
+
+  it("does not sign object storage when a fixed preview role is unavailable", async () => {
+    patchTasks.findSkillPreview.mockResolvedValue(undefined);
+
+    await expect(
+      service.authorizeSkillPreviewDownload(
+        runId,
+        referenceSkillId,
+        "source-frame",
+        ownerUserId,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: "PATCH_TASK_SKILL_PREVIEW_NOT_READY" },
     });
     expect(artifacts.authorizeRunArtifactDownload).not.toHaveBeenCalled();
   });

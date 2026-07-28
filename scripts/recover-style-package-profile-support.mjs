@@ -12,14 +12,28 @@
  */
 import { createHash } from "node:crypto";
 
-/** 解析固定四参数及可选 `--apply`；默认模式始终是只读事务预演。 */
+/** Package 恢复总预算的不可提升上限；脚本只能开放既有上限内的下一轮。 */
+export const targetMaxAttempts = 10;
+
+/** Worker/Server 公开稳定码的受限格式；原始异常文本不能进入审计事件。 */
+export const stableCodePattern = /^[A-Z][A-Z0-9_]{0,79}$/u;
+
+/** 解析固定五参数及可选 `--apply`；默认模式始终是只读事务预演。 */
 export function parseArguments(arguments_) {
   const apply = arguments_.includes("--apply");
   const values = arguments_.filter((value) => value !== "--apply");
-  if (values.length !== 4) throw new Error("USAGE_INVALID");
-  const [runId, expectedProfileSha256, packagerSha256, validatorSha256] =
-    values;
+  if (values.length !== 5) throw new Error("USAGE_INVALID");
+  const [
+    runId,
+    expectedErrorCode,
+    expectedProfileSha256,
+    packagerSha256,
+    validatorSha256,
+  ] = values;
   if (!isUuid(runId)) throw new Error("RUN_ID_INVALID");
+  if (!stableCodePattern.test(expectedErrorCode)) {
+    throw new Error("EXPECTED_ERROR_CODE_INVALID");
+  }
   for (const value of [
     expectedProfileSha256,
     packagerSha256,
@@ -29,7 +43,70 @@ export function parseArguments(arguments_) {
   }
   return {
     runId: runId.toLowerCase(),
+    expectedErrorCode,
     expectedProfileSha256: expectedProfileSha256.toUpperCase(),
+    packagerSha256: packagerSha256.toUpperCase(),
+    validatorSha256: validatorSha256.toUpperCase(),
+    apply,
+  };
+}
+
+/**
+ * 解析多轮 Package 恢复的三段 profile epoch 和新工具摘要。
+ *
+ * 输入只来自维护者显式 CLI；返回值供事务脚本核对历史 attempt 1、2..N-1、N 三段证据。
+ * 缺少任一完整 SHA、轮次已达总预算或三个历史 profile 不互异时失败关闭，不连接数据库。
+ */
+export function parseCurrentProfileArguments(arguments_) {
+  const apply = arguments_.includes("--apply");
+  const values = arguments_.filter((value) => value !== "--apply");
+  if (values.length !== 8) throw new Error("USAGE_INVALID");
+  const [
+    runId,
+    expectedAttemptText,
+    expectedErrorCode,
+    profileSha256,
+    initialProfileSha256,
+    intermediateProfileSha256,
+    packagerSha256,
+    validatorSha256,
+  ] = values;
+  const expectedAttempt = Number(expectedAttemptText);
+  if (!isUuid(runId)) throw new Error("RUN_ID_INVALID");
+  if (
+    !Number.isSafeInteger(expectedAttempt) ||
+    expectedAttempt < 2 ||
+    expectedAttempt >= targetMaxAttempts
+  ) {
+    throw new Error("EXPECTED_ATTEMPT_INVALID");
+  }
+  if (!stableCodePattern.test(expectedErrorCode)) {
+    throw new Error("EXPECTED_ERROR_CODE_INVALID");
+  }
+  for (const value of [
+    profileSha256,
+    initialProfileSha256,
+    intermediateProfileSha256,
+    packagerSha256,
+    validatorSha256,
+  ]) {
+    if (!isSha256(value)) throw new Error("SHA256_INVALID");
+  }
+  const profileEpochs = new Set([
+    initialProfileSha256.toUpperCase(),
+    intermediateProfileSha256.toUpperCase(),
+    profileSha256.toUpperCase(),
+  ]);
+  if (profileEpochs.size !== 3) {
+    throw new Error("PROFILE_SHA256_INVALID");
+  }
+  return {
+    runId: runId.toLowerCase(),
+    expectedAttempt,
+    expectedErrorCode,
+    expectedProfileSha256: profileSha256.toUpperCase(),
+    expectedInitialProfileSha256: initialProfileSha256.toUpperCase(),
+    expectedIntermediateProfileSha256: intermediateProfileSha256.toUpperCase(),
     packagerSha256: packagerSha256.toUpperCase(),
     validatorSha256: validatorSha256.toUpperCase(),
     apply,

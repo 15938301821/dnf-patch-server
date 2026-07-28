@@ -23,6 +23,39 @@ const boundArtifactSchema = z
   })
   .strict();
 
+const npkInternalPathSchema = z
+  .string()
+  .min(1)
+  .max(500)
+  .refine(
+    (value) =>
+      !value.startsWith("/") &&
+      !/^[A-Za-z]:/u.test(value) &&
+      value === value.normalize("NFC").toLowerCase() &&
+      !value
+        .split("/")
+        .some(
+          (segment) =>
+            segment.length === 0 || segment === "." || segment === "..",
+        ),
+    { message: "预览帧必须使用规范化 NPK 内部路径。" },
+  );
+
+const comparisonFrameSchema = z
+  .object({
+    entryIndex: z.number().int().min(0).max(499),
+    frameIndex: z.number().int().min(0).max(1_000_000),
+    internalPath: npkInternalPathSchema,
+    width: z.number().int().positive().max(1_000_000),
+    height: z.number().int().positive().max(1_000_000),
+    canvasWidth: z.number().int().positive().max(1_000_000),
+    canvasHeight: z.number().int().positive().max(1_000_000),
+    x: z.number().int().min(-1_000_000).max(1_000_000),
+    y: z.number().int().min(-1_000_000).max(1_000_000),
+    decodedBgraSha256: uppercaseSha256Schema,
+  })
+  .strict();
+
 const outputEvidenceFields = {
   schemaVersion: z.literal(1),
   jobId: z.uuid(),
@@ -73,10 +106,34 @@ const validationProvenanceSchema = z
   })
   .strict();
 
+const sourcePreviewProvenanceSchema = z
+  .object({
+    ...outputEvidenceFields,
+    kind: z.literal("profession-source-frame-preview-v1"),
+    frame: comparisonFrameSchema,
+    asepriteValidation: boundArtifactSchema,
+  })
+  .strict();
+
+const resultPreviewProvenanceSchema = z
+  .object({
+    ...outputEvidenceFields,
+    kind: z.literal("profession-aseprite-result-preview-v1"),
+    frame: comparisonFrameSchema,
+    asepriteValidation: boundArtifactSchema,
+    sourcePreview: boundArtifactSchema,
+  })
+  .strict();
+
 /** 两个固定输出角色的数据库 JSON 读取 schema；通过不代表对象正文已解压或客户端兼容。 */
 export const professionSkillOutputProvenanceSchema = z.discriminatedUnion(
   "kind",
-  [asepriteProjectsProvenanceSchema, validationProvenanceSchema],
+  [
+    asepriteProjectsProvenanceSchema,
+    validationProvenanceSchema,
+    sourcePreviewProvenanceSchema,
+    resultPreviewProvenanceSchema,
+  ],
 );
 
 /** 经过严格读取校验的 Profession 输出来源元数据。 */

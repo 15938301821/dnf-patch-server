@@ -10,6 +10,7 @@ import { Test } from "@nestjs/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthService } from "../auth/auth.service.js";
 import { PatchTaskController } from "./job.controller.js";
+import { PatchTaskArchiveService } from "./patch-task-archive.service.js";
 import type {
   CreatePatchTaskInput,
   PatchTaskArtifactDownloadView,
@@ -97,12 +98,16 @@ describe("PatchTaskController", () => {
       ) => Promise<PatchTaskView>
     >();
   const requireBrowserUser = vi.fn();
+  const archive = vi.fn().mockResolvedValue(undefined);
   const findDetail = vi.fn().mockResolvedValue(detail);
   const findArtifacts = vi.fn().mockResolvedValue([artifact]);
   const authorizeArtifactDownload = vi.fn().mockResolvedValue(download);
   const authorizeReferenceImageDownload = vi
     .fn()
     .mockResolvedValue(referenceDownload);
+  const authorizeSkillPreviewDownload = vi
+    .fn()
+    .mockResolvedValue({ ...referenceDownload, role: "reference-image" });
   let controller: PatchTaskController;
 
   beforeEach(async () => {
@@ -112,6 +117,11 @@ describe("PatchTaskController", () => {
     findArtifacts.mockResolvedValue([artifact]);
     authorizeArtifactDownload.mockResolvedValue(download);
     authorizeReferenceImageDownload.mockResolvedValue(referenceDownload);
+    authorizeSkillPreviewDownload.mockResolvedValue({
+      ...referenceDownload,
+      role: "reference-image",
+    });
+    archive.mockResolvedValue(undefined);
     requireBrowserUser.mockResolvedValue({ id: ownerUserId });
     const module = await Test.createTestingModule({
       providers: [
@@ -123,16 +133,20 @@ describe("PatchTaskController", () => {
             findArtifacts,
             authorizeArtifactDownload,
             authorizeReferenceImageDownload,
+            authorizeSkillPreviewDownload,
           },
         },
+        { provide: PatchTaskArchiveService, useValue: { archive } },
         { provide: AuthService, useValue: { requireBrowserUser } },
         {
           provide: PatchTaskController,
-          inject: [PatchTaskService, AuthService],
+          inject: [PatchTaskService, PatchTaskArchiveService, AuthService],
           useFactory: (
             patchTasks: PatchTaskService,
+            patchTaskArchive: PatchTaskArchiveService,
             auth: AuthService,
-          ): PatchTaskController => new PatchTaskController(patchTasks, auth),
+          ): PatchTaskController =>
+            new PatchTaskController(patchTasks, patchTaskArchive, auth),
         },
       ],
     }).compile();
@@ -173,6 +187,14 @@ describe("PatchTaskController", () => {
     expect(findDetail).toHaveBeenCalledWith(task.id, ownerUserId);
   });
 
+  it("passes the authenticated owner to the soft archive command", async () => {
+    await expect(
+      controller.archive(task.id, "Bearer access"),
+    ).resolves.toBeUndefined();
+    expect(requireBrowserUser).toHaveBeenCalledWith("Bearer access");
+    expect(archive).toHaveBeenCalledWith(task.id, ownerUserId);
+  });
+
   it("authorizes a fixed role only after resolving the authenticated owner", async () => {
     await expect(
       controller.authorizeArtifactDownload(
@@ -201,6 +223,25 @@ describe("PatchTaskController", () => {
     expect(authorizeReferenceImageDownload).toHaveBeenCalledWith(
       task.id,
       skillId,
+      ownerUserId,
+    );
+  });
+
+  it("authorizes a fixed skill preview role after resolving the owner", async () => {
+    await expect(
+      controller.authorizeSkillPreviewDownload(
+        task.id,
+        skillId,
+        "reference-image",
+        "Bearer access",
+      ),
+    ).resolves.toEqual({
+      data: { ...referenceDownload, role: "reference-image" },
+    });
+    expect(authorizeSkillPreviewDownload).toHaveBeenCalledWith(
+      task.id,
+      skillId,
+      "reference-image",
       ownerUserId,
     );
   });

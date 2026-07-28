@@ -45,7 +45,9 @@ export function createEngineerModelRequest(
     schema: professionEngineerModelWireDecisionSchema,
     instructions: [
       "Return only the bounded pixel-style decision required by the schema.",
-      "Choose RGB palette bytes, bounded intensity parameters, and optional visual operations only.",
+      "Each shadow, midtone, rim, and core palette value must contain exactly three integer RGB channels from 0 through 255.",
+      "Use these inclusive parameter ranges: sourceColorMix 0..1, coreThreshold 0.5..0.95, coreIntensity 0..1, rimThreshold 0..0.8, rimIntensity 0..1, phaseAmount 0..1, crackDensity 0..0.25, and crackIntensity 0..1.",
+      "Choose zero to four unique optionalOperations values only from rim-light, particle-trail, spatial-crack, and blade-core.",
       "Do not emit paths, commands, code, tools, resource mappings, geometry or alpha changes, coverage claims, or deployment instructions.",
     ].join(" "),
     input: stableStringifyJcsV1({

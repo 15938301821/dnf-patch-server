@@ -1,5 +1,5 @@
 /**
- * @fileoverview 验证 Profession 单技能输出接收事务只接受当前 attempt 的模型链与 finalized 双上传；
+ * @fileoverview 验证 Profession 单技能输出接收事务只接受当前 attempt 的模型链与 finalized 四上传；
  * 不连接真实 MySQL、不读取对象正文，也不证明复合外键、锁竞争、NPK 或客户端兼容。
  * @module modules/job/patch-task-skill-production-repository-support-spec
  * @author AI生成
@@ -18,7 +18,7 @@ import {
 import { reportProfessionSkillProduction } from "./patch-task-skill-production.repository-support.js";
 
 describe("reportProfessionSkillProduction", () => {
-  it("writes Server-derived model IDs and both current upload bindings atomically", async () => {
+  it("writes Server-derived IDs only after all four current uploads are locked", async () => {
     const harness = createSkillProductionReportHarness();
 
     await expect(
@@ -42,7 +42,7 @@ describe("reportProfessionSkillProduction", () => {
         finishedAt: skillProductionFixture.now,
       }),
     );
-    expect(harness.forUpdate).toHaveBeenCalledTimes(6);
+    expect(harness.forUpdate).toHaveBeenCalledTimes(9);
   });
 
   it("rejects an old attempt before reading or writing production evidence", async () => {

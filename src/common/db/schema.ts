@@ -141,9 +141,16 @@ export const runs = mysqlTable(
     createdAt: utc("created_at").notNull(),
     updatedAt: utc("updated_at").notNull(),
     finishedAt: utc("finished_at"),
+    /** 用户从任务列表移除终态 Run 的时间；只控制可见性，不删除执行、证据或 Artifact。 */
+    archivedAt: utc("archived_at"),
   },
   (table) => [
     index("runs_owner_user_idx").on(table.ownerUserId),
+    index("runs_owner_archived_created_idx").on(
+      table.ownerUserId,
+      table.archivedAt,
+      table.createdAt,
+    ),
     index("runs_project_idx").on(table.projectId),
     check(
       "runs_status_ck",

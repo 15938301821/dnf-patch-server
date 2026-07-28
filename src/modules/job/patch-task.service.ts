@@ -29,7 +29,8 @@ import type {
   PatchTaskArtifactView,
   PatchTaskDetailView,
   PatchTaskReferenceImageDownloadView,
-  PatchTaskReferenceImageView,
+  PatchTaskSkillPreviewDownloadView,
+  PatchTaskSkillPreviewRole,
   PatchTaskReportResult,
   PatchTaskView,
   PlannedPatchTaskSkill,
@@ -59,18 +60,19 @@ import {
   requireProfessionProgress,
   type PackageProfileConfigPort,
 } from "./patch-task.service-support.js";
+import {
+  authorizePatchTaskReferenceImageDownload,
+  authorizePatchTaskSkillPreviewDownload,
+  type PatchTaskPreviewArtifactDownloadPort,
+  type PatchTaskPreviewRepositoryPort,
+} from "./patch-task-preview-authorization.service-support.js";
 
-interface PatchTaskRepositoryPort {
+interface PatchTaskRepositoryPort extends PatchTaskPreviewRepositoryPort {
   list(ownerUserId: string): Promise<PatchTaskView[]>;
   findDetail(
     runId: string,
     ownerUserId: string,
   ): Promise<PatchTaskDetailView | undefined>;
-  findReferenceImage(
-    runId: string,
-    skillId: string,
-    ownerUserId: string,
-  ): Promise<PatchTaskReferenceImageView | undefined>;
   createPlan(
     pack: Parameters<PatchTaskRepository["createPlan"]>[0],
     skills: PlannedPatchTaskSkill[],
@@ -144,13 +146,7 @@ interface PatchTaskWorkerCapabilityPort {
   ): ReturnType<WorkerService["hasEnabledCapability"]>;
 }
 
-interface PatchTaskArtifactDownloadPort {
-  authorizeRunArtifactDownload(
-    runId: string,
-    artifactId: string,
-    downloadName: string,
-  ): ReturnType<ArtifactService["authorizeRunArtifactDownload"]>;
-}
+type PatchTaskArtifactDownloadPort = PatchTaskPreviewArtifactDownloadPort;
 
 @Injectable()
 export class PatchTaskService {
@@ -198,7 +194,6 @@ export class PatchTaskService {
 
   /**
    * 为当前用户任务中的固定技能参考图签发短期读取授权。
-   *
    * @param runId Controller path 中已校验的任务 UUID。
    * @param skillId Controller path 中已校验的技能 UUID；浏览器不能提交 Artifact ID。
    * @param ownerUserId 从浏览器 Access Token 解析的稳定用户 ID。
@@ -210,29 +205,37 @@ export class PatchTaskService {
     skillId: string,
     ownerUserId: string,
   ): Promise<PatchTaskReferenceImageDownloadView> {
-    // 第一步：按任务、技能和用户固定语义解析图片，证据不完整时禁止接触对象存储。
-    const image = await this.patchTasks.findReferenceImage(
+    return authorizePatchTaskReferenceImageDownload(
+      this.patchTasks,
+      this.artifacts,
       runId,
       skillId,
       ownerUserId,
     );
-    if (!image) {
-      throw new NotFoundException({
-        code: "PATCH_TASK_REFERENCE_IMAGE_NOT_READY",
-        message: "该技能的模型参考图尚未生成或当前用户无权查看。",
-      });
-    }
-    // 第二步：Artifact 领域再次确认图片属于同一 Run，之后才签发有限期对象存储 URL。
-    const authorization = await this.artifacts.authorizeRunArtifactDownload(
+  }
+
+  /**
+   * 为当前用户任务中的一个固定技能预览角色签发短期读取授权。
+   * @param runId Controller path 中已校验的任务 UUID。
+   * @param skillId Controller path 中已校验的技能 UUID。
+   * @param role 严格枚举的源帧、模型参考图或 Aseprite 结果；不是 Artifact 名称。
+   * @param ownerUserId 从浏览器 Access Token 解析的稳定用户 ID。
+   * @returns PNG 脱敏元数据与短期 URL；不证明兼容、部署或全技能覆盖。
+   */
+  async authorizeSkillPreviewDownload(
+    runId: string,
+    skillId: string,
+    role: PatchTaskSkillPreviewRole,
+    ownerUserId: string,
+  ): Promise<PatchTaskSkillPreviewDownloadView> {
+    return authorizePatchTaskSkillPreviewDownload(
+      this.patchTasks,
+      this.artifacts,
       runId,
-      image.artifactId,
-      image.artifactName,
+      skillId,
+      role,
+      ownerUserId,
     );
-    return {
-      ...image,
-      downloadUrl: authorization.downloadUrl,
-      expiresAtUtc: authorization.expiresAtUtc,
-    };
   }
 
   async create(

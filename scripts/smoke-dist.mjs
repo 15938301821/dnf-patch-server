@@ -94,24 +94,32 @@ try {
   // 步骤 3：凭据型 CORS 预检必须精确匹配允许来源，不能退化为通配放行。
   const corsOrigin = "http://127.0.0.1:3000";
   const preflightResponse = await fetch(
-    `http://${host}:${String(apiPort)}/v1/auth/refresh`,
+    `http://${host}:${String(apiPort)}/v1/jobs/00000000-0000-4000-8000-000000000000`,
     {
       method: "OPTIONS",
       headers: {
         Origin: corsOrigin,
-        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Method": "DELETE",
+        "Access-Control-Request-Headers": "authorization",
       },
       signal: AbortSignal.timeout(2_000),
     },
   );
+  const allowedMethods =
+    preflightResponse.headers.get("access-control-allow-methods") ?? "";
   if (
     preflightResponse.status !== 204 ||
     preflightResponse.headers.get("access-control-allow-origin") !==
       corsOrigin ||
-    preflightResponse.headers.get("access-control-allow-credentials") !== "true"
+    preflightResponse.headers.get("access-control-allow-credentials") !==
+      "true" ||
+    !allowedMethods
+      .split(",")
+      .map((method) => method.trim().toUpperCase())
+      .includes("DELETE")
   ) {
     throw new Error(
-      "Credentialed CORS preflight did not preserve the allowlist.",
+      "Credentialed DELETE CORS preflight did not preserve the allowlist.",
     );
   }
   process.stdout.write(

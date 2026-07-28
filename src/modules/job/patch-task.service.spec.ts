@@ -41,6 +41,7 @@ describe("PatchTaskService", () => {
     list: vi.fn(),
     findDetail: vi.fn(),
     findReferenceImage: vi.fn(),
+    findSkillPreview: vi.fn(),
     createPlan: vi.fn(),
     findArtifact: vi.fn(),
     findArtifacts: vi.fn(),

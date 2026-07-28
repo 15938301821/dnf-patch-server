@@ -41,14 +41,22 @@ const passedSkillProductionReportSchema = z
     asepriteAdapterSha256: sha256Schema,
     asepriteArtifactId: z.uuid(),
     validationArtifactId: z.uuid(),
+    sourcePreviewArtifactId: z.uuid(),
+    resultPreviewArtifactId: z.uuid(),
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.asepriteArtifactId === value.validationArtifactId) {
+    const artifactIds = [
+      value.asepriteArtifactId,
+      value.validationArtifactId,
+      value.sourcePreviewArtifactId,
+      value.resultPreviewArtifactId,
+    ];
+    if (new Set(artifactIds).size !== artifactIds.length) {
       context.addIssue({
         code: "custom",
-        path: ["validationArtifactId"],
-        message: "Aseprite 工程与 runtime 验证必须使用不同 Artifact。",
+        path: ["resultPreviewArtifactId"],
+        message: "Aseprite 输出与两项预览必须使用四个不同 Artifact。",
       });
     }
   });
@@ -293,20 +301,55 @@ export interface PatchTaskArtifactDownloadView extends PatchTaskArtifactView {
   expiresAtUtc: string;
 }
 
+/** 浏览器只能从这三个固定语义角色中选择技能预览，不能提交 Artifact ID 或对象 key。 */
+export const patchTaskSkillPreviewRoleSchema = z.enum([
+  "source-frame",
+  "reference-image",
+  "aseprite-result",
+]);
+export type PatchTaskSkillPreviewRole = z.infer<
+  typeof patchTaskSkillPreviewRoleSchema
+>;
+
+/** 源帧与 Aseprite 结果共享的冻结帧身份；不包含本机路径、对象 key 或像素正文。 */
+export interface PatchTaskSkillPreviewFrameView {
+  entryIndex: number;
+  frameIndex: number;
+  internalPath: string;
+  width: number;
+  height: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  x: number;
+  y: number;
+}
+
 /**
- * 当前任务技能的固定模型参考图元数据；由服务端从 reference-image-v1 证据解析，
- * 浏览器不能通过此结构选择任意 Artifact。
+ * 当前任务技能的固定预览元数据。服务端按角色解析当前 attempt 证据，浏览器不能通过此结构
+ * 选择任意 Artifact；frame 只在源帧和 Aseprite 结果角色中存在。
  */
-export interface PatchTaskReferenceImageView {
+export interface PatchTaskSkillPreviewView {
   artifactId: string;
   skillId: string;
+  role: PatchTaskSkillPreviewRole;
   artifactName: string;
   mediaType: "image/png";
   byteLength: number;
   sha256: string;
+  frame?: PatchTaskSkillPreviewFrameView;
 }
 
-/** 固定技能参考图的短期读取授权；URL 到期失效且不得进入持久化状态。 */
+/** 固定技能预览的短期读取授权；URL 到期失效且不得进入持久化状态。 */
+export interface PatchTaskSkillPreviewDownloadView extends PatchTaskSkillPreviewView {
+  downloadUrl: string;
+  expiresAtUtc: string;
+}
+
+/** 旧参考图端点的兼容 ViewModel；新调用方应使用固定角色预览契约。 */
+export type PatchTaskReferenceImageView = Omit<
+  PatchTaskSkillPreviewView,
+  "role" | "frame"
+>;
 export interface PatchTaskReferenceImageDownloadView extends PatchTaskReferenceImageView {
   downloadUrl: string;
   expiresAtUtc: string;

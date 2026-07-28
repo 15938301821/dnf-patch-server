@@ -126,6 +126,15 @@ describe("ProfessionEngineerExecutionService", () => {
       role: "engineer",
       schemaName: "profession_engineer_pixel_style_decision_v1",
     });
+    expect(request?.instructions).toContain(
+      "exactly three integer RGB channels from 0 through 255",
+    );
+    expect(request?.instructions).toContain("coreThreshold 0.5..0.95");
+    expect(request?.instructions).toContain("rimThreshold 0..0.8");
+    expect(request?.instructions).toContain("crackDensity 0..0.25");
+    expect(request?.instructions).toContain(
+      "zero to four unique optionalOperations",
+    );
     expect(bind).toHaveBeenCalledWith(
       executionId,
       leaseInput(),

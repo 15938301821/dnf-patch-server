@@ -9,16 +9,20 @@
  * 调用关系：相邻 Vitest 行为测试按具名场景创建最小 Drizzle transaction stub，再调用真实接收函数。
  * 输入是有限场景名，输出包含 passed DTO、数据库端口和写入观察值。副作用仅记录 mock 调用。
  * 安全边界：fixture 不证明真实 CHECK、复合外键或 row lock；场景必须保留当前 attempt、固定来源、
- * 双模型阶段和双 finalized upload 的完整证据，不得用永远成功的 stub 绕过被测校验。
+ * 双模型阶段和四个 finalized upload 的完整证据，不得用永远成功的 stub 绕过被测校验。
  */
-import { vi } from "vitest";
-import type { DatabaseService } from "../../common/db/database.service.js";
 import { sha256JcsV1, sha256Json } from "../../common/utils/canonical.js";
 import type { ReportPatchTaskSkillProductionInput } from "./patch-task.contracts.js";
 import {
   createStyleSkillPromptComposition,
   type StyleSkillProductionJobPayloadV2,
 } from "./style-skill-production.contracts.js";
+import {
+  createSkillProductionTransactionHarness,
+  type SkillProductionReportHarness,
+} from "./patch-task-skill-production.repository-fixture-support.js";
+
+export type { SkillProductionReportHarness } from "./patch-task-skill-production.repository-fixture-support.js";
 
 /** 行为断言使用的稳定 UUID 与数据库时间；这些值只存在于测试，不代表真实生产证据。 */
 export const skillProductionFixture = {
@@ -39,8 +43,12 @@ export const skillProductionFixture = {
   imageAttemptId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
   projectsArtifactId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
   validationArtifactId: "10101010-1010-4010-8010-101010101010",
+  sourcePreviewArtifactId: "11111111-2222-4111-8111-111111111111",
+  resultPreviewArtifactId: "12121212-2222-4212-8212-121212121212",
   projectsUploadId: "20202020-2020-4020-8020-202020202020",
   validationUploadId: "30303030-3030-4030-8030-303030303030",
+  sourcePreviewUploadId: "31313131-3131-4131-8131-313131313131",
+  resultPreviewUploadId: "32323232-3232-4232-8232-323232323232",
   now: new Date("2026-07-24T00:00:00.000Z"),
 } as const;
 
@@ -57,16 +65,6 @@ export type SkillProductionReportScenario =
   | "source-id-mismatch"
   | "projects-not-finalized"
   | "validation-projects-role";
-
-/** 测试可观察的数据库端口、passed 输入和写入记录。 */
-export interface SkillProductionReportHarness {
-  connection: DatabaseService;
-  input: PassedReport;
-  select: ReturnType<typeof vi.fn>;
-  update: ReturnType<typeof vi.fn>;
-  forUpdate: (lock: string) => void;
-  updated: Record<string, unknown>[];
-}
 
 /**
  * 创建一个只改变单项证据的接收事务场景。
@@ -87,12 +85,14 @@ export function createSkillProductionReportHarness(
     asepriteAdapterSha256: "2".repeat(64),
     asepriteArtifactId: skillProductionFixture.projectsArtifactId,
     validationArtifactId: skillProductionFixture.validationArtifactId,
+    sourcePreviewArtifactId: skillProductionFixture.sourcePreviewArtifactId,
+    resultPreviewArtifactId: skillProductionFixture.resultPreviewArtifactId,
   };
   const rows =
     scenario === "old-attempt"
       ? [[leasedJob(payload)], [{ value: skillProductionFixture.now }]]
       : acceptedRows(payload, scenario);
-  return reportHarness(rows, input);
+  return createSkillProductionTransactionHarness(rows, input);
 }
 
 function acceptedRows(
@@ -126,6 +126,9 @@ function acceptedRows(
     [source],
     [projects],
     [validation],
+    [sourcePreviewUploadRow()],
+    [sourcePreviewUploadRow()],
+    [resultPreviewUploadRow()],
   ];
 }
 
@@ -252,14 +255,37 @@ function validationUploadRow(): Record<string, unknown> {
   );
 }
 
+function sourcePreviewUploadRow(): Record<string, unknown> {
+  return uploadRow(
+    skillProductionFixture.sourcePreviewUploadId,
+    skillProductionFixture.sourcePreviewArtifactId,
+    "profession-source-frame-preview.png",
+    "5".repeat(64),
+    sourcePreviewProvenance(),
+    "image/png",
+  );
+}
+
+function resultPreviewUploadRow(): Record<string, unknown> {
+  return uploadRow(
+    skillProductionFixture.resultPreviewUploadId,
+    skillProductionFixture.resultPreviewArtifactId,
+    "profession-aseprite-result-preview.png",
+    "6".repeat(64),
+    resultPreviewProvenance(),
+    "image/png",
+  );
+}
+
 function uploadRow(
   uploadId: string,
   artifactId: string,
   logicalName: string,
   sha256: string,
   provenance: Record<string, unknown>,
+  mediaType = "application/zip",
 ): Record<string, unknown> {
-  const objectKey = `artifacts/${artifactId}.zip`;
+  const objectKey = `artifacts/${artifactId}${mediaType === "image/png" ? ".png" : ".zip"}`;
   return {
     uploadId,
     sessionRunId: skillProductionFixture.runId,
@@ -269,7 +295,7 @@ function uploadRow(
     attempt: 2,
     objectKey,
     sessionLogicalName: logicalName,
-    sessionMediaType: "application/zip",
+    sessionMediaType: mediaType,
     expectedByteLength: 256,
     expectedSha256: sha256,
     sessionProvenance: provenance,
@@ -281,7 +307,7 @@ function uploadRow(
     artifactRunId: skillProductionFixture.runId,
     storageKey: objectKey,
     artifactLogicalName: logicalName,
-    artifactMediaType: "application/zip",
+    artifactMediaType: mediaType,
     artifactByteLength: 256,
     artifactSha256: sha256,
     artifactProvenance: provenance,
@@ -303,6 +329,49 @@ function validationProvenance(): Record<string, unknown> {
       artifactId: skillProductionFixture.projectsArtifactId,
       sha256: "3".repeat(64),
     },
+  };
+}
+
+function sourcePreviewProvenance(): Record<string, unknown> {
+  return {
+    ...baseOutputProvenance(),
+    kind: "profession-source-frame-preview-v1",
+    frame: comparisonFrame(),
+    asepriteValidation: {
+      artifactId: skillProductionFixture.validationArtifactId,
+      sha256: "4".repeat(64),
+    },
+  };
+}
+
+function resultPreviewProvenance(): Record<string, unknown> {
+  return {
+    ...baseOutputProvenance(),
+    kind: "profession-aseprite-result-preview-v1",
+    frame: comparisonFrame(),
+    asepriteValidation: {
+      artifactId: skillProductionFixture.validationArtifactId,
+      sha256: "4".repeat(64),
+    },
+    sourcePreview: {
+      artifactId: skillProductionFixture.sourcePreviewArtifactId,
+      sha256: "5".repeat(64),
+    },
+  };
+}
+
+function comparisonFrame(): Record<string, unknown> {
+  return {
+    entryIndex: 0,
+    frameIndex: 3,
+    internalPath: "sprite/effect/a.img",
+    width: 16,
+    height: 12,
+    canvasWidth: 32,
+    canvasHeight: 24,
+    x: 2,
+    y: -1,
+    decodedBgraSha256: "7".repeat(64),
   };
 }
 
@@ -342,67 +411,6 @@ function baseOutputProvenance(): Record<string, unknown> {
       clientCompatibilityProven: false,
     },
   };
-}
-
-function reportHarness(
-  selectRows: unknown[][],
-  input: PassedReport,
-): SkillProductionReportHarness {
-  let selectIndex = 0;
-  const forUpdateMock = vi.fn();
-  const recordForUpdate = (lock: string): void => {
-    forUpdateMock(lock);
-  };
-  const select = vi.fn(() => {
-    const rows = selectRows[selectIndex] ?? [];
-    selectIndex += 1;
-    return { from: vi.fn(() => queryBuilder(rows, recordForUpdate)) };
-  });
-  const updated: Record<string, unknown>[] = [];
-  const update = vi.fn(() => ({
-    set: vi.fn((value: Record<string, unknown>) => ({
-      where: vi.fn(() => {
-        updated.push(value);
-        return Promise.resolve([{ affectedRows: 1 }]);
-      }),
-    })),
-  }));
-  const transaction = vi.fn(
-    (
-      callback: (transaction: {
-        select: typeof select;
-        update: typeof update;
-      }) => unknown,
-    ) => Promise.resolve(callback({ select, update })),
-  );
-  return {
-    connection: {
-      database: { transaction },
-    } as unknown as DatabaseService,
-    input,
-    select,
-    update,
-    forUpdate: forUpdateMock,
-    updated,
-  };
-}
-
-function queryBuilder(
-  rows: unknown[],
-  recordForUpdate: (lock: string) => void,
-): Record<string, unknown> {
-  const query = {
-    innerJoin: vi.fn(() => query),
-    where: vi.fn(() => query),
-    limit: vi.fn(() => query),
-    for: vi.fn((lock: string) => {
-      recordForUpdate(lock);
-      return Promise.resolve(rows);
-    }),
-    then: (resolve: (value: unknown[]) => unknown): Promise<unknown> =>
-      Promise.resolve(rows).then(resolve),
-  };
-  return query;
 }
 
 function requiredSkill(
