@@ -25,7 +25,7 @@ import {
   npkInventories,
   npkInventoryEntries,
 } from "../../common/db/schema.js";
-import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import {
   resolveProfessionExecutionContext,
   type ResolveProfessionExecutionContextResult,
@@ -77,7 +77,7 @@ export class ProfessionSourceContextRepository {
    */
   async resolveSkillSourceContext(
     jobId: string,
-    input: RequestProfessionSkillExecutionInput,
+    input: ProfessionSkillLeaseInput,
   ): Promise<ResolveProfessionSkillSourceContextResult> {
     return this.connection.database.transaction(async (transaction) => {
       // 第一步：先锁定权威 Job，并用同一事务的数据库时间校验 lease 与冻结 payload。

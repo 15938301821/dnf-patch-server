@@ -32,6 +32,9 @@ const requiredDirectories = [
   "src/common/utils",
   "src/config",
   "src/modules",
+  "tests/common",
+  "tests/config",
+  "tests/modules",
 ];
 /** 构建、规则、计划、门禁与应用入口的必需文件快照。 */
 const requiredFiles = [
@@ -62,8 +65,8 @@ const requiredFiles = [
   "scripts/minio-bootstrap.sh",
   "scripts/smoke-dist.mjs",
   "scripts/test-mysql-runtime.mjs",
-  "src/app.module.spec.ts",
   "src/app.module.ts",
+  "tests/app.module.spec.ts",
   "src/main.ts",
   "tsconfig.build.json",
   "tsconfig.json",
@@ -110,6 +113,21 @@ const moduleClassNames = {
   run: "RunModule",
   worker: "WorkerModule",
 };
+/** 当前拥有测试的领域目录；新增首个模块测试时必须显式登记，禁止未知测试分区。 */
+const testedModules = [
+  "artifact",
+  "auth",
+  "factory",
+  "guardrail",
+  "image",
+  "job",
+  "model-configuration",
+  "npk",
+  "openai",
+  "profession",
+  "run",
+  "worker",
+];
 /** 禁止出现的旧式横向兼容目录，避免 Controller/Service/Repository 双轨架构。 */
 const forbiddenCompatibilityPaths = [
   "src/controllers",
@@ -138,7 +156,6 @@ async function validateStructure() {
   }
 
   await assertExactChildren("src", [
-    "app.module.spec.ts",
     "app.module.ts",
     "common",
     "config",
@@ -154,6 +171,29 @@ async function validateStructure() {
     "utils",
   ]);
   await assertExactChildren("src/modules", Object.keys(requiredModuleFiles));
+  await assertExactChildren("tests", [
+    "app.module.spec.ts",
+    "common",
+    "config",
+    "modules",
+  ]);
+  await assertExactChildren("tests/modules", testedModules);
+
+  const productionFiles = await listFilesRecursively("src");
+  for (const relativePath of productionFiles) {
+    assert(
+      !/\.(?:spec|test)\.ts$/u.test(relativePath) &&
+        !/(?:fixture|spec-support)\.ts$/u.test(relativePath),
+      `Test support must not exist in src: ${relativePath}`,
+    );
+    if (relativePath.endsWith(".ts")) {
+      const source = await readFile(pathFromRoot(relativePath), "utf8");
+      assert(
+        !/from\s+["']vitest["']/u.test(source),
+        `Production source must not import Vitest: ${relativePath}`,
+      );
+    }
+  }
 
   // 步骤 2：逐模块验证纵向角色文件，避免回退为并行 controllers/services 目录。
   for (const [moduleName, fileRoles] of Object.entries(requiredModuleFiles)) {
@@ -303,6 +343,27 @@ async function assertExactChildren(relativePath, expectedChildren) {
     JSON.stringify(actual) === JSON.stringify(expected),
     `Directory structure differs at ${relativePath}: ${JSON.stringify({ actual, expected })}`,
   );
+}
+
+/**
+ * 递归列出目录内文件，用于验证正式源码没有混入测试支撑代码。
+ * @param relativePath 已通过 pathFromRoot 约束的仓库相对目录。
+ * @returns 使用 `/` 分隔的仓库相对文件路径。
+ */
+async function listFilesRecursively(relativePath) {
+  const entries = await readdir(pathFromRoot(relativePath), {
+    withFileTypes: true,
+  });
+  const files = [];
+  for (const entry of entries) {
+    const childPath = `${relativePath}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...(await listFilesRecursively(childPath)));
+    } else if (entry.isFile()) {
+      files.push(childPath);
+    }
+  }
+  return files;
 }
 
 /**

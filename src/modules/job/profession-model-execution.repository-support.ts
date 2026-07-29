@@ -25,6 +25,7 @@ import {
 import { professionSkillModelExecutions } from "../../common/db/profession-model-execution-schema.js";
 import { databaseNow } from "./job-run-event.repository-support.js";
 import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import {
   resolveProfessionExecutionContext,
   type ResolveProfessionExecutionContextResult,
@@ -40,12 +41,13 @@ import {
   type ReserveProfessionModelExecutionResult,
 } from "./profession-model-execution.js";
 import { lockedProfessionModelExecution } from "./profession-model-execution-lock.repository-support.js";
+import { resolveSourceVisualInput } from "./profession-source-visual.repository-support.js";
 
 /** 锁定 Job，并按数据库时间解析当前 lease 对应的冻结单技能上下文。 */
 export async function resolveProfessionSkillExecution(
   connection: DatabaseService,
   jobId: string,
-  input: RequestProfessionSkillExecutionInput,
+  input: ProfessionSkillLeaseInput,
 ): Promise<ResolveProfessionExecutionContextResult> {
   return connection.database.transaction(async (transaction) => {
     const [job] = await transaction
@@ -78,6 +80,14 @@ export async function reserveProfessionSkillModelExecution(
     const now = await databaseNow(transaction);
     const gate = resolveProfessionExecutionContext(job, input, now);
     if (gate.status !== "accepted") return gate;
+    const sourceVisualInput = await resolveSourceVisualInput(
+      transaction,
+      jobId,
+      input,
+      gate.context.runId,
+      gate.context.skill.sourceEvidence.sourceFrameManifestArtifactId,
+    );
+    if (!sourceVisualInput) return { status: "source-visual-input-mismatch" };
     const identity: ProfessionModelExecutionIdentity = {
       runId: gate.context.runId,
       jobId,
@@ -87,8 +97,11 @@ export async function reserveProfessionSkillModelExecution(
       skillId: input.skillId,
       stage,
       promptSha256: gate.context.skill.promptSha256,
+      sourceVisualArtifactId: sourceVisualInput.artifactId,
+      sourceVisualSha256: sourceVisualInput.sha256,
+      sourceVisualFrameMapSha256: sourceVisualInput.frameMapSha256,
     };
-    if (stage === professionReferenceImageStage) {
+    if (stage === professionEngineerPlanStage) {
       const [prerequisite] = await transaction
         .select()
         .from(professionSkillModelExecutions)
@@ -99,7 +112,7 @@ export async function reserveProfessionSkillModelExecution(
             eq(professionSkillModelExecutions.skillId, input.skillId),
             eq(
               professionSkillModelExecutions.stage,
-              professionEngineerPlanStage,
+              professionReferenceImageStage,
             ),
           ),
         )
@@ -108,7 +121,7 @@ export async function reserveProfessionSkillModelExecution(
       if (!prerequisite) return { status: "prerequisite-not-passed" };
       const prerequisiteState = classifyProfessionModelExecution(prerequisite, {
         ...identity,
-        stage: professionEngineerPlanStage,
+        stage: professionReferenceImageStage,
       });
       if (prerequisiteState.status === "execution-integrity-failed") {
         return prerequisiteState;
@@ -158,7 +171,12 @@ export async function reserveProfessionSkillModelExecution(
     if (reservation[0].affectedRows !== 1) {
       throw new Error("PROFESSION_MODEL_EXECUTION_RESERVATION_CONFLICT");
     }
-    return { status: "execute", executionId, context: gate.context };
+    return {
+      status: "execute",
+      executionId,
+      context: gate.context,
+      sourceVisualInput,
+    };
   });
 }
 

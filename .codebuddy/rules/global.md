@@ -191,7 +191,9 @@ Nest Module 可以缩短正文，但必须说明它装配哪个领域能力、�
 - 目录使用 `kebab-case`；当前领域目录如 `artifact`、`guardrail`、`job` 保持稳定。
 - TypeScript 源文件使用仓库现有的 `kebab-case.role.ts` 形式，例如 `job-reaper.service.ts`、`run-fingerprint.spec.ts`。
 - 类、接口、类型和枚举使用 `PascalCase`；变量、函数和方法使用 `camelCase`；常量仅在真正不可变且具全局语义时使用 `UPPER_SNAKE_CASE`。
-- 测试文件与被测文件同目录，命名为 `*.spec.ts`。
+- 测试代码统一位于根级 `tests/`，按 `src/` 的 `common`、`config`、`modules/<domain>` 边界
+  镜像分块，命名为 `*.spec.ts`；fixture 与 spec-support 放入所属测试模块的 `fixtures/`。
+- `src/` 不得包含测试、fixture、spec-support 或 `vitest` 依赖，避免测试支撑代码进入正式构建。
 - 项目使用 ESM。TypeScript 相对导入必须沿用仓库约定的 `.js` 后缀；类型依赖使用 `import type`。
 - 使用 Prettier 和 ESLint 的现有格式，不引入并行格式化规则。
 - 领域模块不得导入其他模块的 repository、内部辅助函数或数据库行类型；跨模块协作只能依赖对方导出的 service、公开契约或明确的基础设施接口。

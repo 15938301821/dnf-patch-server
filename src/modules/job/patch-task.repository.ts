@@ -42,7 +42,7 @@ import {
   mapPatchTaskProgress,
   mapPatchTaskStatus,
 } from "./patch-task-status.js";
-import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import type { ResolveProfessionExecutionContextResult } from "./profession-execution-context.js";
 import { databaseNow } from "./job-run-event.repository-support.js";
 import { reportProfessionSkillProduction } from "./patch-task-skill-production.repository-support.js";
@@ -342,7 +342,7 @@ export class PatchTaskRepository {
 
   async resolveProfessionSkillExecution(
     jobId: string,
-    input: RequestProfessionSkillExecutionInput,
+    input: ProfessionSkillLeaseInput,
   ): Promise<ResolveProfessionExecutionContextResult> {
     return resolveProfessionExecution(this.connection, jobId, input);
   }

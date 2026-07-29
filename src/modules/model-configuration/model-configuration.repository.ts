@@ -11,13 +11,17 @@ import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../../common/db/database.service.js";
 import { userModelConfigurations, users } from "../../common/db/schema.js";
 import type { EncryptedModelCredential } from "./model-credential-cipher.js";
-import type { ModelRole } from "./model-configuration.contracts.js";
+import type {
+  ModelReasoningEffort,
+  ModelRole,
+} from "./model-configuration.contracts.js";
 
 export interface ModelConfigurationRecord {
   userId: string;
   role: ModelRole;
   endpoint: string;
   model: string;
+  reasoningEffort: ModelReasoningEffort;
   credential: EncryptedModelCredential;
   version: number;
 }
@@ -26,6 +30,7 @@ export interface ModelConfigurationWrite {
   role: ModelRole;
   endpoint: string;
   model: string;
+  reasoningEffort: ModelReasoningEffort;
   credential?: EncryptedModelCredential;
 }
 
@@ -93,6 +98,7 @@ export class ModelConfigurationRepository {
             .set({
               endpoint: write.endpoint,
               model: write.model,
+              reasoningEffort: write.reasoningEffort,
               version: current.version + 1,
               updatedAt: now,
               ...(write.credential ? credentialColumns(write.credential) : {}),
@@ -108,6 +114,7 @@ export class ModelConfigurationRepository {
           role: write.role,
           endpoint: write.endpoint,
           model: write.model,
+          reasoningEffort: write.reasoningEffort,
           ...credentialColumns(credential),
           version: 1,
           createdAt: now,
@@ -146,6 +153,7 @@ function toRecord(
     role,
     endpoint: row.endpoint,
     model: row.model,
+    reasoningEffort: row.reasoningEffort as ModelReasoningEffort,
     credential: {
       ciphertext: row.credentialCiphertext,
       nonce: row.credentialNonce,

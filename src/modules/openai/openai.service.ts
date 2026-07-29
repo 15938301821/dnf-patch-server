@@ -10,6 +10,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { sha256Json } from "../../common/utils/canonical.js";
 import { resolveOpenAiEndpoint } from "../../config/openai-endpoint.js";
 import type {
+  ModelReasoningEffort,
   ModelRole as ConfigurationRole,
   ResolvedModelRoleConfiguration,
 } from "../model-configuration/model-configuration.contracts.js";
@@ -18,6 +19,7 @@ import { RunService } from "../run/run.service.js";
 import type {
   ImageModelRequest,
   ImageModelResult,
+  ModelImageInput,
   ModelEgressGuard,
   ModelCallView,
   ModelRole,
@@ -35,11 +37,63 @@ import {
   type OpenAiRepositoryPort,
 } from "./openai.repository.js";
 
+const maximumModelImageBytes = 64 * 1024 * 1024;
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
 interface ModelConfigurationLookupPort {
   resolve(
     userId: string,
     role: ConfigurationRole,
   ): ReturnType<ModelConfigurationService["resolve"]>;
+}
+
+function verifiedImages(
+  images: readonly ModelImageInput[],
+): readonly ModelImageInput[] {
+  if (images.length < 1 || images.length > 2) {
+    throw new Error("MODEL_IMAGE_INPUT_COUNT_INVALID");
+  }
+  const verified = images.map(verifiedImage);
+  if (new Set(verified.map((image) => image.role)).size !== verified.length) {
+    throw new Error("MODEL_IMAGE_INPUT_ROLE_DUPLICATED");
+  }
+  return verified;
+}
+
+function verifiedImage(image: ModelImageInput): ModelImageInput {
+  const bytes = Buffer.from(image.bytes);
+  if (
+    bytes.byteLength <= 0 ||
+    bytes.byteLength > maximumModelImageBytes ||
+    bytes.byteLength < pngSignature.byteLength ||
+    !bytes.subarray(0, pngSignature.byteLength).equals(pngSignature) ||
+    !/^[A-F0-9]{64}$/u.test(image.sha256) ||
+    sha256Bytes(bytes) !== image.sha256
+  ) {
+    throw new Error("MODEL_IMAGE_INPUT_INVALID");
+  }
+  return { ...image, bytes };
+}
+
+function imageIdentities(
+  images: readonly ModelImageInput[],
+): readonly ReturnType<typeof imageIdentity>[] {
+  return verifiedImages(images).map(imageIdentity);
+}
+
+function imageIdentity(image: ModelImageInput): {
+  role: ModelImageInput["role"];
+  mediaType: "image/png";
+  byteLength: number;
+  sha256: string;
+} {
+  const verified = verifiedImage(image);
+  return {
+    role: verified.role,
+    mediaType: verified.mediaType,
+    byteLength: verified.bytes.byteLength,
+    sha256: verified.sha256,
+  };
 }
 
 interface RunLookupPort {
@@ -49,6 +103,7 @@ interface RunLookupPort {
 interface ResolvedCallContext {
   blocked?: undefined;
   model: string;
+  reasoningEffort: ModelReasoningEffort;
   endpointIdentity: string;
   modelConfigurationVersion: number;
   provider: OpenAiCallConfiguration;
@@ -83,9 +138,17 @@ export class OpenAiService {
       endpointIdentity: context.endpointIdentity,
       ...(context.blocked
         ? {}
-        : { modelConfigurationVersion: context.modelConfigurationVersion }),
+        : {
+            modelConfigurationVersion: context.modelConfigurationVersion,
+            ...(context.reasoningEffort === "default"
+              ? {}
+              : { reasoning: { effort: context.reasoningEffort } }),
+          }),
       instructions: request.instructions,
       input: request.input,
+      ...(request.imageInputs
+        ? { imageInputs: imageIdentities(request.imageInputs) }
+        : {}),
       schemaName: request.schemaName,
       tools: [],
       store: false,
@@ -109,8 +172,12 @@ export class OpenAiService {
       const response = await this.provider.structured(
         {
           model: context.model,
+          reasoningEffort: context.reasoningEffort,
           instructions: request.instructions,
           input: request.input,
+          ...(request.imageInputs
+            ? { imageInputs: verifiedImages(request.imageInputs) }
+            : {}),
           schema: request.schema,
           schemaName: request.schemaName,
         },
@@ -153,10 +220,13 @@ export class OpenAiService {
         ? {}
         : { modelConfigurationVersion: context.modelConfigurationVersion }),
       prompt: request.prompt,
+      ...(request.sourceImage
+        ? { sourceImage: imageIdentity(request.sourceImage) }
+        : {}),
       n: 1,
       size: "1536x1024",
       quality: "high",
-      background: "opaque",
+      background: "transparent",
       outputFormat: "png",
     });
     if (context.blocked) {
@@ -179,6 +249,9 @@ export class OpenAiService {
         {
           model: context.model,
           prompt: request.prompt,
+          ...(request.sourceImage
+            ? { sourceImage: verifiedImage(request.sourceImage) }
+            : {}),
         },
         context.provider,
       );
@@ -228,6 +301,7 @@ export class OpenAiService {
     const endpoint = resolveOpenAiEndpoint(configuration.endpoint);
     return {
       model: configuration.model,
+      reasoningEffort: configuration.reasoningEffort,
       endpointIdentity: endpoint.identity,
       modelConfigurationVersion: configuration.version,
       provider: {

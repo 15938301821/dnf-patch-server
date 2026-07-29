@@ -23,6 +23,14 @@ import type { z } from "zod";
 /** 服务端固定映射的模型职责；调用方不能借此传入任意角色或 Provider 能力。 */
 export type ModelRole = "orchestrator" | "engineer" | "artist";
 
+/** 仅在一次受控模型调用内存中存在的 PNG 输入；摘要用于出站前复核和脱敏审计。 */
+export interface ModelImageInput {
+  role: "official-source" | "generated-reference";
+  mediaType: "image/png";
+  bytes: Uint8Array;
+  sha256: string;
+}
+
 /** ModelCall 审计记录的有限状态机；`running` 之外的状态均不表示候选补丁已验证或部署。 */
 export type ModelCallStatus =
   | "running"
@@ -64,6 +72,8 @@ export interface StructuredModelRequest<T> {
   instructions: string;
   /** 已受上游业务边界约束的文本输入；哈希会进入审计，但原文不应写入 ModelCall 记录。 */
   input: string;
+  /** Engineer V2 固定为官方源图和生成参考图；其他结构化调用可不携带图片。 */
+  imageInputs?: readonly ModelImageInput[];
 }
 
 /**
@@ -78,6 +88,8 @@ export interface ImageModelRequest {
   role: "artist";
   /** 服务端构建的受限提示词；调用完成后只保留哈希审计，不持久化图片 BLOB。 */
   prompt: string;
+  /** Artist V2 以官方源图为视觉条件生成强对比参考图。 */
+  sourceImage?: ModelImageInput;
 }
 
 /**

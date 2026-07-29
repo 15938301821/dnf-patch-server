@@ -17,7 +17,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import type { ProfessionSkillSourceContextView } from "./profession-source-context.contracts.js";
 import {
   ProfessionSourceContextRepository,
@@ -27,7 +27,7 @@ import {
 interface ProfessionSourceContextRepositoryPort {
   resolveSkillSourceContext(
     jobId: string,
-    input: RequestProfessionSkillExecutionInput,
+    input: ProfessionSkillLeaseInput,
   ): Promise<ResolveProfessionSkillSourceContextResult>;
 }
 
@@ -50,7 +50,7 @@ export class ProfessionSourceContextService {
    */
   async getSkillSourceContext(
     jobId: string,
-    input: RequestProfessionSkillExecutionInput,
+    input: ProfessionSkillLeaseInput,
   ): Promise<ProfessionSkillSourceContextView> {
     const result = await this.sources.resolveSkillSourceContext(jobId, input);
     if (result.status === "accepted") return result.context;

@@ -26,6 +26,10 @@ import {
   aggregateModelThroughput,
   type PatchTaskDetailModelCallRecord,
 } from "./patch-task-model-throughput.js";
+import {
+  professionEngineerPlanStage,
+  readableProfessionReferenceImageStages,
+} from "./profession-model-execution.js";
 
 /** Repository 传入的任务主记录投影；owner 已在查询条件中验证，不在 ViewModel 中回显。 */
 export interface PatchTaskDetailBase {
@@ -129,11 +133,14 @@ function mapSkill(
       execution.skillId === skill.skillId &&
       execution.attempt === skill.attempt,
   );
-  const engineer = current.find(
-    (execution) => execution.stage === "engineer-plan-v1",
-  );
-  const reference = current.find(
-    (execution) => execution.stage === "reference-image-v1",
+  const engineer = findVersionedExecution(current, [
+    professionEngineerPlanStage,
+    "engineer-plan-v2",
+    "engineer-plan-v1",
+  ]);
+  const reference = findVersionedExecution(
+    current,
+    readableProfessionReferenceImageStages,
   );
   const terminalWithoutPreciseStage =
     skill.status === "failed" || skill.status === "blocked";
@@ -175,6 +182,18 @@ function mapSkill(
       reference.outputArtifactId !== null &&
       reference.outputMediaType === "image/png",
   };
+}
+
+/** 按新到旧选择同一逻辑阶段，避免数据库返回顺序让历史记录遮蔽当前 V3 证据。 */
+function findVersionedExecution(
+  executions: readonly PatchTaskDetailExecutionRecord[],
+  stages: readonly string[],
+): PatchTaskDetailExecutionRecord | undefined {
+  for (const stage of stages) {
+    const execution = executions.find((candidate) => candidate.stage === stage);
+    if (execution) return execution;
+  }
+  return undefined;
 }
 
 function fallbackModelStatus(production: string): PatchTaskStepStatus {

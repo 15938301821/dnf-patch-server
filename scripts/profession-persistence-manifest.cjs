@@ -88,7 +88,10 @@ const manifestSchema = z
     entries: z.array(manifestEntrySchema).min(1).max(500),
     safety: z
       .object({
-        referenceImageUsedForRuntimePixels: z.literal(false),
+        referenceImageUsedAsVisualGuidance: z.literal(true),
+        referenceImageDirectPixelReplacement: z.literal(false),
+        sourceGeometryPreserved: z.literal(true),
+        sourceAlphaPreserved: z.literal(true),
         deploymentAuthorized: z.literal(false),
         deploymentPerformed: z.literal(false),
         fullSkillCoverageProven: z.literal(false),

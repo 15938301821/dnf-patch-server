@@ -42,7 +42,7 @@ export interface PatchTaskPreviewArtifactDownloadPort {
 
 /**
  * 为旧参考图端点签发兼容授权。
- * @returns 当前 attempt reference-image-v1 的脱敏元数据和短期 URL。
+ * @returns 当前 attempt 现行参考图阶段的脱敏元数据和短期 URL。
  */
 export async function authorizePatchTaskReferenceImageDownload(
   patchTasks: PatchTaskPreviewRepositoryPort,

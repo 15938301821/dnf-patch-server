@@ -57,6 +57,7 @@ export class ModelConfigurationService {
         role,
         endpoint: input[role].endpoint,
         model: input[role].model,
+        reasoningEffort: input[role].reasoningEffort,
         ...(input[role].apiKey
           ? {
               credential: this.cipher.encrypt(userId, role, input[role].apiKey),
@@ -89,6 +90,7 @@ export class ModelConfigurationService {
       return {
         endpoint: record.endpoint,
         model: record.model,
+        reasoningEffort: reasoningEffortForRole(role, record.reasoningEffort),
         keyConfigured: true,
         apiKey: this.cipher.decrypt(userId, role, record.credential),
         version: record.version,
@@ -116,15 +118,27 @@ export class ModelConfigurationService {
       return {
         endpoint: record.endpoint,
         model: record.model,
+        reasoningEffort: reasoningEffortForRole(role, record.reasoningEffort),
         keyConfigured: true,
       };
     }
     return {
       endpoint: this.config.getOrThrow("OPENAI_BASE_URL", { infer: true }),
       model: this.config.getOrThrow(modelKeyFor(role), { infer: true }),
+      reasoningEffort: role === "referenceGenerator" ? "default" : "medium",
       keyConfigured: false,
     };
   }
+}
+
+/** 图片角色保持内部 default；历史文本 default 在读取和调用边界统一升级为 medium。 */
+function reasoningEffortForRole(
+  role: ModelRole,
+  reasoningEffort: ModelRoleConfiguration["reasoningEffort"],
+): ModelRoleConfiguration["reasoningEffort"] {
+  return role !== "referenceGenerator" && reasoningEffort === "default"
+    ? "medium"
+    : reasoningEffort;
 }
 
 function modelKeyFor(

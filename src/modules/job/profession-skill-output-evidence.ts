@@ -56,8 +56,21 @@ const comparisonFrameSchema = z
   })
   .strict();
 
-const outputEvidenceFields = {
-  schemaVersion: z.literal(1),
+/** Worker 独立读取源帧、参考图和 runtime 后计算的固定质量摘要；不能由 Report DTO 自报。 */
+const referenceTransferQualitySchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    evaluatedFrameCount: z.number().int().positive().max(100_000),
+    evaluatedPixelCount: z.number().int().positive().max(1_000_000_000),
+    referenceCoverage: z.number().min(0.8).max(1),
+    referenceSimilarity: z.number().min(0.9).max(1),
+    sourceEdgeEnergy: z.number().min(0).max(255),
+    runtimeEdgeEnergy: z.number().min(0).max(255),
+    edgeEnergyRatio: z.number().min(1.01).max(999),
+  })
+  .strict();
+
+const outputEvidenceIdentityFields = {
   jobId: z.uuid(),
   attempt: z.number().int().min(1).max(10),
   skillId: z.uuid(),
@@ -80,9 +93,37 @@ const outputEvidenceFields = {
       adapterSha256: uppercaseSha256Schema,
     })
     .strict(),
+};
+
+const currentOutputEvidenceFields = {
+  schemaVersion: z.literal(2),
+  ...outputEvidenceIdentityFields,
+  referenceTransferQuality: referenceTransferQualitySchema,
   safety: z
     .object({
-      referenceImageUsedForRuntimePixels: z.literal(false),
+      referenceImageUsedAsRuntimeRgbSource: z.literal(true),
+      referenceImageDirectPixelReplacement: z.literal(false),
+      referenceTransferQualityPassed: z.literal(true),
+      sourceGeometryPreserved: z.literal(true),
+      sourceAlphaPreserved: z.literal(true),
+      deploymentAuthorized: z.literal(false),
+      deploymentPerformed: z.literal(false),
+      fullSkillCoverageProven: z.literal(false),
+      clientCompatibilityProven: z.literal(false),
+    })
+    .strict(),
+};
+
+/** 历史 V1 只允许详情读取；当前接收事务和 Package 必须显式要求 V2 kind。 */
+const legacyOutputEvidenceFields = {
+  schemaVersion: z.literal(1),
+  ...outputEvidenceIdentityFields,
+  safety: z
+    .object({
+      referenceImageUsedAsVisualGuidance: z.literal(true),
+      referenceImageDirectPixelReplacement: z.literal(false),
+      sourceGeometryPreserved: z.literal(true),
+      sourceAlphaPreserved: z.literal(true),
       deploymentAuthorized: z.literal(false),
       deploymentPerformed: z.literal(false),
       fullSkillCoverageProven: z.literal(false),
@@ -93,23 +134,23 @@ const outputEvidenceFields = {
 
 const asepriteProjectsProvenanceSchema = z
   .object({
-    ...outputEvidenceFields,
-    kind: z.literal("profession-aseprite-projects-v1"),
+    ...currentOutputEvidenceFields,
+    kind: z.literal("profession-reference-projects-v2"),
   })
   .strict();
 
 const validationProvenanceSchema = z
   .object({
-    ...outputEvidenceFields,
-    kind: z.literal("profession-aseprite-validation-v1"),
+    ...currentOutputEvidenceFields,
+    kind: z.literal("profession-reference-validation-v2"),
     asepriteProjects: boundArtifactSchema,
   })
   .strict();
 
 const sourcePreviewProvenanceSchema = z
   .object({
-    ...outputEvidenceFields,
-    kind: z.literal("profession-source-frame-preview-v1"),
+    ...currentOutputEvidenceFields,
+    kind: z.literal("profession-source-frame-preview-v2"),
     frame: comparisonFrameSchema,
     asepriteValidation: boundArtifactSchema,
   })
@@ -117,7 +158,41 @@ const sourcePreviewProvenanceSchema = z
 
 const resultPreviewProvenanceSchema = z
   .object({
-    ...outputEvidenceFields,
+    ...currentOutputEvidenceFields,
+    kind: z.literal("profession-reference-result-preview-v2"),
+    frame: comparisonFrameSchema,
+    asepriteValidation: boundArtifactSchema,
+    sourcePreview: boundArtifactSchema,
+  })
+  .strict();
+
+const legacyProjectsProvenanceSchema = z
+  .object({
+    ...legacyOutputEvidenceFields,
+    kind: z.literal("profession-aseprite-projects-v1"),
+  })
+  .strict();
+
+const legacyValidationProvenanceSchema = z
+  .object({
+    ...legacyOutputEvidenceFields,
+    kind: z.literal("profession-aseprite-validation-v1"),
+    asepriteProjects: boundArtifactSchema,
+  })
+  .strict();
+
+const legacySourcePreviewProvenanceSchema = z
+  .object({
+    ...legacyOutputEvidenceFields,
+    kind: z.literal("profession-source-frame-preview-v1"),
+    frame: comparisonFrameSchema,
+    asepriteValidation: boundArtifactSchema,
+  })
+  .strict();
+
+const legacyResultPreviewProvenanceSchema = z
+  .object({
+    ...legacyOutputEvidenceFields,
     kind: z.literal("profession-aseprite-result-preview-v1"),
     frame: comparisonFrameSchema,
     asepriteValidation: boundArtifactSchema,
@@ -133,6 +208,10 @@ export const professionSkillOutputProvenanceSchema = z.discriminatedUnion(
     validationProvenanceSchema,
     sourcePreviewProvenanceSchema,
     resultPreviewProvenanceSchema,
+    legacyProjectsProvenanceSchema,
+    legacyValidationProvenanceSchema,
+    legacySourcePreviewProvenanceSchema,
+    legacyResultPreviewProvenanceSchema,
   ],
 );
 

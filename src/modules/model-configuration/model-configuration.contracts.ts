@@ -16,6 +16,19 @@ export const modelRoleSchema = z.enum([
 
 export type ModelRole = z.infer<typeof modelRoleSchema>;
 
+/** 持久化推理强度；default 仅兼容图片角色和历史文本记录。 */
+export const modelReasoningEffortSchema = z.enum([
+  "default",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+]);
+
+export type ModelReasoningEffort = z.infer<typeof modelReasoningEffortSchema>;
+
 const modelEndpointSchema = z
   .string()
   .trim()
@@ -35,6 +48,7 @@ export const saveModelRoleConfigurationSchema = z
   .object({
     endpoint: modelEndpointSchema,
     model: z.string().trim().min(1).max(120),
+    reasoningEffort: modelReasoningEffortSchema,
     apiKey: z
       .string()
       .min(1)
@@ -50,7 +64,25 @@ export const saveModelConfigurationSchema = z
     spriteProcessor: saveModelRoleConfigurationSchema,
     referenceGenerator: saveModelRoleConfigurationSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    for (const role of ["orchestrator", "spriteProcessor"] as const) {
+      if (input[role].reasoningEffort === "default") {
+        context.addIssue({
+          code: "custom",
+          path: [role, "reasoningEffort"],
+          message: "文本模型必须选择明确的推理强度。",
+        });
+      }
+    }
+    if (input.referenceGenerator.reasoningEffort !== "default") {
+      context.addIssue({
+        code: "custom",
+        path: ["referenceGenerator", "reasoningEffort"],
+        message: "图片生成角色仅支持接口默认推理强度。",
+      });
+    }
+  });
 
 export type SaveModelRoleConfigurationInput = z.infer<
   typeof saveModelRoleConfigurationSchema
@@ -61,6 +93,7 @@ export type SaveModelConfigurationInput = z.infer<
 export interface ModelRoleConfiguration {
   endpoint: string;
   model: string;
+  reasoningEffort: ModelReasoningEffort;
   keyConfigured: boolean;
 }
 

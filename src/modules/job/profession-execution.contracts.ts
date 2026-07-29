@@ -14,8 +14,10 @@
  */
 import { z } from "zod";
 
-/** Worker 请求固定 Profession 技能步骤时必须提交的完整 fencing 身份。 */
-export const requestProfessionSkillExecutionSchema = z
+const sha256Schema = z.string().regex(/^[A-F0-9]{64}$/u);
+
+/** Worker 读取固定 Profession 技能源事实时必须提交的完整 fencing 身份。 */
+export const professionSkillLeaseSchema = z
   .object({
     workerId: z.uuid(),
     leaseId: z.uuid(),
@@ -23,6 +25,46 @@ export const requestProfessionSkillExecutionSchema = z
     skillId: z.uuid(),
   })
   .strict();
+
+/** Worker 请求模型步骤时还必须绑定同 attempt 已 finalize 的官方源图集。 */
+export const requestProfessionSkillExecutionSchema = professionSkillLeaseSchema
+  .extend({
+    sourceVisualInput: z
+      .object({
+        artifactId: z.uuid(),
+        mediaType: z.literal("image/png"),
+        byteLength: z
+          .number()
+          .int()
+          .positive()
+          .max(64 * 1024 * 1024),
+        sha256: sha256Schema,
+        frameMapSha256: sha256Schema,
+      })
+      .strict(),
+  })
+  .strict();
+
+/** 源图上传会话和 Artifact 必须共同携带的可复核 provenance。 */
+export const professionSourceVisualInputProvenanceSchema = z
+  .object({
+    kind: z.literal("profession-source-visual-input-v2"),
+    schemaVersion: z.literal(2),
+    jobId: z.uuid(),
+    runId: z.uuid(),
+    attempt: z.number().int().min(1).max(10),
+    skillId: z.uuid(),
+    sourceSha256: sha256Schema,
+    frameManifestArtifactId: z.uuid(),
+    frameManifestSha256: sha256Schema,
+    frameMapSha256: sha256Schema,
+    frameCount: z.number().int().positive().max(2_048),
+  })
+  .strict();
+
+export type ProfessionSkillLeaseInput = z.infer<
+  typeof professionSkillLeaseSchema
+>;
 
 /** 经运行时校验的 Profession 技能执行请求，不携带可执行内容或用户凭据。 */
 export type RequestProfessionSkillExecutionInput = z.infer<

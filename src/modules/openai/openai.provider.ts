@@ -7,12 +7,14 @@
  */
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
+import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 import sharp from "sharp";
 import { z } from "zod";
 import type { Environment } from "../../config/environment.js";
-import type { ModelUsage } from "./openai.contracts.js";
+import type { ModelReasoningEffort } from "../model-configuration/model-configuration.contracts.js";
+import type { ModelImageInput, ModelUsage } from "./openai.contracts.js";
 
 const maxImageBytes = 32 * 1024 * 1024;
 const maxEncodedImageLength = 4 * Math.ceil(maxImageBytes / 3);
@@ -78,15 +80,18 @@ export interface OpenAiCallConfiguration {
 
 export interface StructuredProviderRequest<T> {
   model: string;
+  reasoningEffort: ModelReasoningEffort;
   schemaName: string;
   schema: z.ZodType<T>;
   instructions: string;
   input: string;
+  imageInputs?: readonly ModelImageInput[];
 }
 
 export interface ImageProviderRequest {
   model: string;
   prompt: string;
+  sourceImage?: ModelImageInput;
 }
 
 /** 结构化模型调用的已校验结果；usage 缺失时调用方必须显示为未计量。 */
@@ -133,14 +138,41 @@ export class OpenAiProvider implements OpenAiProviderPort {
     configuration: OpenAiCallConfiguration,
   ): Promise<StructuredProviderResult<T>> {
     const client = this.client(configuration);
-    const response = await client.responses.parse({
+    const body: ResponseCreateParamsNonStreaming = {
       model: request.model,
+      ...(request.reasoningEffort === "default" ||
+      request.reasoningEffort === "ultra"
+        ? {}
+        : { reasoning: { effort: request.reasoningEffort } }),
       instructions: request.instructions,
-      input: request.input,
+      input: request.imageInputs?.length
+        ? [
+            {
+              role: "user",
+              content: [
+                { type: "input_text" as const, text: request.input },
+                ...request.imageInputs.map((image) => ({
+                  type: "input_image" as const,
+                  detail: "original" as const,
+                  image_url: dataUrl(image),
+                })),
+              ],
+            },
+          ]
+        : request.input,
       text: { format: zodTextFormat(request.schema, request.schemaName) },
       tools: [],
       store: false,
-    });
+    };
+    const response = await client.responses.parse(
+      body,
+      request.reasoningEffort === "ultra"
+        ? {
+            // ultra 是 OpenAI 兼容端点扩展值；原样发送，官方端点不支持时不得降级或伪造成功。
+            body: { ...body, reasoning: { effort: "ultra" } },
+          }
+        : undefined,
+    );
     return {
       responseId: response.id,
       value: request.schema.parse(response.output_parsed),
@@ -155,15 +187,31 @@ export class OpenAiProvider implements OpenAiProviderPort {
   ): Promise<ImageProviderResult> {
     const client = this.client(configuration);
     try {
-      const response = await client.images.generate({
-        model: request.model,
-        prompt: request.prompt,
-        n: 1,
-        size: "1536x1024",
-        quality: "high",
-        background: "opaque",
-        output_format: "png",
-      });
+      const response = request.sourceImage
+        ? await client.images.edit({
+            model: request.model,
+            image: await toFile(
+              Buffer.from(request.sourceImage.bytes),
+              "official-source.png",
+              { type: request.sourceImage.mediaType },
+            ),
+            prompt: request.prompt,
+            n: 1,
+            size: "1536x1024",
+            quality: "high",
+            background: "transparent",
+            output_format: "png",
+            input_fidelity: "high",
+          })
+        : await client.images.generate({
+            model: request.model,
+            prompt: request.prompt,
+            n: 1,
+            size: "1536x1024",
+            quality: "high",
+            background: "transparent",
+            output_format: "png",
+          });
       return {
         bytes: decodePngPayload(response.data?.[0]?.b64_json),
         ...optionalUsage(normalizeOpenAiUsage(response.usage)),
@@ -194,7 +242,26 @@ export class OpenAiProvider implements OpenAiProviderPort {
       buildGeminiImageUrl(baseUrl, request.model),
       {
         body: {
-          contents: [{ role: "user", parts: [{ text: request.prompt }] }],
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: request.prompt },
+                ...(request.sourceImage
+                  ? [
+                      {
+                        inlineData: {
+                          mimeType: request.sourceImage.mediaType,
+                          data: Buffer.from(request.sourceImage.bytes).toString(
+                            "base64",
+                          ),
+                        },
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ],
           generationConfig: {
             responseModalities: ["TEXT", "IMAGE"],
             imageConfig: { aspectRatio: "3:2", imageSize: "1K" },
@@ -216,6 +283,10 @@ export class OpenAiProvider implements OpenAiProviderPort {
       maxRetries: this.maxRetries,
     });
   }
+}
+
+function dataUrl(image: ModelImageInput): string {
+  return `data:image/png;base64,${Buffer.from(image.bytes).toString("base64")}`;
 }
 
 /** OpenAI Responses/Images 共用 snake_case usage；畸形遥测被忽略，不能推翻已校验业务结果。 */

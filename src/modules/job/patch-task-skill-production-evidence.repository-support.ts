@@ -7,7 +7,7 @@
  * @relatedPlan N/A - 当前 Profession 单技能真实生产链补全
  *
  * 调用关系：单技能接收事务在已锁定 Job 和 production 后调用；本文件按 Engineer -> Artist ->
- * source -> projects upload -> validation upload 的固定顺序查询并加锁。输入是当前 lease 的 passed DTO
+ * source -> projects upload -> validation upload -> 双预览的固定顺序查询并加锁。输入是当前 lease 的 passed DTO
  * 与已恢复的冻结上下文，输出为有限证据结果。副作用仅为 transaction 内的数据库读取与行锁。
  * 安全边界：模型 ID 只能来自 Server 执行记录，Artifact 必须由同一 Job/Worker/lease/attempt 的
  * finalized 会话产生；两侧 provenance、对象元数据和固定安全 false 任一漂移都 fail-closed。
@@ -55,6 +55,11 @@ type ModelEvidence = Exclude<
   Awaited<ReturnType<typeof lockedPassedModelEvidence>>,
   undefined
 >;
+type CurrentProjectsProvenance = Extract<
+  ProfessionSkillOutputProvenance,
+  { kind: "profession-reference-projects-v2" }
+>;
+type CurrentBaseProvenance = Omit<CurrentProjectsProvenance, "kind">;
 
 interface SourceEvidence {
   runId: string;
@@ -112,11 +117,24 @@ export async function resolvePassedProductionEvidence(
   if (!sourceEvidence) {
     return { status: "skill-production-evidence-mismatch" };
   }
+  // 质量摘要不来自 Worker Report；先要求 projects 的 upload session 与 Artifact 双侧 JSON 完全一致，
+  // 再把其中的受限摘要作为四角色共同期望值，防止各角色分别伪造一套指标。
+  const projectsProvenance = await resolveOutputProvenance(
+    transaction,
+    input.asepriteArtifactId,
+  );
+  if (
+    !projectsProvenance ||
+    projectsProvenance.kind !== "profession-reference-projects-v2"
+  ) {
+    return { status: "artifact-evidence-mismatch" };
+  }
   const baseProvenance = createBaseProvenance(
     jobId,
     input,
     sourceEvidence,
     modelEvidence,
+    projectsProvenance.referenceTransferQuality,
   );
   const projects = await lockedFinalizedOutputArtifact(
     transaction,
@@ -126,7 +144,7 @@ export async function resolvePassedProductionEvidence(
     input.asepriteArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-aseprite-projects-v1",
+      kind: "profession-reference-projects-v2",
     },
   );
   if (!projects) return { status: "artifact-evidence-mismatch" };
@@ -138,7 +156,7 @@ export async function resolvePassedProductionEvidence(
     input.validationArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-aseprite-validation-v1",
+      kind: "profession-reference-validation-v2",
       asepriteProjects: {
         artifactId: projects.artifactId,
         sha256: projects.sha256,
@@ -152,7 +170,7 @@ export async function resolvePassedProductionEvidence(
   );
   if (
     !sourceProvenance ||
-    sourceProvenance.kind !== "profession-source-frame-preview-v1"
+    sourceProvenance.kind !== "profession-source-frame-preview-v2"
   ) {
     return { status: "artifact-evidence-mismatch" };
   }
@@ -164,7 +182,7 @@ export async function resolvePassedProductionEvidence(
     input.sourcePreviewArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-source-frame-preview-v1",
+      kind: "profession-source-frame-preview-v2",
       frame: sourceProvenance.frame,
       asepriteValidation: {
         artifactId: validation.artifactId,
@@ -182,7 +200,7 @@ export async function resolvePassedProductionEvidence(
     input.resultPreviewArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-aseprite-result-preview-v1",
+      kind: "profession-reference-result-preview-v2",
       frame: sourceProvenance.frame,
       asepriteValidation: {
         artifactId: validation.artifactId,
@@ -251,10 +269,16 @@ async function lockedPassedModelEvidence(
   const engineerPlan = classifyProfessionModelExecution(engineer, {
     ...identity,
     stage: professionEngineerPlanStage,
+    sourceVisualArtifactId: engineer.sourceVisualArtifactId ?? "",
+    sourceVisualSha256: engineer.sourceVisualSha256 ?? "",
+    sourceVisualFrameMapSha256: engineer.sourceVisualFrameMapSha256 ?? "",
   });
   const referenceImage = classifyProfessionModelExecution(artist, {
     ...identity,
     stage: professionReferenceImageStage,
+    sourceVisualArtifactId: artist.sourceVisualArtifactId ?? "",
+    sourceVisualSha256: artist.sourceVisualSha256 ?? "",
+    sourceVisualFrameMapSha256: artist.sourceVisualFrameMapSha256 ?? "",
   });
   return engineerPlan.status === "passed" &&
     engineerPlan.stage === professionEngineerPlanStage &&
@@ -359,9 +383,10 @@ function createBaseProvenance(
   input: PassedReport,
   source: SourceEvidence,
   model: ModelEvidence,
-): Omit<ProfessionSkillOutputProvenance, "kind" | "asepriteProjects"> {
+  referenceTransferQuality: CurrentProjectsProvenance["referenceTransferQuality"],
+): CurrentBaseProvenance {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     jobId,
     attempt: input.attempt,
     skillId: input.skillId,
@@ -375,13 +400,18 @@ function createBaseProvenance(
       artifactId: model.referenceImage.outputArtifactId,
       sha256: model.referenceImage.outputSha256,
     },
+    referenceTransferQuality,
     aseprite: {
       profileId: "aseprite-cli",
       binarySha256: input.asepriteBinarySha256.toUpperCase(),
       adapterSha256: input.asepriteAdapterSha256.toUpperCase(),
     },
     safety: {
-      referenceImageUsedForRuntimePixels: false,
+      referenceImageUsedAsRuntimeRgbSource: true,
+      referenceImageDirectPixelReplacement: false,
+      referenceTransferQualityPassed: true,
+      sourceGeometryPreserved: true,
+      sourceAlphaPreserved: true,
       deploymentAuthorized: false,
       deploymentPerformed: false,
       fullSkillCoverageProven: false,

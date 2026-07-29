@@ -19,6 +19,11 @@
     "incremental": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "drizzle.config.ts", "vitest.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "drizzle.config.ts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

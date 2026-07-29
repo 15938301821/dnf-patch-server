@@ -210,7 +210,10 @@ function createBaseProvenance(ids, sourceRunId) {
       adapterSha256: professionSkillProductionHashes.adapter,
     },
     safety: {
-      referenceImageUsedForRuntimePixels: false,
+      referenceImageUsedAsVisualGuidance: true,
+      referenceImageDirectPixelReplacement: false,
+      sourceGeometryPreserved: true,
+      sourceAlphaPreserved: true,
       deploymentAuthorized: false,
       deploymentPerformed: false,
       fullSkillCoverageProven: false,

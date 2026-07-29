@@ -18,9 +18,15 @@ import type {
 } from "./profession-execution-context.js";
 
 /** Server 内部固定的 Engineer style plan 阶段；Worker DTO 不能选择或覆盖。 */
-export const professionEngineerPlanStage = "engineer-plan-v1" as const;
+export const professionEngineerPlanStage = "engineer-plan-v3" as const;
 /** Server 内部固定的 Artist 参考图阶段；只能在 Engineer 证据通过后预留。 */
-export const professionReferenceImageStage = "reference-image-v1" as const;
+export const professionReferenceImageStage = "reference-image-v3" as const;
+/** 详情与下载只读兼容顺序；新模型执行仍只能写入上面的当前 V3 stage。 */
+export const readableProfessionReferenceImageStages = [
+  professionReferenceImageStage,
+  "reference-image-v2",
+  "reference-image-v1",
+] as const;
 /** 单技能模型链唯一允许的阶段集合，不接受数据库或 Worker 自由字符串。 */
 export type ProfessionModelExecutionStage =
   | typeof professionEngineerPlanStage
@@ -35,12 +41,25 @@ export interface ProfessionModelExecutionIdentity {
   skillId: string;
   stage: ProfessionModelExecutionStage;
   promptSha256: string;
+  sourceVisualArtifactId: string;
+  sourceVisualSha256: string;
+  sourceVisualFrameMapSha256: string;
 }
 
 export interface ProfessionModelOutputEvidence {
   modelCallId: string;
   outputSha256: string;
   outputByteLength: number;
+}
+
+/** Repository 完成 Artifact 归属核验后交给 Service 的受控源图对象引用。 */
+export interface VerifiedProfessionSourceVisualInput {
+  artifactId: string;
+  objectKey: string;
+  mediaType: "image/png";
+  byteLength: number;
+  sha256: string;
+  frameMapSha256: string;
 }
 
 interface FinalizeProfessionModelArtifactInput extends ProfessionModelOutputEvidence {
@@ -72,11 +91,17 @@ export type FinalizeProfessionModelOutputInput =
 
 export interface PersistedProfessionModelExecution extends Omit<
   ProfessionModelExecutionIdentity,
-  "stage"
+  | "stage"
+  | "sourceVisualArtifactId"
+  | "sourceVisualSha256"
+  | "sourceVisualFrameMapSha256"
 > {
   id: string;
   /** 数据库读取值在分类前不可信，未知 stage 必须返回 execution-integrity-failed。 */
   stage: string;
+  sourceVisualArtifactId: string | null;
+  sourceVisualSha256: string | null;
+  sourceVisualFrameMapSha256: string | null;
   status: string;
   modelCallId: string | null;
   imageAttemptId: string | null;
@@ -130,6 +155,7 @@ type ProfessionExecutionGateFailure = Exclude<
 export type ReserveProfessionModelExecutionResult =
   | ProfessionExecutionGateFailure
   | { status: "prerequisite-not-passed" }
+  | { status: "source-visual-input-mismatch" }
   | Exclude<
       ExistingProfessionModelExecutionResult,
       { status: "acquire" } | { status: "persistence-pending" }
@@ -142,6 +168,7 @@ export type ReserveProfessionModelExecutionResult =
       status: "execute";
       executionId: string;
       context: FrozenProfessionSkillExecutionContext;
+      sourceVisualInput: VerifiedProfessionSourceVisualInput;
     };
 
 export function classifyProfessionModelExecution(
@@ -156,7 +183,13 @@ export function classifyProfessionModelExecution(
     execution.attempt !== expected.attempt ||
     execution.skillId !== expected.skillId ||
     execution.stage !== expected.stage ||
-    execution.promptSha256.toUpperCase() !== expected.promptSha256.toUpperCase()
+    execution.promptSha256.toUpperCase() !==
+      expected.promptSha256.toUpperCase() ||
+    execution.sourceVisualArtifactId !== expected.sourceVisualArtifactId ||
+    execution.sourceVisualSha256?.toUpperCase() !==
+      expected.sourceVisualSha256.toUpperCase() ||
+    execution.sourceVisualFrameMapSha256?.toUpperCase() !==
+      expected.sourceVisualFrameMapSha256.toUpperCase()
   ) {
     return { status: "execution-integrity-failed" };
   }

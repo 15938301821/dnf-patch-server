@@ -99,6 +99,14 @@ type CompleteProduction = StylePackageProductionEvidenceRow & {
 type OutputProvenance = ReturnType<
   typeof professionSkillOutputProvenanceSchema.parse
 >;
+type PackageOutputProvenance = Extract<
+  OutputProvenance,
+  {
+    kind:
+      | "profession-reference-projects-v2"
+      | "profession-reference-validation-v2";
+  }
+>;
 
 /**
  * 复核全部上游证据并按 package payload 顺序生成技能输入。
@@ -147,9 +155,12 @@ export function resolveStylePackageSkillInputs(
     if (
       !projects ||
       !validation ||
-      validation.provenance.kind !== "profession-aseprite-validation-v1" ||
+      projects.provenance.kind !== "profession-reference-projects-v2" ||
+      validation.provenance.kind !== "profession-reference-validation-v2" ||
       sha256JcsV1(validation.provenance.source) !==
         sha256JcsV1(projects.provenance.source) ||
+      sha256JcsV1(validation.provenance.referenceTransferQuality) !==
+        sha256JcsV1(projects.provenance.referenceTransferQuality) ||
       validation.provenance.asepriteProjects.artifactId !==
         projects.artifact.id ||
       validation.provenance.asepriteProjects.sha256 !==
@@ -244,7 +255,10 @@ function resolveFinalizedRole(
   runId: string,
   role: "projects" | "validation",
 ):
-  | { artifact: StylePackageArtifactEvidenceRow; provenance: OutputProvenance }
+  | {
+      artifact: StylePackageArtifactEvidenceRow;
+      provenance: PackageOutputProvenance;
+    }
   | undefined {
   if (!artifact || !upload) return undefined;
   const artifactProvenance = professionSkillOutputProvenanceSchema.safeParse(
@@ -255,8 +269,8 @@ function resolveFinalizedRole(
   );
   const expectedKind =
     role === "projects"
-      ? "profession-aseprite-projects-v1"
-      : "profession-aseprite-validation-v1";
+      ? "profession-reference-projects-v2"
+      : "profession-reference-validation-v2";
   const expectedName =
     role === "projects"
       ? "profession-aseprite-projects.zip"

@@ -8,10 +8,10 @@
  *
  * 调用关系：ProfessionExecutionService 把冻结技能上下文交给 engineer 结构化模型，并用本文件
  * 校验、正规化输出；后续 Worker 只能消费正规化 plan，不能消费模型自由文本。
- * 输入输出：模型只选择四档 RGB、受限强度参数和可选视觉操作；输出固定携带几何、alpha 与安全
- * 策略。副作用：纯内存解析和对象构造。
- * 安全边界：模型不能提供路径、命令、代码、资源映射、运行时图片或部署状态；palette-map 与
- * alpha-preserve 永远启用，未知字段、重复操作和越界数值全部 fail-closed。
+ * 输入输出：模型只标注生成图中与官方图集对应的归一化内容边界；输出固定携带 RGB 来源、采样、
+ * 几何、alpha 与质量策略。副作用：纯内存解析和对象构造。
+ * 安全边界：模型不能提供路径、命令、代码、资源映射、像素正文或部署状态；逐帧身份仍由 Worker
+ * 已核验的官方帧映射决定，未知字段、越界边界和过小内容区域全部 fail-closed。
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -20,41 +20,42 @@ import { stableStringifyJcsV1 } from "../../common/utils/canonical.js";
 /** Engineer plan 私有 JSON 的独立内存/对象上限；不能被环境全局对象上限放宽。 */
 export const maxProfessionEngineerPlanBytes = 16 * 1024;
 
-const rgbByteSchema = z.number().int().min(0).max(255);
-const rgbSchema = z.tuple([rgbByteSchema, rgbByteSchema, rgbByteSchema]);
-const optionalOperationSchema = z.enum([
-  "rim-light",
-  "particle-trail",
-  "spatial-crack",
-  "blade-core",
-]);
-const enabledOperationSchema = z.enum([
-  "palette-map",
-  ...optionalOperationSchema.options,
-  "alpha-preserve",
-]);
-
-const paletteSchema = z
+const referenceBoundsWireSchema = z
   .object({
-    shadow: rgbSchema,
-    midtone: rgbSchema,
-    rim: rgbSchema,
-    core: rgbSchema,
+    left: z.number(),
+    top: z.number(),
+    right: z.number(),
+    bottom: z.number(),
   })
   .strict();
 
-const parametersSchema = z
-  .object({
-    sourceColorMix: z.number().min(0).max(1),
-    coreThreshold: z.number().min(0.5).max(0.95),
-    coreIntensity: z.number().min(0).max(1),
-    rimThreshold: z.number().min(0).max(0.8),
-    rimIntensity: z.number().min(0).max(1),
-    phaseAmount: z.number().min(0).max(1),
-    crackDensity: z.number().min(0).max(0.25),
-    crackIntensity: z.number().min(0).max(1),
-  })
-  .strict();
+const referenceBoundsSchema = referenceBoundsWireSchema.superRefine(
+  (bounds, context) => {
+    for (const [key, value] of Object.entries(bounds)) {
+      if (!Number.isFinite(value) || value < 0 || value > 1) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Reference bounds must be finite normalized coordinates.",
+        });
+      }
+    }
+    if (bounds.right - bounds.left < 0.5) {
+      context.addIssue({
+        code: "custom",
+        path: ["right"],
+        message: "Reference content width is too small.",
+      });
+    }
+    if (bounds.bottom - bounds.top < 0.5) {
+      context.addIssue({
+        code: "custom",
+        path: ["bottom"],
+        message: "Reference content height is too small.",
+      });
+    }
+  },
+);
 
 /**
  * Provider wire schema 只表达结构化输出接口普遍支持的基础约束。tuple 长度、数值边界、
@@ -62,88 +63,61 @@ const parametersSchema = z
  */
 export const professionEngineerModelWireDecisionSchema = z
   .object({
-    schemaVersion: z.literal(1),
-    palette: z
-      .object({
-        shadow: z.array(z.number()),
-        midtone: z.array(z.number()),
-        rim: z.array(z.number()),
-        core: z.array(z.number()),
-      })
-      .strict(),
-    parameters: z
-      .object({
-        sourceColorMix: z.number(),
-        coreThreshold: z.number(),
-        coreIntensity: z.number(),
-        rimThreshold: z.number(),
-        rimIntensity: z.number(),
-        phaseAmount: z.number(),
-        crackDensity: z.number(),
-        crackIntensity: z.number(),
-      })
-      .strict(),
-    optionalOperations: z.array(optionalOperationSchema),
+    schemaVersion: z.literal(2),
+    referenceBounds: referenceBoundsWireSchema,
   })
   .strict();
 
 /** Engineer 模型唯一允许返回的结构；不含安全状态、来源身份、本机路径或任意代码。 */
 export const professionEngineerModelDecisionSchema = z
   .object({
-    schemaVersion: z.literal(1),
-    palette: paletteSchema,
-    parameters: parametersSchema,
-    optionalOperations: z.array(optionalOperationSchema).max(4),
+    schemaVersion: z.literal(2),
+    referenceBounds: referenceBoundsSchema,
   })
-  .strict()
-  .superRefine((decision, context) => {
-    if (
-      new Set(decision.optionalOperations).size !==
-      decision.optionalOperations.length
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["optionalOperations"],
-        message: "Engineer operations must be unique.",
-      });
-    }
-  });
+  .strict();
 
-/** Server 正规化后可持久化并交给固定 Aseprite adapter 的版本化 style plan。 */
+/** Server 正规化后可持久化并交给固定 Aseprite adapter 的 v3 style plan。 */
 export const professionEngineerStylePlanSchema = z
   .object({
-    schemaVersion: z.literal(1),
-    kind: z.literal("dnf-aseprite-pixel-style-plan-v1"),
+    schemaVersion: z.literal(3),
+    kind: z.literal("dnf-aseprite-reference-transfer-plan-v3"),
     geometryPolicy: z.literal("strict-preserve-source-frame-position-size"),
     alphaPolicy: z.literal("preserve-source-alpha-byte-exact"),
-    palette: paletteSchema,
-    parameters: parametersSchema,
-    enabledOperations: z.array(enabledOperationSchema).min(2).max(6),
+    rgbPolicy: z.literal("image-model-reference-primary"),
+    mapping: z
+      .object({
+        referenceBounds: referenceBoundsSchema,
+        atlasCoordinatePolicy: z.literal("proportional-source-cell-map"),
+        sampling: z.literal("alpha-weighted-bilinear-nearest-visible"),
+      })
+      .strict(),
+    qualityPolicy: z
+      .object({
+        minimumReferenceCoverage: z.literal(0.8),
+        minimumReferenceSimilarity: z.literal(0.9),
+        minimumEdgeEnergyRatio: z.literal(1.01),
+        transparentRgbMustBeZero: z.literal(true),
+      })
+      .strict(),
+    enabledOperations: z.tuple([
+      z.literal("reference-rgb-transfer"),
+      z.literal("source-effect-mask"),
+      z.literal("detail-sharpen"),
+      z.literal("alpha-preserve"),
+      z.literal("quality-gate"),
+    ]),
     safety: z
       .object({
         arbitraryCodeAccepted: z.literal(false),
         resourceFactsFromModel: z.literal(false),
-        runtimeImageFromImageModel: z.literal(false),
+        runtimeRgbFromImageModel: z.literal(true),
+        runtimeImageDirectReplacement: z.literal(false),
         fullSkillCoverageProven: z.literal(false),
         deploymentAuthorized: z.literal(false),
       })
       .strict(),
   })
-  .strict()
-  .superRefine((plan, context) => {
-    const operations = new Set(plan.enabledOperations);
-    if (
-      operations.size !== plan.enabledOperations.length ||
-      !operations.has("palette-map") ||
-      !operations.has("alpha-preserve")
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["enabledOperations"],
-        message: "Style plan operations are incomplete or repeated.",
-      });
-    }
-  });
+  .strict();
 
 export type ProfessionEngineerModelDecision = z.infer<
   typeof professionEngineerModelDecisionSchema
@@ -173,21 +147,34 @@ export function createProfessionEngineerStylePlan(
 ): ProfessionEngineerStylePlan {
   const decision = professionEngineerModelDecisionSchema.parse(input);
   return professionEngineerStylePlanSchema.parse({
-    schemaVersion: 1,
-    kind: "dnf-aseprite-pixel-style-plan-v1",
+    schemaVersion: 3,
+    kind: "dnf-aseprite-reference-transfer-plan-v3",
     geometryPolicy: "strict-preserve-source-frame-position-size",
     alphaPolicy: "preserve-source-alpha-byte-exact",
-    palette: decision.palette,
-    parameters: decision.parameters,
+    rgbPolicy: "image-model-reference-primary",
+    mapping: {
+      referenceBounds: decision.referenceBounds,
+      atlasCoordinatePolicy: "proportional-source-cell-map",
+      sampling: "alpha-weighted-bilinear-nearest-visible",
+    },
+    qualityPolicy: {
+      minimumReferenceCoverage: 0.8,
+      minimumReferenceSimilarity: 0.9,
+      minimumEdgeEnergyRatio: 1.01,
+      transparentRgbMustBeZero: true,
+    },
     enabledOperations: [
-      "palette-map",
-      ...decision.optionalOperations,
+      "reference-rgb-transfer",
+      "source-effect-mask",
+      "detail-sharpen",
       "alpha-preserve",
+      "quality-gate",
     ],
     safety: {
       arbitraryCodeAccepted: false,
       resourceFactsFromModel: false,
-      runtimeImageFromImageModel: false,
+      runtimeRgbFromImageModel: true,
+      runtimeImageDirectReplacement: false,
       fullSkillCoverageProven: false,
       deploymentAuthorized: false,
     },

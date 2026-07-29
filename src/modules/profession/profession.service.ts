@@ -91,6 +91,31 @@ export class ProfessionService {
     }
   }
 
+  /**
+   * 删除当前浏览器用户拥有的空职业。
+   *
+   * @param professionId Controller path 中已校验的职业 UUID。
+   * @param ownerUserId AuthService 从浏览器 Access Token 解析的稳定用户 ID。
+   * @returns 成功时无正文；只删除职业主行，不级联删除技能、风格或生产证据。
+   * @throws PROFESSION_NOT_FOUND 当职业不存在或不属于当前用户时返回 404。
+   * @throws PROFESSION_DELETE_NOT_ALLOWED 当职业已送审/发布，或仍有技能/风格内容时返回 409。
+   */
+  async delete(professionId: string, ownerUserId: string): Promise<void> {
+    const result = await this.professions.delete(professionId, ownerUserId);
+    if (result === "not-found") {
+      throw new NotFoundException({
+        code: "PROFESSION_NOT_FOUND",
+        message: "职业不存在或无权访问。",
+      });
+    }
+    if (result === "protected") {
+      throw new ConflictException({
+        code: "PROFESSION_DELETE_NOT_ALLOWED",
+        message: "仅可删除没有技能目录和职业风格的私有或被驳回职业。",
+      });
+    }
+  }
+
   async listSkills(
     professionId: string,
     ownerUserId: string,
@@ -162,6 +187,40 @@ export class ProfessionService {
         });
       }
       throw error;
+    }
+  }
+
+  /**
+   * 删除当前用户拥有的可撤销风格草稿。
+   *
+   * @param professionId 当前用户职业的稳定 UUID，来自 Controller path。
+   * @param styleId 目标风格稳定 UUID，Service/Repository 会复核职业归属与生产引用。
+   * @param ownerUserId AuthService 从浏览器 Access Token 解析的稳定用户 ID。
+   * @returns 成功时无正文；Repository 事务已经同时删除风格技能子行并更新职业摘要时间。
+   * @throws STYLE_NOT_FOUND 当风格不存在、职业不存在或不属于当前用户时返回 404。
+   * @throws STYLE_DELETE_NOT_ALLOWED 当风格已送审/发布或已有生产记录时返回 409，数据库不写入。
+   */
+  async deleteStyle(
+    professionId: string,
+    styleId: string,
+    ownerUserId: string,
+  ): Promise<void> {
+    const result = await this.professions.deleteStyle(
+      professionId,
+      styleId,
+      ownerUserId,
+    );
+    if (result === "not-found") {
+      throw new NotFoundException({
+        code: "STYLE_NOT_FOUND",
+        message: "职业风格不存在或无权访问。",
+      });
+    }
+    if (result === "protected") {
+      throw new ConflictException({
+        code: "STYLE_DELETE_NOT_ALLOWED",
+        message: "仅可删除尚未进入生产链的私有或被驳回风格草稿。",
+      });
     }
   }
 

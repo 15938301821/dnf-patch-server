@@ -6,7 +6,7 @@
  * @created 2026-07-24
  * @relatedPlan N/A - 当前 Profession 单技能真实生产链补全
  *
- * 调用关系：公开 ProfessionExecutionService 先调用本内部 Service，只有返回 passed 才可继续 Artist；
+ * 调用关系：公开 ProfessionExecutionService 在 Artist 参考图 passed 后调用本内部 Service；
  * 本 Service 下游调用固定 OpenAI engineer 角色、模型执行 Repository 和对象存储端口。
  * 输入输出：输入仍是当前 Job 的四字段 lease DTO；输出为 in-progress 或严格 plan 与脱敏 Artifact
  * 证据。副作用包括一次受 pre-egress guard 保护的模型调用、私有对象写入和事务状态转换。
@@ -31,6 +31,7 @@ import {
   type ArtifactUploadOptions,
 } from "../artifact/artifact.tokens.js";
 import type {
+  ModelImageInput,
   ModelEgressGuard,
   StructuredModelRequest,
   StructuredModelResult,
@@ -63,6 +64,7 @@ import {
   type ReserveProfessionModelExecutionResult,
 } from "./profession-model-execution.js";
 import { ProfessionModelExecutionRepository } from "./profession-model-execution.repository.js";
+import type { ProfessionReferenceExecutionResult } from "./profession-execution.service.js";
 
 /** 主编排 Service 消费的 Engineer 结果；passed 同时绑定 plan 正文与持久化 Artifact 摘要。 */
 export type ProfessionEngineerExecutionResult =
@@ -131,15 +133,19 @@ export class ProfessionEngineerExecutionService {
   ) {}
 
   /**
-   * 获取或执行当前 attempt 的 Engineer plan；只有本方法的 passed 结果可解锁 Artist reservation。
+   * 获取或执行当前 attempt 的 Engineer plan；输入已绑定 Artist 母图，结果只决定受限空间映射。
    * @param jobId URL 中已校验的 Profession Job UUID。
    * @param input 当前 Worker claim 的精确 lease/attempt/skill DTO，不能携带 stage 或模型参数。
    * @returns in-progress，或已按对象证据恢复/持久化的严格 plan 与 Artifact 标识。
-   * @throws 稳定 Nest 异常表示 lease、模型、配额、对象或执行状态失败；异常后不得调用 Artist。
+   * @throws 稳定 Nest 异常表示 lease、模型、配额、对象或执行状态失败；异常后不得返回可运行计划。
    */
   async executeSkill(
     jobId: string,
     input: RequestProfessionSkillExecutionInput,
+    reference: Extract<
+      ProfessionReferenceExecutionResult,
+      { status: "passed" }
+    >,
   ): Promise<ProfessionEngineerExecutionResult> {
     const reservation =
       await this.executions.reserveProfessionSkillModelExecution(
@@ -171,8 +177,12 @@ export class ProfessionEngineerExecutionService {
     }
 
     // 模型出站前由 Repository 消费唯一 egress 权；guard 拒绝时 Provider 不会被调用。
+    const imageInputs = await this.readModelImages(
+      reservation.sourceVisualInput,
+      reference,
+    );
     const result = await this.models.structured(
-      createEngineerModelRequest(reservation.context),
+      createEngineerModelRequest(reservation.context, reference, imageInputs),
       async (record) =>
         this.executions.bindProfessionModelCallBeforeEgress(
           reservation.executionId,
@@ -243,6 +253,48 @@ export class ProfessionEngineerExecutionService {
       evidence,
       encoded.plan,
     );
+  }
+
+  private async readModelImages(
+    source: Extract<
+      ReserveProfessionModelExecutionResult,
+      { status: "execute" }
+    >["sourceVisualInput"],
+    reference: Extract<
+      ProfessionReferenceExecutionResult,
+      { status: "passed" }
+    >,
+  ): Promise<readonly [ModelImageInput, ModelImageInput]> {
+    const [official, generated] = await Promise.all([
+      this.storage.readVerifiedBytes({
+        objectKey: source.objectKey,
+        expectedMediaType: "image/png",
+        expectedByteLength: source.byteLength,
+        expectedSha256: source.sha256,
+        maxByteLength: 64 * 1024 * 1024,
+      }),
+      this.storage.readVerifiedBytes({
+        objectKey: referenceImageObjectKey(reference.executionId),
+        expectedMediaType: "image/png",
+        expectedByteLength: reference.byteLength,
+        expectedSha256: reference.sha256,
+        maxByteLength: 32 * 1024 * 1024,
+      }),
+    ]);
+    return [
+      {
+        role: "official-source",
+        mediaType: "image/png",
+        bytes: official.bytes,
+        sha256: official.sha256.toUpperCase(),
+      },
+      {
+        role: "generated-reference",
+        mediaType: "image/png",
+        bytes: generated.bytes,
+        sha256: generated.sha256.toUpperCase(),
+      },
+    ];
   }
 
   private async recoverPersistence(
@@ -380,4 +432,8 @@ export class ProfessionEngineerExecutionService {
       throwEngineerStateConflict();
     }
   }
+}
+
+function referenceImageObjectKey(executionId: string): string {
+  return `artifacts/profession-${executionId}-reference.png`;
 }

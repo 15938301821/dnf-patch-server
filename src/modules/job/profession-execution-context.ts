@@ -14,7 +14,7 @@
  */
 import { sha256Json } from "../../common/utils/canonical.js";
 import type { JobLeaseState } from "./job-lease.js";
-import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import {
   styleSkillProductionJobPayloadV2Schema,
   type StyleSkillPromptPackageV2,
@@ -66,7 +66,7 @@ export type ResolveProfessionExecutionContextResult =
  */
 export function resolveProfessionExecutionContext(
   job: ProfessionExecutionJobState,
-  input: RequestProfessionSkillExecutionInput,
+  input: ProfessionSkillLeaseInput,
   now: Date,
 ): ResolveProfessionExecutionContextResult {
   // 第一步：新协议要求 owner、fencing token、attempt 与数据库期限全部精确匹配，不沿用旧版省略 token 兼容。

@@ -1,9 +1,6 @@
 /**
  * @fileoverview 将前端制作任务请求映射为受 Guardrail 保护的 Run 与固定 Worker Job。
  * @module job
- * @author AI生成
- * @created 2026-07-21
- * @relatedPlan N/A（对应当前前端业务与后端工作流直接需求）
  */
 import {
   ConflictException,
@@ -38,7 +35,7 @@ import type {
   ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
 import { PatchTaskRepository } from "./patch-task.repository.js";
-import type { RequestProfessionSkillExecutionInput } from "./profession-execution.contracts.js";
+import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import type {
   FrozenProfessionSkillExecutionContext,
   ResolveProfessionExecutionContextResult,
@@ -96,7 +93,7 @@ interface PatchTaskRepositoryPort extends PatchTaskPreviewRepositoryPort {
   ): Promise<PatchTaskReportResult>;
   resolveProfessionSkillExecution(
     jobId: string,
-    input: RequestProfessionSkillExecutionInput,
+    input: ProfessionSkillLeaseInput,
   ): Promise<ResolveProfessionExecutionContextResult>;
   resolveProfessionProductionProgress(
     jobId: string,
@@ -477,7 +474,7 @@ export class PatchTaskService {
 
   async resolveProfessionSkillExecution(
     jobId: string,
-    input: RequestProfessionSkillExecutionInput,
+    input: ProfessionSkillLeaseInput,
   ): Promise<FrozenProfessionSkillExecutionContext> {
     const result = await this.patchTasks.resolveProfessionSkillExecution(
       jobId,

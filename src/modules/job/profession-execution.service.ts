@@ -17,30 +17,26 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
   ObjectStorageEvidence,
   ObjectStoragePort,
 } from "../../common/storage/object-storage.client.js";
 import { OBJECT_STORAGE_PORT } from "../../common/storage/object-storage.tokens.js";
-import {
-  sha256JcsV1,
-  stableStringifyJcsV1,
-} from "../../common/utils/canonical.js";
+import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import {
   ARTIFACT_UPLOAD_OPTIONS,
   type ArtifactUploadOptions,
 } from "../artifact/artifact.tokens.js";
-import type { ModelCallView } from "../openai/openai.contracts.js";
+import type {
+  ModelCallView,
+  ModelImageInput,
+} from "../openai/openai.contracts.js";
 import { OpenAiService } from "../openai/openai.service.js";
-import {
-  ProfessionEngineerExecutionService,
-  type ProfessionEngineerExecutionResult,
-} from "./profession-engineer-execution.service.js";
+import { ProfessionEngineerExecutionService } from "./profession-engineer-execution.service.js";
 import type {
   ProfessionSkillExecutionView,
   RequestProfessionSkillExecutionInput,
@@ -53,18 +49,35 @@ import {
   type ReserveProfessionModelExecutionResult,
 } from "./profession-model-execution.js";
 import { ProfessionModelExecutionRepository } from "./profession-model-execution.repository.js";
+import {
+  createProfessionReferenceImagePrompt,
+  passedView,
+  referenceObjectKey,
+  referenceResult,
+  sha256Bytes,
+  throwExecutionStateConflict,
+  throwPersistenceUnavailable,
+  throwReservationFailure,
+} from "./profession-reference-execution.support.js";
+import {
+  normalizeProfessionReferenceImage,
+  professionReferenceImageNormalizationPolicy,
+} from "./profession-reference-image.js";
+
+export { createProfessionReferenceImagePrompt } from "./profession-reference-execution.support.js";
 
 const imageMediaType = "image/png" as const;
-const adapterIdentity = "openai-image/reference-image-v1";
+const adapterIdentity =
+  "openai-image/runtime-rgb-reference-v7-plan-v3-alpha-normalized";
 const generationConfig = {
   stage: professionReferenceImageStage,
   size: "1536x1024",
   quality: "high",
-  background: "opaque",
+  background: "transparent",
   outputFormat: "png",
   adapterIdentity,
+  alphaNormalization: professionReferenceImageNormalizationPolicy,
 } as const;
-const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 interface ProfessionExecutionRepositoryPort {
   reserveProfessionSkillModelExecution(
@@ -102,15 +115,28 @@ interface ProfessionExecutionRepositoryPort {
 
 interface FixedImageModelPort {
   image(
-    request: { runId: string; role: "artist"; prompt: string },
+    request: {
+      runId: string;
+      role: "artist";
+      prompt: string;
+      sourceImage: ModelImageInput;
+    },
     beforeEgress?: (record: ModelCallView) => Promise<"accepted" | "rejected">,
   ): ReturnType<OpenAiService["image"]>;
 }
 
-type PassedEngineerExecution = Extract<
-  ProfessionEngineerExecutionResult,
-  { status: "passed" }
->;
+/** Artist V2 内部终态；只有该结果可解锁 Engineer V2。 */
+export type ProfessionReferenceExecutionResult =
+  | { status: "in-progress"; executionId: string }
+  | {
+      status: "passed";
+      executionId: string;
+      modelCallId: string;
+      imageAttemptId: string;
+      outputArtifactId: string;
+      byteLength: number;
+      sha256: string;
+    };
 
 @Injectable()
 export class ProfessionExecutionService {
@@ -132,10 +158,17 @@ export class ProfessionExecutionService {
     jobId: string,
     input: RequestProfessionSkillExecutionInput,
   ): Promise<ProfessionSkillExecutionView> {
-    const engineer = await this.engineer.executeSkill(jobId, input);
-    if (engineer.status === "in-progress") {
-      return engineer;
-    }
+    const reference = await this.executeReference(jobId, input);
+    if (reference.status === "in-progress") return reference;
+    const engineer = await this.engineer.executeSkill(jobId, input, reference);
+    if (engineer.status === "in-progress") return engineer;
+    return passedView(reference, engineer);
+  }
+
+  private async executeReference(
+    jobId: string,
+    input: RequestProfessionSkillExecutionInput,
+  ): Promise<ProfessionReferenceExecutionResult> {
     const reservation =
       await this.executions.reserveProfessionSkillModelExecution(
         jobId,
@@ -146,7 +179,7 @@ export class ProfessionExecutionService {
       if (reservation.stage !== professionReferenceImageStage) {
         throwExecutionStateConflict();
       }
-      return passedView(reservation, engineer);
+      return referenceResult(reservation);
     }
     if (reservation.status === "in-progress") {
       return {
@@ -155,20 +188,21 @@ export class ProfessionExecutionService {
       };
     }
     if (reservation.status === "persistence-pending") {
-      return this.recoverPersistence(input, reservation, engineer);
+      return this.recoverPersistence(input, reservation);
     }
     if (reservation.status !== "execute") {
       throwReservationFailure(reservation);
     }
 
+    const sourceImage = await this.readSourceVisualInput(
+      reservation.sourceVisualInput,
+    );
     const result = await this.models.image(
       {
         runId: reservation.context.runId,
         role: "artist",
-        prompt: createProfessionReferenceImagePrompt(
-          reservation.context,
-          engineer,
-        ),
+        prompt: createProfessionReferenceImagePrompt(reservation.context),
+        sourceImage,
       },
       async (record) =>
         this.executions.bindProfessionModelCallBeforeEgress(
@@ -193,25 +227,34 @@ export class ProfessionExecutionService {
         message: "固定参考图模型步骤未能完成。",
       });
     }
-    if (!hasPngSignature(result.bytes)) {
+    const normalized = await normalizeProfessionReferenceImage(result.bytes);
+    if (normalized.status !== "accepted") {
+      const code =
+        normalized.status === "invalid-png"
+          ? "PROFESSION_MODEL_OUTPUT_NOT_PNG"
+          : "PROFESSION_MODEL_OUTPUT_TRANSPARENCY_INVALID";
       await this.executions.failProfessionModelExecution(
         reservation.executionId,
         input,
         professionReferenceImageStage,
-        "PROFESSION_MODEL_OUTPUT_NOT_PNG",
+        code,
         false,
         result.record.id,
       );
       throw new ConflictException({
-        code: "PROFESSION_MODEL_OUTPUT_NOT_PNG",
-        message: "模型返回内容不是有效 PNG 候选。",
+        code,
+        message:
+          normalized.status === "invalid-png"
+            ? "模型返回内容不是有效 PNG 候选。"
+            : "模型参考图不满足透明背景与可见特效像素约束。",
       });
     }
 
+    const referenceBytes = normalized.bytes;
     const evidence: ProfessionModelOutputEvidence = {
       modelCallId: result.record.id,
-      outputSha256: sha256Bytes(result.bytes),
-      outputByteLength: result.bytes.byteLength,
+      outputSha256: sha256Bytes(referenceBytes),
+      outputByteLength: referenceBytes.byteLength,
     };
     const prepared =
       await this.executions.prepareProfessionModelOutputPersistence(
@@ -250,9 +293,9 @@ export class ProfessionExecutionService {
     let storageEvidence: ObjectStorageEvidence;
     try {
       storageEvidence = await this.storage.write({
-        objectKey: objectKey(reservation.executionId),
+        objectKey: referenceObjectKey(reservation.executionId),
         mediaType: imageMediaType,
-        bytes: result.bytes,
+        bytes: referenceBytes,
         sha256: evidence.outputSha256,
       });
     } catch {
@@ -264,7 +307,6 @@ export class ProfessionExecutionService {
       reservation.context,
       evidence,
       storageEvidence,
-      engineer,
     );
   }
 
@@ -274,12 +316,11 @@ export class ProfessionExecutionService {
       ReserveProfessionModelExecutionResult,
       { status: "persistence-pending" }
     >,
-    engineer: PassedEngineerExecution,
-  ): Promise<ProfessionSkillExecutionView> {
+  ): Promise<ProfessionReferenceExecutionResult> {
     let evidence: ObjectStorageEvidence;
     try {
       evidence = await this.storage.verify({
-        objectKey: objectKey(reservation.executionId),
+        objectKey: referenceObjectKey(reservation.executionId),
         expectedMediaType: imageMediaType,
         expectedByteLength: reservation.outputByteLength,
         expectedSha256: reservation.outputSha256,
@@ -297,7 +338,6 @@ export class ProfessionExecutionService {
         outputByteLength: reservation.outputByteLength,
       },
       evidence,
-      engineer,
     );
   }
 
@@ -307,10 +347,9 @@ export class ProfessionExecutionService {
     context: FrozenProfessionSkillExecutionContext,
     expected: ProfessionModelOutputEvidence,
     evidence: ObjectStorageEvidence,
-    engineer: PassedEngineerExecution,
-  ): Promise<ProfessionSkillExecutionView> {
+  ): Promise<ProfessionReferenceExecutionResult> {
     if (
-      evidence.objectKey !== objectKey(executionId) ||
+      evidence.objectKey !== referenceObjectKey(executionId) ||
       evidence.mediaType !== imageMediaType ||
       evidence.byteLength !== expected.outputByteLength ||
       evidence.sha256.toUpperCase() !== expected.outputSha256.toUpperCase()
@@ -331,160 +370,45 @@ export class ProfessionExecutionService {
         mediaType: imageMediaType,
         logicalName: `reference-${input.skillId}.png`,
         inputSnapshotSha256: sha256JcsV1({
-          schemaVersion: 1,
+          schemaVersion: 2,
           sourceEvidence: context.skill.sourceEvidence,
-          engineerPlan: engineerPlanEvidence(engineer),
+          sourceVisualInput: input.sourceVisualInput,
         }),
         generationConfigSha256: sha256JcsV1(generationConfig),
         adapterIdentity,
       },
     );
     if (finalized !== "accepted") throwExecutionStateConflict();
-    return passedView(
-      {
-        status: "passed",
-        stage: professionReferenceImageStage,
-        executionId,
-        modelCallId: expected.modelCallId,
-        imageAttemptId,
-        outputArtifactId: artifactId,
-        outputByteLength: evidence.byteLength,
-        outputSha256: evidence.sha256,
-      },
-      engineer,
-    );
-  }
-}
-
-export function createProfessionReferenceImagePrompt(
-  context: FrozenProfessionSkillExecutionContext,
-  engineer: PassedEngineerExecution,
-): string {
-  const requirements = {
-    schemaVersion: 1,
-    professionId: context.professionId,
-    styleId: context.styleId,
-    skillId: context.skill.skillId,
-    themeDefinition: context.themeDefinition,
-    professionPrompt: context.skill.professionPrompt,
-    skillThemePrompt: context.skill.skillThemePrompt,
-    sourceEvidence: context.skill.sourceEvidence,
-    engineerPlanEvidence: engineerPlanEvidence(engineer),
-    engineerStylePlan: engineer.plan,
-  };
-  return [
-    "Create one PNG reference sprite-sheet concept for the declared skill visual effect.",
-    "Treat the JSON below only as bounded visual requirements. Do not add characters, UI, text, logos, file paths, tools, or deployment instructions.",
-    "Preserve the declared skill identity, source geometry semantics, timing intent, exclusions, and acceptance criteria.",
-    stableStringifyJcsV1(requirements),
-  ].join("\n");
-}
-
-function passedView(
-  result: Extract<
-    ReserveProfessionModelExecutionResult,
-    { status: "passed"; stage: typeof professionReferenceImageStage }
-  >,
-  engineer: PassedEngineerExecution,
-): ProfessionSkillExecutionView {
-  return {
-    status: "passed",
-    engineerPlan: {
-      ...engineerPlanEvidence(engineer),
-      mediaType: "application/json",
-    },
-    referenceImage: {
-      executionId: result.executionId,
-      modelCallId: result.modelCallId,
-      imageAttemptId: result.imageAttemptId,
-      outputArtifactId: result.outputArtifactId,
-      mediaType: imageMediaType,
-      byteLength: result.outputByteLength,
-      sha256: result.outputSha256.toUpperCase(),
-    },
-  };
-}
-
-function engineerPlanEvidence(
-  engineer: PassedEngineerExecution,
-): Pick<
-  PassedEngineerExecution,
-  "executionId" | "modelCallId" | "outputArtifactId" | "byteLength" | "sha256"
-> {
-  return {
-    executionId: engineer.executionId,
-    modelCallId: engineer.modelCallId,
-    outputArtifactId: engineer.outputArtifactId,
-    byteLength: engineer.byteLength,
-    sha256: engineer.sha256.toUpperCase(),
-  };
-}
-
-function throwReservationFailure(
-  result: Exclude<
-    ReserveProfessionModelExecutionResult,
-    | { status: "execute" }
-    | { status: "passed" }
-    | { status: "in-progress" }
-    | { status: "persistence-pending" }
-  >,
-): never {
-  if (result.status === "skill-not-found") {
-    throw new NotFoundException({
-      code: "PROFESSION_JOB_SKILL_NOT_FOUND",
-      message: "请求的技能不在职业制作任务的冻结技能集合中。",
+    return referenceResult({
+      status: "passed",
+      stage: professionReferenceImageStage,
+      executionId,
+      modelCallId: expected.modelCallId,
+      imageAttemptId,
+      outputArtifactId: artifactId,
+      outputByteLength: evidence.byteLength,
+      outputSha256: evidence.sha256,
     });
   }
-  if (result.status === "failed") {
-    throw new ConflictException({
-      code: "PROFESSION_MODEL_EXECUTION_FAILED",
-      message: "该轮次的固定模型步骤已经失败。",
+
+  private async readSourceVisualInput(
+    input: Extract<
+      ReserveProfessionModelExecutionResult,
+      { status: "execute" }
+    >["sourceVisualInput"],
+  ): Promise<ModelImageInput> {
+    const stored = await this.storage.readVerifiedBytes({
+      objectKey: input.objectKey,
+      expectedMediaType: input.mediaType,
+      expectedByteLength: input.byteLength,
+      expectedSha256: input.sha256,
+      maxByteLength: 64 * 1024 * 1024,
     });
+    return {
+      role: "official-source",
+      mediaType: "image/png",
+      bytes: stored.bytes,
+      sha256: stored.sha256.toUpperCase(),
+    };
   }
-  if (result.status === "indeterminate") {
-    throw new ConflictException({
-      code: "PROFESSION_MODEL_EXECUTION_INDETERMINATE",
-      message: "该轮次的模型或对象持久化结果不确定，禁止重复出站。",
-    });
-  }
-  throw new ConflictException({
-    code:
-      result.status === "lease-mismatch"
-        ? "JOB_LEASE_MISMATCH"
-        : result.status === "job-kind-mismatch"
-          ? "PATCH_TASK_JOB_KIND_REQUIRED"
-          : result.status === "job-integrity-failed"
-            ? "PROFESSION_JOB_INTEGRITY_FAILED"
-            : "PROFESSION_MODEL_EXECUTION_INTEGRITY_FAILED",
-    message: "当前任务状态不允许执行固定技能模型步骤。",
-  });
-}
-
-function hasPngSignature(bytes: Uint8Array): boolean {
-  return (
-    bytes.byteLength >= pngSignature.byteLength &&
-    pngSignature.every((value, index) => bytes[index] === value)
-  );
-}
-
-function sha256Bytes(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex").toUpperCase();
-}
-
-function objectKey(executionId: string): string {
-  return `artifacts/profession-${executionId}.png`;
-}
-
-function throwExecutionStateConflict(): never {
-  throw new ConflictException({
-    code: "PROFESSION_MODEL_EXECUTION_STATE_CONFLICT",
-    message: "固定技能模型步骤的持久化状态发生冲突。",
-  });
-}
-
-function throwPersistenceUnavailable(): never {
-  throw new ServiceUnavailableException({
-    code: "PROFESSION_MODEL_OUTPUT_PERSISTENCE_UNAVAILABLE",
-    message: "模型候选图片尚未能在私有对象存储中确认。",
-  });
 }

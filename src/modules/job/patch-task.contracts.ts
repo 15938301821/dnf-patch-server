@@ -324,6 +324,18 @@ export interface PatchTaskSkillPreviewFrameView {
   y: number;
 }
 
+/** V2 参考 RGB 传输的独立质量摘要；数值来自 finalized provenance，不由浏览器或 Report DTO 提交。 */
+export interface PatchTaskReferenceTransferQualityView {
+  schemaVersion: 1;
+  evaluatedFrameCount: number;
+  evaluatedPixelCount: number;
+  referenceCoverage: number;
+  referenceSimilarity: number;
+  sourceEdgeEnergy: number;
+  runtimeEdgeEnergy: number;
+  edgeEnergyRatio: number;
+}
+
 /**
  * 当前任务技能的固定预览元数据。服务端按角色解析当前 attempt 证据，浏览器不能通过此结构
  * 选择任意 Artifact；frame 只在源帧和 Aseprite 结果角色中存在。
@@ -337,6 +349,7 @@ export interface PatchTaskSkillPreviewView {
   byteLength: number;
   sha256: string;
   frame?: PatchTaskSkillPreviewFrameView;
+  referenceTransferQuality?: PatchTaskReferenceTransferQualityView;
 }
 
 /** 固定技能预览的短期读取授权；URL 到期失效且不得进入持久化状态。 */

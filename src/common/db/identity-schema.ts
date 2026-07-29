@@ -72,6 +72,10 @@ export const userModelConfigurations = mysqlTable(
     /** 已通过 HTTPS `/v1` 安全 URL schema 的端点，不含凭据或查询参数。 */
     endpoint: varchar("endpoint", { length: 500 }).notNull(),
     model: varchar("model", { length: 120 }).notNull(),
+    /** 文本 Provider 六档推理强度；default 仅兼容图片角色和升级前的历史记录。 */
+    reasoningEffort: varchar("reasoning_effort", { length: 16 })
+      .notNull()
+      .default("default"),
     /** AES-256-GCM 密文；不包含主密钥，且不得进入 API、日志、事件或测试快照。 */
     credentialCiphertext: text("credential_ciphertext").notNull(),
     /** 当前密文的唯一 nonce，与 tag/keyVersion 必须来自同一次加密。 */
@@ -95,6 +99,10 @@ export const userModelConfigurations = mysqlTable(
     check(
       "user_model_configurations_role_ck",
       sql`${table.role} in ('orchestrator', 'spriteProcessor', 'referenceGenerator')`,
+    ),
+    check(
+      "user_model_configurations_reasoning_effort_ck",
+      sql`${table.reasoningEffort} in ('default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')`,
     ),
   ],
 );

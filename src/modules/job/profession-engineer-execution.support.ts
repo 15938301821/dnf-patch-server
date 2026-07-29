@@ -18,7 +18,10 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { stableStringifyJcsV1 } from "../../common/utils/canonical.js";
-import type { StructuredModelRequest } from "../openai/openai.contracts.js";
+import type {
+  ModelImageInput,
+  StructuredModelRequest,
+} from "../openai/openai.contracts.js";
 import {
   professionEngineerModelWireDecisionSchema,
   type ProfessionEngineerModelWireDecision,
@@ -28,7 +31,7 @@ import type { ReserveProfessionModelExecutionResult } from "./profession-model-e
 
 /** Engineer plan Artifact 固定媒体类型；对象存储声明和数据库 Artifact 必须一致。 */
 export const engineerPlanMediaType = "application/json" as const;
-const engineerSchemaName = "profession_engineer_pixel_style_decision_v1";
+const engineerSchemaName = "profession_engineer_reference_mapping_v2";
 
 /**
  * 构造固定 engineer structured 请求；Worker、HTTP 或模型配置不能覆盖 schema、role 或指令。
@@ -37,6 +40,15 @@ const engineerSchemaName = "profession_engineer_pixel_style_decision_v1";
  */
 export function createEngineerModelRequest(
   context: FrozenProfessionSkillExecutionContext,
+  referenceEvidence: {
+    executionId: string;
+    modelCallId: string;
+    imageAttemptId: string;
+    outputArtifactId: string;
+    byteLength: number;
+    sha256: string;
+  },
+  imageInputs: readonly [ModelImageInput, ModelImageInput],
 ): StructuredModelRequest<ProfessionEngineerModelWireDecision> {
   return {
     runId: context.runId,
@@ -44,14 +56,15 @@ export function createEngineerModelRequest(
     schemaName: engineerSchemaName,
     schema: professionEngineerModelWireDecisionSchema,
     instructions: [
-      "Return only the bounded pixel-style decision required by the schema.",
-      "Each shadow, midtone, rim, and core palette value must contain exactly three integer RGB channels from 0 through 255.",
-      "Use these inclusive parameter ranges: sourceColorMix 0..1, coreThreshold 0.5..0.95, coreIntensity 0..1, rimThreshold 0..0.8, rimIntensity 0..1, phaseAmount 0..1, crackDensity 0..0.25, and crackIntensity 0..1.",
-      "Choose zero to four unique optionalOperations values only from rim-light, particle-trail, spatial-crack, and blade-core.",
+      "Return only the bounded reference-image mapping required by the schema.",
+      "Locate the generated effect content that corresponds to the official representative frame.",
+      "Express referenceBounds as normalized left, top, right, and bottom coordinates from 0 through 1 in the generated-reference image.",
+      "The selected bounds must include the complete generated effect with at least 0.5 normalized width and height.",
       "Do not emit paths, commands, code, tools, resource mappings, geometry or alpha changes, coverage claims, or deployment instructions.",
+      "Use the official-source image as the sole geometry, frame identity, and alpha authority. The generated-reference image is the primary runtime RGB source; do not reduce it to a palette or suggest procedural recoloring.",
     ].join(" "),
     input: stableStringifyJcsV1({
-      schemaVersion: 1,
+      schemaVersion: 2,
       professionId: context.professionId,
       styleId: context.styleId,
       skillId: context.skill.skillId,
@@ -59,7 +72,9 @@ export function createEngineerModelRequest(
       professionPrompt: context.skill.professionPrompt,
       skillThemePrompt: context.skill.skillThemePrompt,
       sourceEvidence: context.skill.sourceEvidence,
+      referenceEvidence,
     }),
+    imageInputs,
   };
 }
 
@@ -126,7 +141,9 @@ export function throwEngineerReservationFailure(
           ? "PATCH_TASK_JOB_KIND_REQUIRED"
           : result.status === "job-integrity-failed"
             ? "PROFESSION_JOB_INTEGRITY_FAILED"
-            : "PROFESSION_ENGINEER_EXECUTION_INTEGRITY_FAILED",
+            : result.status === "source-visual-input-mismatch"
+              ? "PROFESSION_SOURCE_VISUAL_INPUT_MISMATCH"
+              : "PROFESSION_ENGINEER_EXECUTION_INTEGRITY_FAILED",
     message: "当前任务状态不允许执行固定 Engineer 步骤。",
   });
 }

@@ -37,6 +37,14 @@ import {
   readProfessionSkillSources,
   replaceProfessionSkillCatalog,
 } from "./profession-skill-sources.repository.js";
+import {
+  deleteProfession,
+  type DeleteProfessionResult,
+} from "./profession-delete.repository.js";
+import {
+  deleteProfessionStyle,
+  type DeleteProfessionStyleResult,
+} from "./profession-style-delete.repository.js";
 
 @Injectable()
 export class ProfessionRepository {
@@ -147,6 +155,14 @@ export class ProfessionRepository {
       publishStatus: "private",
       updatedAt: now.toISOString(),
     };
+  }
+
+  /** 删除当前用户拥有的空职业；状态与内容保护由同模块事务函数统一执行。 */
+  delete(
+    professionId: string,
+    ownerUserId: string,
+  ): Promise<DeleteProfessionResult> {
+    return deleteProfession(this.connection, professionId, ownerUserId);
   }
 
   async listSkills(professionId: string): Promise<ProfessionSkillSummary[]> {
@@ -325,6 +341,31 @@ export class ProfessionRepository {
       publishStatus: "private",
       updatedAt: now.toISOString(),
     };
+  }
+
+  /**
+   * 在一个事务中删除可撤销的风格草稿及其技能子行。
+   *
+   * 删除前锁定风格主行，再检查技能生产和风格包两类引用；主行锁让并发生产请求不能在检查后
+   * 悄悄建立新引用，限制性外键则作为数据库最后一道兜底。不存在或不属于用户的风格统一返回
+   * `not-found`，状态或生产链不允许删除时返回 `protected`，避免把数据库细节暴露给 Controller。
+   *
+   * @param professionId 已通过 HTTP path 校验的职业 UUID。
+   * @param styleId 已通过 HTTP path 校验的风格 UUID，必须与职业复合归属一致。
+   * @param ownerUserId 从浏览器 Access Token 解析的稳定用户 ID，不能来自 body/query。
+   * @returns deleted 表示主行和技能子行已原子删除；其他结果由 Service 映射为稳定 HTTP 异常。
+   */
+  async deleteStyle(
+    professionId: string,
+    styleId: string,
+    ownerUserId: string,
+  ): Promise<DeleteProfessionStyleResult> {
+    return deleteProfessionStyle(
+      this.connection,
+      professionId,
+      styleId,
+      ownerUserId,
+    );
   }
 
   async hasProduction(styleId: string): Promise<boolean> {

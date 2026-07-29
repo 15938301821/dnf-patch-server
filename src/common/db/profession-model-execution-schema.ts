@@ -57,6 +57,14 @@ export const professionSkillModelExecutions = mysqlTable(
     stage: varchar("stage", { length: 32 }).notNull(),
     /** 绑定冻结 Prompt 组合；同一记录后续状态变更不得替换。 */
     promptSha256: varchar("prompt_sha256", { length: 64 }).notNull(),
+    /** V2/V3 两阶段共同绑定的当前 attempt 官方源帧视觉图集；V1 历史记录为空。 */
+    sourceVisualArtifactId: varchar("source_visual_artifact_id", {
+      length: 64,
+    }),
+    sourceVisualSha256: varchar("source_visual_sha256", { length: 64 }),
+    sourceVisualFrameMapSha256: varchar("source_visual_frame_map_sha256", {
+      length: 64,
+    }),
     modelCallId: varchar("model_call_id", { length: 64 }),
     imageAttemptId: varchar("image_attempt_id", { length: 64 }),
     outputArtifactId: varchar("output_artifact_id", { length: 64 }),
@@ -87,7 +95,11 @@ export const professionSkillModelExecutions = mysqlTable(
     ),
     check(
       "profession_skill_model_executions_stage_ck",
-      sql`${table.stage} in ('engineer-plan-v1', 'reference-image-v1')`,
+      sql`${table.stage} in ('engineer-plan-v1', 'reference-image-v1', 'engineer-plan-v2', 'reference-image-v2', 'engineer-plan-v3', 'reference-image-v3')`,
+    ),
+    check(
+      "profession_skill_model_executions_source_visual_ck",
+      sql`(${table.stage} in ('engineer-plan-v1', 'reference-image-v1') and ${table.sourceVisualArtifactId} is null and ${table.sourceVisualSha256} is null and ${table.sourceVisualFrameMapSha256} is null) or (${table.stage} in ('engineer-plan-v2', 'reference-image-v2', 'engineer-plan-v3', 'reference-image-v3') and ${table.sourceVisualArtifactId} is not null and ${table.sourceVisualSha256} is not null and ${table.sourceVisualFrameMapSha256} is not null)`,
     ),
     check(
       "profession_skill_model_executions_status_ck",
@@ -99,7 +111,7 @@ export const professionSkillModelExecutions = mysqlTable(
     ),
     check(
       "profession_skill_model_executions_evidence_ck",
-      sql`(${table.status} = 'prepared' and ${table.modelCallId} is null and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is null and ${table.outputByteLength} is null and ${table.errorCode} is null) or (${table.status} = 'egressing' and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is null and ${table.outputByteLength} is null and ${table.errorCode} is null) or (${table.status} = 'persisting' and ${table.modelCallId} is not null and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is not null and ${table.outputByteLength} is not null and ${table.errorCode} is null) or (${table.status} = 'passed' and ${table.modelCallId} is not null and ((${table.stage} = 'engineer-plan-v1' and ${table.imageAttemptId} is null) or (${table.stage} = 'reference-image-v1' and ${table.imageAttemptId} is not null)) and ${table.outputArtifactId} is not null and ${table.outputSha256} is not null and ${table.outputByteLength} is not null and ${table.errorCode} is null) or (${table.status} = 'failed' and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is null and ${table.outputByteLength} is null and ${table.errorCode} is not null) or (${table.status} = 'indeterminate' and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.errorCode} is not null and ((${table.outputSha256} is null and ${table.outputByteLength} is null) or (${table.modelCallId} is not null and ${table.outputSha256} is not null and ${table.outputByteLength} is not null)))`,
+      sql`(${table.status} = 'prepared' and ${table.modelCallId} is null and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is null and ${table.outputByteLength} is null and ${table.errorCode} is null) or (${table.status} = 'egressing' and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is null and ${table.outputByteLength} is null and ${table.errorCode} is null) or (${table.status} = 'persisting' and ${table.modelCallId} is not null and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is not null and ${table.outputByteLength} is not null and ${table.errorCode} is null) or (${table.status} = 'passed' and ${table.modelCallId} is not null and ((${table.stage} in ('engineer-plan-v1', 'engineer-plan-v2', 'engineer-plan-v3') and ${table.imageAttemptId} is null) or (${table.stage} in ('reference-image-v1', 'reference-image-v2', 'reference-image-v3') and ${table.imageAttemptId} is not null)) and ${table.outputArtifactId} is not null and ${table.outputSha256} is not null and ${table.outputByteLength} is not null and ${table.errorCode} is null) or (${table.status} = 'failed' and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.outputSha256} is null and ${table.outputByteLength} is null and ${table.errorCode} is not null) or (${table.status} = 'indeterminate' and ${table.imageAttemptId} is null and ${table.outputArtifactId} is null and ${table.errorCode} is not null and ((${table.outputSha256} is null and ${table.outputByteLength} is null) or (${table.modelCallId} is not null and ${table.outputSha256} is not null and ${table.outputByteLength} is not null)))`,
     ),
     foreignKey({
       columns: [table.runId, table.jobId],
@@ -138,6 +150,11 @@ export const professionSkillModelExecutions = mysqlTable(
       columns: [table.runId, table.outputArtifactId],
       foreignColumns: [artifacts.runId, artifacts.id],
       name: "profession_skill_model_executions_artifact_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.sourceVisualArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "profession_skill_model_executions_source_visual_artifact_run_fk",
     }).onDelete("restrict"),
   ],
 );

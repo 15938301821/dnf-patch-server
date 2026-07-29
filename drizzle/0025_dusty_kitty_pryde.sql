@@ -1,0 +1,2 @@
+ALTER TABLE `user_model_configurations` ADD `reasoning_effort` varchar(16) DEFAULT 'default' NOT NULL;--> statement-breakpoint
+ALTER TABLE `user_model_configurations` ADD CONSTRAINT `user_model_configurations_reasoning_effort_ck` CHECK (`user_model_configurations`.`reasoning_effort` in ('default', 'low', 'medium', 'high'));

@@ -17,8 +17,8 @@ import { idSchema } from "../../common/contracts/index.js";
 import { ZodValidationPipe } from "../../common/http/zod-validation.pipe.js";
 import { WorkerTokenGuard } from "../../common/security/worker-token.guard.js";
 import {
-  requestProfessionSkillExecutionSchema,
-  type RequestProfessionSkillExecutionInput,
+  professionSkillLeaseSchema,
+  type ProfessionSkillLeaseInput,
 } from "./profession-execution.contracts.js";
 import {
   professionSkillSourceContextViewSchema,
@@ -42,8 +42,8 @@ export class ProfessionSourceContextController {
   @Post(":id/profession-skill-source-context")
   async getSkillSourceContext(
     @Param("id", new ZodValidationPipe(idSchema)) jobId: string,
-    @Body(new ZodValidationPipe(requestProfessionSkillExecutionSchema))
-    input: RequestProfessionSkillExecutionInput,
+    @Body(new ZodValidationPipe(professionSkillLeaseSchema))
+    input: ProfessionSkillLeaseInput,
   ): Promise<ProfessionSkillSourceContextView> {
     return professionSkillSourceContextViewSchema.parse(
       await this.sources.getSkillSourceContext(jobId, input),

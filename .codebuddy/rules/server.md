@@ -41,10 +41,12 @@ dnf-patch-server/
 │  │  └─ worker/            # Worker 注册、能力、禁用状态和心跳
 │  ├─ app.module.ts         # 根依赖装配
 │  └─ main.ts               # 全局前缀、过滤器、CORS、监听与关闭钩子
+├─ tests/                   # 按 src 的 common/config/modules 领域边界镜像组织的测试与 fixture
 └─ package.json             # 依赖和门禁入口
 ```
 
 - `dist/`、`node_modules/`、`.git/`、本机 `.env` 和临时数据库目录不属于源码结构。
+- `src/` 只包含正式运行代码；测试、fixture、spec-support 和 Vitest 依赖只能位于 `tests/`。
 - 新增领域能力优先扩展现有模块；创建新模块时必须同步更新根模块、结构验证脚本、README 和相关测试。
 - 不得新增 `src/controllers`、`src/services`、`src/repositories`、`src/shared` 或 `src/server` 等兼容双轨目录。
 
