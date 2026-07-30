@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   createProfessionEngineerStylePlan,
   encodeProfessionEngineerStylePlan,
+  normalizeProfessionEngineerModelDecision,
   parseProfessionEngineerStylePlanBytes,
   professionEngineerModelDecisionSchema,
   professionEngineerModelWireDecisionSchema,
@@ -18,17 +19,70 @@ import {
 } from "../../../src/modules/job/profession-engineer-plan.js";
 
 describe("Profession engineer style plan", () => {
-  it("makes the image-model reference the runtime RGB source while preserving geometry and alpha", () => {
+  it("creates v5 creative stable frames while limiting official and reference authority", () => {
     const plan = createProfessionEngineerStylePlan(decision());
 
     expect(plan).toMatchObject({
+      schemaVersion: 5,
+      kind: "dnf-aseprite-creative-stable-frame-plan-v5",
+      geometryPolicy: "strict-preserve-source-frame-structure",
+      alphaPolicy: "preserve-source-alpha-byte-exact",
+      rgbPolicy: "creative-visible-rgb-reconstruction",
+      mapping: {
+        referenceRole: "style-and-composition-only",
+        sampling: "smoothed-style-field",
+      },
+      enabledOperations: [
+        "reference-style-extraction",
+        "visible-rgb-reconstruction",
+        "isolated-noise-suppression",
+        "continuous-energy-band",
+        "clean-bright-core",
+        "sharp-edge-finish",
+        "dxt1-background-preserve",
+        "alpha-preserve",
+        "quality-gate",
+      ],
+      safety: {
+        arbitraryCodeAccepted: false,
+        resourceFactsFromModel: false,
+        runtimeRgbFromImageModel: false,
+        runtimeImageDirectReplacement: false,
+        fullSkillCoverageProven: false,
+        deploymentAuthorized: false,
+      },
+    });
+    expect(plan.qualityPolicy).toMatchObject({
+      maximumIsolatedNoiseRatio: 0.015,
+      minimumContinuousBandRatio: 0.55,
+      minimumBrightCoreRatio: 0.01,
+      minimumEdgeContrast: 24,
+      maximumStrongEdgeRatio: 0.25,
+      maximumPeriodicStripeRatio: 0.08,
+      maximumWhiteLineRatio: 0.45,
+      maximumDxt1BoundaryJumpRatio: 0.05,
+      nonPlaceholderFrameTransferRequired: true,
+    });
+    expect(plan).not.toHaveProperty("palette");
+  });
+
+  it("keeps historical v3 canonical plans readable without generating them", () => {
+    const legacyPlan = {
       schemaVersion: 3,
       kind: "dnf-aseprite-reference-transfer-plan-v3",
       geometryPolicy: "strict-preserve-source-frame-position-size",
       alphaPolicy: "preserve-source-alpha-byte-exact",
       rgbPolicy: "image-model-reference-primary",
       mapping: {
+        referenceBounds: decision().referenceBounds,
+        atlasCoordinatePolicy: "proportional-source-cell-map",
         sampling: "alpha-weighted-bilinear-nearest-visible",
+      },
+      qualityPolicy: {
+        minimumReferenceCoverage: 0.8,
+        minimumReferenceSimilarity: 0.9,
+        minimumEdgeEnergyRatio: 1.01,
+        transparentRgbMustBeZero: true,
       },
       enabledOperations: [
         "reference-rgb-transfer",
@@ -45,8 +99,11 @@ describe("Profession engineer style plan", () => {
         fullSkillCoverageProven: false,
         deploymentAuthorized: false,
       },
-    });
-    expect(plan).not.toHaveProperty("palette");
+    };
+
+    expect(professionEngineerStylePlanSchema.parse(legacyPlan)).toEqual(
+      legacyPlan,
+    );
   });
 
   it("rejects unknown fields, out-of-range bounds and undersized mappings", () => {
@@ -86,6 +143,33 @@ describe("Profession engineer style plan", () => {
       professionEngineerModelWireDecisionSchema.parse({
         ...wireDecision,
         command: "do-not-accept",
+      }),
+    ).toThrow();
+  });
+
+  it("falls back narrow valid bounds to the full reference without accepting unsafe coordinates", () => {
+    expect(
+      normalizeProfessionEngineerModelDecision({
+        ...decision(),
+        referenceBounds: {
+          ...decision().referenceBounds,
+          right: decision().referenceBounds.left + 0.1,
+        },
+      }),
+    ).toEqual({
+      schemaVersion: 2,
+      referenceBounds: { left: 0, top: 0, right: 1, bottom: 1 },
+    });
+    expect(() =>
+      normalizeProfessionEngineerModelDecision({
+        ...decision(),
+        referenceBounds: { ...decision().referenceBounds, bottom: 1.1 },
+      }),
+    ).toThrow();
+    expect(() =>
+      normalizeProfessionEngineerModelDecision({
+        ...decision(),
+        referenceBounds: { ...decision().referenceBounds, right: 0.01 },
       }),
     ).toThrow();
   });

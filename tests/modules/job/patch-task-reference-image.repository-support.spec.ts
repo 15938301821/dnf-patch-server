@@ -17,6 +17,15 @@ import {
   findPatchTaskReferenceImage,
   findPatchTaskSkillPreview,
 } from "../../../src/modules/job/patch-task-reference-image.repository-support.js";
+import {
+  createCreativeResultPreviewProvenance,
+  createCreativeSourcePreviewProvenance,
+  createCreativeValidationProvenance,
+  currentStableFrameQualityEvidence,
+  historicalStableFrameQualityEvidence,
+  historicalStableFrameQualityV3Evidence,
+  productionPreviewPublicFrame,
+} from "./fixtures/patch-task-production-preview.fixture.js";
 
 const runId = "11111111-1111-4111-8111-111111111111";
 const skillId = "22222222-2222-4222-8222-222222222222";
@@ -27,6 +36,12 @@ const leaseId = "77777777-7777-4777-8777-777777777777";
 const validationArtifactId = "88888888-8888-4888-8888-888888888888";
 const sourceArtifactId = "99999999-9999-4999-8999-999999999999";
 const resultArtifactId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const previewEvidenceIdentity = {
+  jobId,
+  skillId,
+  validationArtifactId,
+  sourceArtifactId,
+};
 const image = {
   artifactId: "44444444-4444-4444-8444-444444444444",
   skillId,
@@ -99,9 +114,13 @@ describe("findPatchTaskReferenceImage", () => {
 });
 
 describe("findPatchTaskSkillPreview", () => {
-  it("returns current V2 source preview with reference transfer quality", async () => {
-    const validation = currentValidationProvenance();
-    const source = currentSourcePreviewProvenance();
+  it("returns current V4 source preview with stable-frame quality V4", async () => {
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+    );
 
     await expect(
       findPatchTaskSkillPreview(
@@ -117,13 +136,47 @@ describe("findPatchTaskSkillPreview", () => {
     ).resolves.toMatchObject({
       artifactId: sourceArtifactId,
       role: "source-frame",
-      referenceTransferQuality: qualityEvidence(),
+      referenceTransferQuality: currentStableFrameQualityEvidence(),
     });
   });
 
-  it("returns the fixed source PNG without exposing the decoded pixel digest", async () => {
-    const validation = validationProvenance();
-    const source = sourcePreviewProvenance();
+  it("keeps old V4 source preview readable with historical quality V3", async () => {
+    const generation = "historical-quality-v3" as const;
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+      generation,
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+      generation,
+    );
+
+    await expect(
+      findPatchTaskSkillPreview(
+        sequentialDatabaseStub([
+          [productionContext(validation)],
+          [previewRow(sourceArtifactId, "source-frame", source)],
+        ]),
+        runId,
+        skillId,
+        "source-frame",
+        ownerUserId,
+      ),
+    ).resolves.toMatchObject({
+      artifactId: sourceArtifactId,
+      referenceTransferQuality: historicalStableFrameQualityV3Evidence(),
+    });
+  });
+
+  it("keeps historical V3 source preview readable with quality V2", async () => {
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+      "historical-v3",
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+      "historical-v3",
+    );
 
     await expect(
       findPatchTaskSkillPreview(
@@ -144,14 +197,21 @@ describe("findPatchTaskSkillPreview", () => {
       mediaType: "image/png",
       byteLength: 256,
       sha256: "5".repeat(64),
-      frame: publicFrame(),
+      frame: productionPreviewPublicFrame(),
+      referenceTransferQuality: historicalStableFrameQualityEvidence(),
     });
   });
 
-  it("returns the Aseprite result only when it binds the same source frame", async () => {
-    const validation = validationProvenance();
-    const source = sourcePreviewProvenance();
-    const result = resultPreviewProvenance();
+  it("returns current V4 result only when it binds the same V4 source frame", async () => {
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+    );
+    const result = createCreativeResultPreviewProvenance(
+      previewEvidenceIdentity,
+    );
 
     await expect(
       findPatchTaskSkillPreview(
@@ -168,12 +228,49 @@ describe("findPatchTaskSkillPreview", () => {
     ).resolves.toMatchObject({
       artifactId: resultArtifactId,
       role: "aseprite-result",
-      frame: publicFrame(),
+      frame: productionPreviewPublicFrame(),
+      referenceTransferQuality: currentStableFrameQualityEvidence(),
+    });
+  });
+
+  it("keeps historical V3 result readable when it binds the same V3 source", async () => {
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+      "historical-v3",
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+      "historical-v3",
+    );
+    const result = createCreativeResultPreviewProvenance(
+      previewEvidenceIdentity,
+      { generation: "historical-v3" },
+    );
+
+    await expect(
+      findPatchTaskSkillPreview(
+        sequentialDatabaseStub([
+          [productionContext(validation)],
+          [previewRow(sourceArtifactId, "source-frame", source)],
+          [previewRow(resultArtifactId, "aseprite-result", result)],
+        ]),
+        runId,
+        skillId,
+        "aseprite-result",
+        ownerUserId,
+      ),
+    ).resolves.toMatchObject({
+      artifactId: resultArtifactId,
+      role: "aseprite-result",
+      referenceTransferQuality: historicalStableFrameQualityEvidence(),
     });
   });
 
   it("keeps a historical task usable when the new source preview is absent", async () => {
-    const validation = validationProvenance();
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+      "historical-v3",
+    );
 
     await expect(
       findPatchTaskSkillPreview(
@@ -187,11 +284,16 @@ describe("findPatchTaskSkillPreview", () => {
   });
 
   it("fails closed when the result preview drifts to another frame", async () => {
-    const validation = validationProvenance();
-    const source = sourcePreviewProvenance();
-    const result = resultPreviewProvenance({
-      frame: { ...comparisonFrame(), frameIndex: 4 },
-    });
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+    );
+    const result = createCreativeResultPreviewProvenance(
+      previewEvidenceIdentity,
+      { frameOverrides: { frameIndex: 4 } },
+    );
 
     await expect(
       findPatchTaskSkillPreview(
@@ -199,6 +301,56 @@ describe("findPatchTaskSkillPreview", () => {
           [productionContext(validation)],
           [previewRow(sourceArtifactId, "source-frame", source)],
           [previewRow(resultArtifactId, "aseprite-result", result)],
+        ]),
+        runId,
+        skillId,
+        "aseprite-result",
+        ownerUserId,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a historical V3 source under current V4 validation", async () => {
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+    );
+    const historicalSource = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+      "historical-v3",
+    );
+
+    await expect(
+      findPatchTaskSkillPreview(
+        sequentialDatabaseStub([
+          [productionContext(validation)],
+          [previewRow(sourceArtifactId, "source-frame", historicalSource)],
+        ]),
+        runId,
+        skillId,
+        "source-frame",
+        ownerUserId,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a historical V3 result after matching V4 validation and source", async () => {
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+    );
+    const historicalResult = createCreativeResultPreviewProvenance(
+      previewEvidenceIdentity,
+      { generation: "historical-v3" },
+    );
+
+    await expect(
+      findPatchTaskSkillPreview(
+        sequentialDatabaseStub([
+          [productionContext(validation)],
+          [previewRow(sourceArtifactId, "source-frame", source)],
+          [previewRow(resultArtifactId, "aseprite-result", historicalResult)],
         ]),
         runId,
         skillId,
@@ -281,167 +433,5 @@ function previewRow(
     sessionByteLength: 256,
     sessionSha256: sha256,
     sessionProvenance: provenance,
-  };
-}
-
-function validationProvenance(): Record<string, unknown> {
-  return {
-    ...baseProvenance(),
-    kind: "profession-aseprite-validation-v1",
-    asepriteProjects: {
-      artifactId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      sha256: "3".repeat(64),
-    },
-  };
-}
-
-function sourcePreviewProvenance(): Record<string, unknown> {
-  return {
-    ...baseProvenance(),
-    kind: "profession-source-frame-preview-v1",
-    frame: comparisonFrame(),
-    asepriteValidation: {
-      artifactId: validationArtifactId,
-      sha256: "4".repeat(64),
-    },
-  };
-}
-
-function resultPreviewProvenance(
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    ...baseProvenance(),
-    kind: "profession-aseprite-result-preview-v1",
-    frame: comparisonFrame(),
-    asepriteValidation: {
-      artifactId: validationArtifactId,
-      sha256: "4".repeat(64),
-    },
-    sourcePreview: {
-      artifactId: sourceArtifactId,
-      sha256: "5".repeat(64),
-    },
-    ...overrides,
-  };
-}
-
-function currentValidationProvenance(): Record<string, unknown> {
-  return {
-    ...currentBaseProvenance(),
-    kind: "profession-reference-validation-v2",
-    asepriteProjects: {
-      artifactId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      sha256: "3".repeat(64),
-    },
-  };
-}
-
-function currentSourcePreviewProvenance(): Record<string, unknown> {
-  return {
-    ...currentBaseProvenance(),
-    kind: "profession-source-frame-preview-v2",
-    frame: comparisonFrame(),
-    asepriteValidation: {
-      artifactId: validationArtifactId,
-      sha256: "4".repeat(64),
-    },
-  };
-}
-
-function currentBaseProvenance(): Record<string, unknown> {
-  const legacy = baseProvenance();
-  const identity = { ...legacy };
-  delete identity.safety;
-  return {
-    ...identity,
-    schemaVersion: 2,
-    referenceTransferQuality: qualityEvidence(),
-    safety: {
-      referenceImageUsedAsRuntimeRgbSource: true,
-      referenceImageDirectPixelReplacement: false,
-      referenceTransferQualityPassed: true,
-      sourceGeometryPreserved: true,
-      sourceAlphaPreserved: true,
-      deploymentAuthorized: false,
-      deploymentPerformed: false,
-      fullSkillCoverageProven: false,
-      clientCompatibilityProven: false,
-    },
-  };
-}
-
-function qualityEvidence(): Record<string, unknown> {
-  return {
-    schemaVersion: 1,
-    evaluatedFrameCount: 1,
-    evaluatedPixelCount: 2,
-    referenceCoverage: 1,
-    referenceSimilarity: 1,
-    sourceEdgeEnergy: 10,
-    runtimeEdgeEnergy: 20,
-    edgeEnergyRatio: 2,
-  };
-}
-
-function baseProvenance(): Record<string, unknown> {
-  return {
-    schemaVersion: 1,
-    jobId,
-    attempt: 2,
-    skillId,
-    source: {
-      runId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-      inventoryId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-      sourceSha256: "A".repeat(64),
-      frameManifestArtifactId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-      frameManifestSha256: "B".repeat(64),
-      frameManifestToolSha256: "C".repeat(64),
-    },
-    engineerPlan: {
-      artifactId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-      sha256: "D".repeat(64),
-    },
-    referenceImage: {
-      imageAttemptId: "10101010-1010-4010-8010-101010101010",
-      artifactId: "11111111-1111-4111-8111-111111111112",
-      sha256: "E".repeat(64),
-    },
-    aseprite: {
-      profileId: "aseprite-cli",
-      binarySha256: "1".repeat(64),
-      adapterSha256: "2".repeat(64),
-    },
-    safety: {
-      referenceImageUsedAsVisualGuidance: true,
-      referenceImageDirectPixelReplacement: false,
-      sourceGeometryPreserved: true,
-      sourceAlphaPreserved: true,
-      deploymentAuthorized: false,
-      deploymentPerformed: false,
-      fullSkillCoverageProven: false,
-      clientCompatibilityProven: false,
-    },
-  };
-}
-
-function comparisonFrame(): Record<string, unknown> {
-  return {
-    ...publicFrame(),
-    decodedBgraSha256: "7".repeat(64),
-  };
-}
-
-function publicFrame(): Record<string, unknown> {
-  return {
-    entryIndex: 0,
-    frameIndex: 3,
-    internalPath: "sprite/effect/a.img",
-    width: 16,
-    height: 12,
-    canvasWidth: 32,
-    canvasHeight: 24,
-    x: 2,
-    y: -1,
   };
 }

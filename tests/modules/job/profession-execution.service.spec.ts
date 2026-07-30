@@ -139,10 +139,14 @@ describe("ProfessionExecutionService", () => {
     const imageRequest = modelImage.mock.calls[0]?.[0];
     if (!imageRequest) throw new Error("TEST_IMAGE_REQUEST_REQUIRED");
     expect(imageRequest.prompt).toContain("official representative frame");
-    expect(imageRequest.prompt).toContain("same effect silhouette");
+    expect(imageRequest.prompt).toMatch(
+      /continuous fine energy bands[\s\S]*Avoid grain[\s\S]*repeated narrow parallel stripes/,
+    );
     expect(imageRequest.prompt).toContain("transparent background");
     expect(imageRequest.prompt).toContain("uniform neutral #080808 matte");
-    expect(imageRequest.prompt).toContain("runtime RGB source");
+    expect(imageRequest.prompt).toContain(
+      "will not be copied directly into runtime frames",
+    );
     expect(imageRequest.sourceImage).toMatchObject({
       role: "official-source",
       mediaType: "image/png",
@@ -295,7 +299,6 @@ describe("ProfessionExecutionService", () => {
     });
     expect(result.status).toBe("passed");
   });
-
   it("fails the execution when the model does not return a passed image", async () => {
     reserveProfessionSkillModelExecution.mockResolvedValue({
       status: "execute",
@@ -310,7 +313,6 @@ describe("ProfessionExecutionService", () => {
         errorCode: "MODEL_PROVIDER_REQUEST_FAILED",
       },
     });
-
     await expect(
       service.executeSkill(jobId, leaseInput()),
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
@@ -324,7 +326,6 @@ describe("ProfessionExecutionService", () => {
     );
     expect(storageWrite).not.toHaveBeenCalled();
   });
-
   it.each([
     {
       label: "non-PNG bytes",
@@ -347,7 +348,6 @@ describe("ProfessionExecutionService", () => {
       bytes,
       record: { ...modelRecord(), status: "passed" },
     });
-
     const failure = service.executeSkill(jobId, leaseInput());
     await expect(failure).rejects.toBeInstanceOf(ConflictException);
     await expect(failure).rejects.toMatchObject({ response: { code } });

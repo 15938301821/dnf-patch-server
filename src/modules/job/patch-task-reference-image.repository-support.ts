@@ -24,11 +24,19 @@ import type {
   PatchTaskSkillPreviewView,
 } from "./patch-task.contracts.js";
 import { publicPatchTaskSkillPreviewFrame } from "./patch-task-preview-frame.js";
-import {
-  professionSkillOutputProvenanceSchema,
-  type ProfessionSkillOutputProvenance,
-} from "./profession-skill-output-evidence.js";
+import { professionSkillOutputProvenanceSchema } from "./profession-skill-output-evidence.js";
 import { readableProfessionReferenceImageStages } from "./profession-model-execution.js";
+import {
+  hasSamePatchTaskOutputEvidence,
+  isMatchingPatchTaskPreviewProvenance,
+  isPatchTaskResultPreviewProvenance,
+  isPatchTaskSourcePreviewProvenance,
+  parsePatchTaskValidationProvenance,
+  type PatchTaskProductionPreviewRole,
+  type PatchTaskResultPreviewProvenance,
+  type PatchTaskSourcePreviewProvenance,
+  type PatchTaskValidationProvenance,
+} from "./patch-task-production-preview-evidence.js";
 
 const productionPreviewRoles = {
   "source-frame": {
@@ -38,30 +46,6 @@ const productionPreviewRoles = {
     logicalName: "profession-aseprite-result-preview.png",
   },
 } as const;
-
-type ProductionPreviewRole = keyof typeof productionPreviewRoles;
-type ValidationProvenance = Extract<
-  ProfessionSkillOutputProvenance,
-  {
-    kind: "profession-aseprite-validation-v1" | "profession-reference-validation-v2";
-  }
->;
-type SourcePreviewProvenance = Extract<
-  ProfessionSkillOutputProvenance,
-  {
-    kind:
-      | "profession-source-frame-preview-v1"
-      | "profession-source-frame-preview-v2";
-  }
->;
-type ResultPreviewProvenance = Extract<
-  ProfessionSkillOutputProvenance,
-  {
-    kind:
-      | "profession-aseprite-result-preview-v1"
-      | "profession-reference-result-preview-v2";
-  }
->;
 
 /** 按浏览器固定角色分派查询；角色已由 Controller schema 限定，不能退化为任意逻辑名。 */
 export async function findPatchTaskSkillPreview(
@@ -180,7 +164,7 @@ async function findProductionPreview(
   connection: DatabaseService,
   runId: string,
   skillId: string,
-  role: ProductionPreviewRole,
+  role: PatchTaskProductionPreviewRole,
   ownerUserId: string,
 ): Promise<PatchTaskSkillPreviewView | undefined> {
   const contexts = await connection.database
@@ -231,8 +215,10 @@ async function findProductionPreview(
     )
     .limit(2);
   const context = contexts.length === 1 ? contexts[0] : undefined;
-  const validation = parseValidationProvenance(context?.validationProvenance);
-  const validationUpload = parseValidationProvenance(
+  const validation = parsePatchTaskValidationProvenance(
+    context?.validationProvenance,
+  );
+  const validationUpload = parsePatchTaskValidationProvenance(
     context?.validationUploadProvenance,
   );
   if (
@@ -291,7 +277,9 @@ interface ProductionPreviewContext {
 
 interface ResolvedProductionPreview {
   view: PatchTaskSkillPreviewView;
-  provenance: SourcePreviewProvenance | ResultPreviewProvenance;
+  provenance:
+    | PatchTaskSourcePreviewProvenance
+    | PatchTaskResultPreviewProvenance;
 }
 
 /** 读取一个固定角色的唯一 finalized PNG，并复核会话与 Artifact 两份元数据及 provenance。 */
@@ -299,9 +287,9 @@ async function findFinalizedPreview(
   connection: DatabaseService,
   runId: string,
   skillId: string,
-  role: ProductionPreviewRole,
+  role: PatchTaskProductionPreviewRole,
   context: ProductionPreviewContext,
-  validation: ValidationProvenance,
+  validation: PatchTaskValidationProvenance,
   source?: ResolvedProductionPreview,
 ): Promise<ResolvedProductionPreview | undefined> {
   const expected = productionPreviewRoles[role];
@@ -363,7 +351,11 @@ async function findFinalizedPreview(
     !artifactProvenance.success ||
     sha256JcsV1(sessionProvenance.data) !==
       sha256JcsV1(artifactProvenance.data) ||
-    !isMatchingPreviewProvenance(sessionProvenance.data, role, validation)
+    !isMatchingPatchTaskPreviewProvenance(
+      sessionProvenance.data,
+      role,
+      validation,
+    )
   ) {
     return undefined;
   }
@@ -375,15 +367,15 @@ async function findFinalizedPreview(
     provenance.asepriteValidation.artifactId !== context.validationArtifactId ||
     provenance.asepriteValidation.sha256.toUpperCase() !==
       context.validationSha256.toUpperCase() ||
-    !sameBaseEvidence(provenance, validation)
+    !hasSamePatchTaskOutputEvidence(provenance, validation)
   ) {
     return undefined;
   }
-  if (isResultPreviewProvenance(provenance)) {
+  if (isPatchTaskResultPreviewProvenance(provenance)) {
     if (
       !source ||
-      !isSourcePreviewProvenance(source.provenance) ||
-      !isMatchingPreviewProvenance(
+      !isPatchTaskSourcePreviewProvenance(source.provenance) ||
+      !isMatchingPatchTaskPreviewProvenance(
         source.provenance,
         "source-frame",
         validation,
@@ -406,94 +398,12 @@ async function findFinalizedPreview(
       byteLength: row.artifactByteLength,
       sha256: row.artifactSha256,
       frame: publicPatchTaskSkillPreviewFrame(provenance.frame),
-      ...(validation.kind === "profession-reference-validation-v2"
+      ...("referenceTransferQuality" in validation
         ? {
-            referenceTransferQuality:
-              validation.referenceTransferQuality,
+            referenceTransferQuality: validation.referenceTransferQuality,
           }
         : {}),
     },
     provenance,
   };
 }
-
-function parseValidationProvenance(
-  value: unknown,
-): ValidationProvenance | undefined {
-  const parsed = professionSkillOutputProvenanceSchema.safeParse(value);
-  return parsed.success &&
-    (parsed.data.kind === "profession-aseprite-validation-v1" ||
-      parsed.data.kind === "profession-reference-validation-v2")
-    ? parsed.data
-    : undefined;
-}
-
-/** 要求 preview 与 validation 属于同一代契约，禁止历史 V1 与当前 V2 交叉拼接。 */
-function isMatchingPreviewProvenance(
-  provenance: ProfessionSkillOutputProvenance,
-  role: ProductionPreviewRole,
-  validation: ValidationProvenance,
-): provenance is SourcePreviewProvenance | ResultPreviewProvenance {
-  if (validation.kind === "profession-reference-validation-v2") {
-    return role === "source-frame"
-      ? provenance.kind === "profession-source-frame-preview-v2"
-      : provenance.kind === "profession-reference-result-preview-v2";
-  }
-  return role === "source-frame"
-    ? provenance.kind === "profession-source-frame-preview-v1"
-    : provenance.kind === "profession-aseprite-result-preview-v1";
-}
-
-/** 识别两代源帧 preview；调用方仍需用 validation 进一步约束代际。 */
-function isSourcePreviewProvenance(
-  provenance: SourcePreviewProvenance | ResultPreviewProvenance,
-): provenance is SourcePreviewProvenance {
-  return (
-    provenance.kind === "profession-source-frame-preview-v1" ||
-    provenance.kind === "profession-source-frame-preview-v2"
-  );
-}
-
-/** 识别两代结果 preview；调用方仍需复核同代源帧和完整帧身份。 */
-function isResultPreviewProvenance(
-  provenance: SourcePreviewProvenance | ResultPreviewProvenance,
-): provenance is ResultPreviewProvenance {
-  return (
-    provenance.kind === "profession-aseprite-result-preview-v1" ||
-    provenance.kind === "profession-reference-result-preview-v2"
-  );
-}
-
-/** 比较 validation 与预览共享的完整来源/模型/工具/安全证据，排除各角色专属字段。 */
-function sameBaseEvidence(
-  preview: SourcePreviewProvenance | ResultPreviewProvenance,
-  validation: ValidationProvenance,
-): boolean {
-  const previewBase = commonOutputEvidence(preview);
-  const validationBase = commonOutputEvidence(validation);
-  return sha256JcsV1(previewBase) === sha256JcsV1(validationBase);
-}
-
-/** 删除角色专属绑定但保留 V2 质量摘要，供同代 validation/preview 逐值比较。 */
-function commonOutputEvidence(
-  provenance:
-    | ValidationProvenance
-    | SourcePreviewProvenance
-    | ResultPreviewProvenance,
-): Record<string, unknown> {
-  return {
-    schemaVersion: provenance.schemaVersion,
-    jobId: provenance.jobId,
-    attempt: provenance.attempt,
-    skillId: provenance.skillId,
-    source: provenance.source,
-    engineerPlan: provenance.engineerPlan,
-    referenceImage: provenance.referenceImage,
-    ...("referenceTransferQuality" in provenance
-      ? { referenceTransferQuality: provenance.referenceTransferQuality }
-      : {}),
-    aseprite: provenance.aseprite,
-    safety: provenance.safety,
-  };
-}
-

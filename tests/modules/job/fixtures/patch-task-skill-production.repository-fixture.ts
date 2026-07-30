@@ -21,6 +21,14 @@ import {
   type SkillProductionReportHarness,
 } from "./patch-task-skill-production.repository-fixture-support.js";
 import { skillProductionFixture } from "./patch-task-skill-production.fixture-ids.js";
+import {
+  currentProjectsProvenance,
+  currentResultPreviewProvenance,
+  currentSourcePreviewProvenance,
+  currentValidationProvenance,
+  historicalCreativeProjectsProvenance,
+  historicalQualityV3ProjectsProvenance,
+} from "./patch-task-skill-production-output-provenance.fixture.js";
 
 export type { SkillProductionReportHarness } from "./patch-task-skill-production.repository-fixture-support.js";
 export { skillProductionFixture };
@@ -37,6 +45,8 @@ export type SkillProductionReportScenario =
   | "artist-old-attempt"
   | "source-id-mismatch"
   | "projects-not-finalized"
+  | "historical-v3-projects"
+  | "historical-quality-v3-projects"
   | "validation-projects-role"
   | "validation-quality-mismatch";
 
@@ -79,13 +89,21 @@ function acceptedRows(
   if (scenario === "projects-not-finalized") {
     projects.sessionStatus = "authorized";
   }
+  if (scenario === "historical-v3-projects") {
+    projects.sessionProvenance = historicalCreativeProjectsProvenance();
+    projects.artifactProvenance = historicalCreativeProjectsProvenance();
+  }
+  if (scenario === "historical-quality-v3-projects") {
+    projects.sessionProvenance = historicalQualityV3ProjectsProvenance();
+    projects.artifactProvenance = historicalQualityV3ProjectsProvenance();
+  }
   const validation = validationUploadRow();
   if (scenario === "validation-projects-role") {
-    validation.sessionProvenance = projectsProvenance();
-    validation.artifactProvenance = projectsProvenance();
+    validation.sessionProvenance = currentProjectsProvenance();
+    validation.artifactProvenance = currentProjectsProvenance();
   }
   if (scenario === "validation-quality-mismatch") {
-    const provenance = validationProvenance({ referenceSimilarity: 0.95 });
+    const provenance = currentValidationProvenance({ strongEdgeRatio: 0.11 });
     validation.sessionProvenance = provenance;
     validation.artifactProvenance = provenance;
   }
@@ -224,7 +242,7 @@ function projectsUploadRow(): Record<string, unknown> {
     skillProductionFixture.projectsArtifactId,
     "projects.zip",
     "3".repeat(64),
-    projectsProvenance(),
+    currentProjectsProvenance(),
   );
 }
 
@@ -234,7 +252,7 @@ function validationUploadRow(): Record<string, unknown> {
     skillProductionFixture.validationArtifactId,
     "validation.zip",
     "4".repeat(64),
-    validationProvenance(),
+    currentValidationProvenance(),
   );
 }
 
@@ -244,7 +262,7 @@ function sourcePreviewUploadRow(): Record<string, unknown> {
     skillProductionFixture.sourcePreviewArtifactId,
     "profession-source-frame-preview.png",
     "5".repeat(64),
-    sourcePreviewProvenance(),
+    currentSourcePreviewProvenance(),
     "image/png",
   );
 }
@@ -255,7 +273,7 @@ function resultPreviewUploadRow(): Record<string, unknown> {
     skillProductionFixture.resultPreviewArtifactId,
     "profession-aseprite-result-preview.png",
     "6".repeat(64),
-    resultPreviewProvenance(),
+    currentResultPreviewProvenance(),
     "image/png",
   );
 }
@@ -294,124 +312,6 @@ function uploadRow(
     artifactByteLength: 256,
     artifactSha256: sha256,
     artifactProvenance: provenance,
-  };
-}
-
-function projectsProvenance(): Record<string, unknown> {
-  return {
-    ...baseOutputProvenance(),
-    kind: "profession-reference-projects-v2",
-  };
-}
-
-function validationProvenance(
-  qualityOverrides: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    ...baseOutputProvenance(qualityOverrides),
-    kind: "profession-reference-validation-v2",
-    asepriteProjects: {
-      artifactId: skillProductionFixture.projectsArtifactId,
-      sha256: "3".repeat(64),
-    },
-  };
-}
-
-function sourcePreviewProvenance(): Record<string, unknown> {
-  return {
-    ...baseOutputProvenance(),
-    kind: "profession-source-frame-preview-v2",
-    frame: comparisonFrame(),
-    asepriteValidation: {
-      artifactId: skillProductionFixture.validationArtifactId,
-      sha256: "4".repeat(64),
-    },
-  };
-}
-
-function resultPreviewProvenance(): Record<string, unknown> {
-  return {
-    ...baseOutputProvenance(),
-    kind: "profession-reference-result-preview-v2",
-    frame: comparisonFrame(),
-    asepriteValidation: {
-      artifactId: skillProductionFixture.validationArtifactId,
-      sha256: "4".repeat(64),
-    },
-    sourcePreview: {
-      artifactId: skillProductionFixture.sourcePreviewArtifactId,
-      sha256: "5".repeat(64),
-    },
-  };
-}
-
-function comparisonFrame(): Record<string, unknown> {
-  return {
-    entryIndex: 0,
-    frameIndex: 3,
-    internalPath: "sprite/effect/a.img",
-    width: 16,
-    height: 12,
-    canvasWidth: 32,
-    canvasHeight: 24,
-    x: 2,
-    y: -1,
-    decodedBgraSha256: "7".repeat(64),
-  };
-}
-
-function baseOutputProvenance(
-  qualityOverrides: Record<string, unknown> = {},
-): Record<string, unknown> {
-  return {
-    schemaVersion: 2,
-    jobId: skillProductionFixture.jobId,
-    attempt: 2,
-    skillId: skillProductionFixture.skillId,
-    source: {
-      runId: skillProductionFixture.sourceRunId,
-      inventoryId: skillProductionFixture.sourceInventoryId,
-      sourceSha256: "A".repeat(64),
-      frameManifestArtifactId: skillProductionFixture.sourceManifestArtifactId,
-      frameManifestSha256: "B".repeat(64),
-      frameManifestToolSha256: "C".repeat(64),
-    },
-    engineerPlan: {
-      artifactId: skillProductionFixture.engineerArtifactId,
-      sha256: "E".repeat(64),
-    },
-    referenceImage: {
-      imageAttemptId: skillProductionFixture.imageAttemptId,
-      artifactId: skillProductionFixture.referenceArtifactId,
-      sha256: "F".repeat(64),
-    },
-    referenceTransferQuality: {
-      schemaVersion: 1,
-      evaluatedFrameCount: 1,
-      evaluatedPixelCount: 2,
-      referenceCoverage: 1,
-      referenceSimilarity: 1,
-      sourceEdgeEnergy: 10,
-      runtimeEdgeEnergy: 20,
-      edgeEnergyRatio: 2,
-      ...qualityOverrides,
-    },
-    aseprite: {
-      profileId: "aseprite-cli",
-      binarySha256: "1".repeat(64),
-      adapterSha256: "2".repeat(64),
-    },
-    safety: {
-      referenceImageUsedAsRuntimeRgbSource: true,
-      referenceImageDirectPixelReplacement: false,
-      referenceTransferQualityPassed: true,
-      sourceGeometryPreserved: true,
-      sourceAlphaPreserved: true,
-      deploymentAuthorized: false,
-      deploymentPerformed: false,
-      fullSkillCoverageProven: false,
-      clientCompatibilityProven: false,
-    },
   };
 }
 

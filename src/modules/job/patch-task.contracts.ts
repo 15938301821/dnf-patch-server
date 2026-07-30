@@ -324,17 +324,51 @@ export interface PatchTaskSkillPreviewFrameView {
   y: number;
 }
 
-/** V2 参考 RGB 传输的独立质量摘要；数值来自 finalized provenance，不由浏览器或 Report DTO 提交。 */
-export interface PatchTaskReferenceTransferQualityView {
-  schemaVersion: 1;
-  evaluatedFrameCount: number;
-  evaluatedPixelCount: number;
-  referenceCoverage: number;
-  referenceSimilarity: number;
-  sourceEdgeEnergy: number;
-  runtimeEdgeEnergy: number;
-  edgeEnergyRatio: number;
-}
+/** finalized provenance 中的质量摘要；浏览器按 schemaVersion 区分历史参考传输与稳定帧指标。 */
+export type PatchTaskReferenceTransferQualityView =
+  | {
+      schemaVersion: 1;
+      evaluatedFrameCount: number;
+      evaluatedPixelCount: number;
+      referenceCoverage: number;
+      referenceSimilarity: number;
+      sourceEdgeEnergy: number;
+      runtimeEdgeEnergy: number;
+      edgeEnergyRatio: number;
+    }
+  | {
+      schemaVersion: 2;
+      evaluatedFrameCount: number;
+      evaluatedPixelCount: number;
+      isolatedNoiseRatio: number;
+      continuousBandRatio: number;
+      brightCoreRatio: number;
+      edgeContrast: number;
+    }
+  | {
+      schemaVersion: 3;
+      evaluatedFrameCount: number;
+      evaluatedPixelCount: number;
+      isolatedNoiseRatio: number;
+      continuousBandRatio: number;
+      brightCoreRatio: number;
+      edgeContrast: number;
+      strongEdgeRatio: number;
+      periodicStripeRatio: number;
+    }
+  | {
+      schemaVersion: 4;
+      evaluatedFrameCount: number;
+      evaluatedPixelCount: number;
+      isolatedNoiseRatio: number;
+      continuousBandRatio: number;
+      brightCoreRatio: number;
+      edgeContrast: number;
+      strongEdgeRatio: number;
+      periodicStripeRatio: number;
+      maximumWhiteLineRatio: number;
+      maximumDxt1BoundaryJumpRatio: number;
+    };
 
 /**
  * 当前任务技能的固定预览元数据。服务端按角色解析当前 attempt 证据，浏览器不能通过此结构

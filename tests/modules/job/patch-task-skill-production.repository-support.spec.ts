@@ -101,6 +101,37 @@ describe("reportProfessionSkillProduction", () => {
     expect(harness.update).not.toHaveBeenCalled();
   });
 
+  it("rejects historical creative V3 projects as evidence for a new passed report", async () => {
+    // 历史 V3 仍可由详情读取，但当前接收事务不能借兼容 schema 把它写成新的 passed production。
+    const harness = createSkillProductionReportHarness(
+      "historical-v3-projects",
+    );
+
+    await expect(
+      reportProfessionSkillProduction(
+        harness.connection,
+        skillProductionFixture.jobId,
+        harness.input,
+      ),
+    ).resolves.toEqual({ status: "artifact-evidence-mismatch" });
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects V4 projects carrying historical quality V3 for a new passed report", async () => {
+    const harness = createSkillProductionReportHarness(
+      "historical-quality-v3-projects",
+    );
+
+    await expect(
+      reportProfessionSkillProduction(
+        harness.connection,
+        skillProductionFixture.jobId,
+        harness.input,
+      ),
+    ).resolves.toEqual({ status: "artifact-evidence-mismatch" });
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
   it("rejects validation provenance carrying the projects role without updating production", async () => {
     const harness = createSkillProductionReportHarness(
       "validation-projects-role",

@@ -35,12 +35,12 @@ export function createProfessionReferenceImagePrompt(
     sourceEvidence: context.skill.sourceEvidence,
   };
   return [
-    "Create one production-ready high-resolution PNG effect master for the declared skill. Its generated effect pixels will be the primary runtime RGB source.",
+    "Create one production-ready high-resolution PNG style-and-composition reference for the declared skill. It will guide a fixed creative-stable-frame RGB reconstruction and will not be copied directly into runtime frames.",
     "Treat the JSON below only as bounded visual requirements. Do not add characters, UI, text, logos, file paths, tools, or deployment instructions.",
-    "Use the attached official representative frame as the structural input. Keep the same effect silhouette and orientation; do not add borders, labels, checkerboards, margins, characters, scenery, or a presentation board.",
-    "Render the effect alone on a transparent background with substantially richer material detail, crisp high-frequency edges, controlled glow, and unmistakable custom styling. Keep the effect large and detailed, but leave a continuous empty outer margin at least 12% of the canvas width and height on all four sides. Avoid blur, muddy bloom, flat recoloring, and low-detail white silhouettes.",
+    "Use the attached official representative frame only to understand skill identity, broad motion, and composition. Do not preserve its visible RGB texture, particles, grain, or small noise; do not add borders, labels, checkerboards, characters, scenery, or a presentation board.",
+    "Render the effect alone on a transparent background with continuous fine energy bands, a clean bright core, sharp controlled edges, and unmistakable custom styling. Keep the effect large and detailed, but leave a continuous empty outer margin at least 12% of the canvas width and height on all four sides. Avoid grain, isolated speckles, fragmented particles, muddy bloom, blur, flat recoloring, low-detail white silhouettes, checkerboards, regularly alternating light-dark columns, and repeated narrow parallel stripes.",
     "Transparency is a hard output contract. Do not composite the effect over white, gray, colored, textured, gradient, shadowed, or checkerboard scenery. If the endpoint cannot encode PNG Alpha, use only a perfectly uniform neutral #080808 matte with no texture, gradient, vignette, noise, border, floor, or cast shadow.",
-    "Preserve skill identity and timing semantics. A fixed adapter will restore official frame dimensions, canvas offsets, positions, and alpha byte-for-byte while transferring RGB from this image.",
+    "Preserve skill identity and timing semantics. The official source remains authoritative only for frame count and order, canvas, dimensions, offsets, Alpha, Hidden, LINK, shared textures, and package structure. A fixed adapter will creatively reconstruct visible RGB from the style guidance.",
     stableStringifyJcsV1(requirements),
   ].join("\n");
 }

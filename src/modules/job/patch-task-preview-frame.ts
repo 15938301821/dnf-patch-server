@@ -13,11 +13,13 @@ type SourcePreviewProvenance = Extract<
   {
     kind:
       | "profession-source-frame-preview-v1"
-      | "profession-source-frame-preview-v2";
+      | "profession-source-frame-preview-v2"
+      | "profession-creative-source-frame-preview-v3"
+      | "profession-creative-source-frame-preview-v4";
   }
 >;
 
-/** 仅公开帧位置与几何，隐藏 Worker 用于字节身份复核的 decoded BGRA SHA-256。 */
+/** 仅公开各代帧位置与几何，隐藏 Worker 用于字节身份复核的 decoded BGRA SHA-256。 */
 export function publicPatchTaskSkillPreviewFrame(
   frame: SourcePreviewProvenance["frame"],
 ): PatchTaskSkillPreviewFrameView {

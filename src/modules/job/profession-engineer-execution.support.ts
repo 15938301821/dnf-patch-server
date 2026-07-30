@@ -60,8 +60,11 @@ export function createEngineerModelRequest(
       "Locate the generated effect content that corresponds to the official representative frame.",
       "Express referenceBounds as normalized left, top, right, and bottom coordinates from 0 through 1 in the generated-reference image.",
       "The selected bounds must include the complete generated effect with at least 0.5 normalized width and height.",
+      "If the effect bounds are uncertain or occupy less than 0.5 normalized width or height, return the full image exactly as left 0, top 0, right 1, and bottom 1.",
       "Do not emit paths, commands, code, tools, resource mappings, geometry or alpha changes, coverage claims, or deployment instructions.",
-      "Use the official-source image as the sole geometry, frame identity, and alpha authority. The generated-reference image is the primary runtime RGB source; do not reduce it to a palette or suggest procedural recoloring.",
+      "Use the official-source image only as the frame-count, frame-order, canvas, size, offset, alpha, Hidden, LINK, shared-texture, and package-structure authority.",
+      "Treat the generated-reference image only as style and composition guidance. A fixed creative-stable-frame adapter will reconstruct visible runtime RGB; do not request pixel copying, source-RGB preservation, or direct image replacement.",
+      "Select broad low-frequency color fields and overall effect composition; do not treat checkerboards, regularly alternating light-dark columns, or repeated narrow parallel stripes as intended style detail.",
     ].join(" "),
     input: stableStringifyJcsV1({
       schemaVersion: 2,

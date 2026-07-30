@@ -13,7 +13,10 @@
  * 对象 key、角色与 Aseprite 工具身份均未漂移，缺一项即 fail-closed。
  */
 import { sha256JcsV1 } from "../../common/utils/canonical.js";
-import { professionSkillOutputProvenanceSchema } from "./profession-skill-output-evidence.js";
+import {
+  currentProfessionSkillOutputProvenanceSchema,
+  type CurrentProfessionSkillOutputProvenance,
+} from "./profession-skill-output-evidence.js";
 import type { StylePackageContextV3 } from "./style-package-production.contracts.js";
 
 /** Package context 复核所需的单技能 production 数据库字段。 */
@@ -96,15 +99,12 @@ type CompleteProduction = StylePackageProductionEvidenceRow & {
   validationUploadId: string;
 };
 
-type OutputProvenance = ReturnType<
-  typeof professionSkillOutputProvenanceSchema.parse
->;
 type PackageOutputProvenance = Extract<
-  OutputProvenance,
+  CurrentProfessionSkillOutputProvenance,
   {
     kind:
-      | "profession-reference-projects-v2"
-      | "profession-reference-validation-v2";
+      | "profession-creative-projects-v4"
+      | "profession-creative-validation-v4";
   }
 >;
 
@@ -155,8 +155,8 @@ export function resolveStylePackageSkillInputs(
     if (
       !projects ||
       !validation ||
-      projects.provenance.kind !== "profession-reference-projects-v2" ||
-      validation.provenance.kind !== "profession-reference-validation-v2" ||
+      projects.provenance.kind !== "profession-creative-projects-v4" ||
+      validation.provenance.kind !== "profession-creative-validation-v4" ||
       sha256JcsV1(validation.provenance.source) !==
         sha256JcsV1(projects.provenance.source) ||
       sha256JcsV1(validation.provenance.referenceTransferQuality) !==
@@ -261,16 +261,14 @@ function resolveFinalizedRole(
     }
   | undefined {
   if (!artifact || !upload) return undefined;
-  const artifactProvenance = professionSkillOutputProvenanceSchema.safeParse(
-    artifact.provenance,
-  );
-  const uploadProvenance = professionSkillOutputProvenanceSchema.safeParse(
-    upload.provenance,
-  );
+  const artifactProvenance =
+    currentProfessionSkillOutputProvenanceSchema.safeParse(artifact.provenance);
+  const uploadProvenance =
+    currentProfessionSkillOutputProvenanceSchema.safeParse(upload.provenance);
   const expectedKind =
     role === "projects"
-      ? "profession-reference-projects-v2"
-      : "profession-reference-validation-v2";
+      ? "profession-creative-projects-v4"
+      : "profession-creative-validation-v4";
   const expectedName =
     role === "projects"
       ? "profession-aseprite-projects.zip"
@@ -319,7 +317,7 @@ function resolveFinalizedRole(
 
 /** 将严格 provenance 与 production 中保存的来源、attempt 和 Aseprite 工具身份交叉核对。 */
 function matchesProductionIdentity(
-  provenance: OutputProvenance,
+  provenance: CurrentProfessionSkillOutputProvenance,
   production: CompleteProduction,
 ): boolean {
   return (

@@ -19,6 +19,10 @@ import type {
   UploadFixture,
 } from "./fixtures/style-package-context.repository.spec-support.js";
 import { createOutputUploadFixture } from "./fixtures/style-package-context.repository.spec-support.js";
+import {
+  createStylePackageOutputArtifact,
+  type StylePackageEvidenceGeneration,
+} from "./fixtures/style-package-output-evidence.fixture.js";
 import type {
   RequestStylePackageContextV3,
   StylePackageProductionJobPayloadV3,
@@ -129,7 +133,7 @@ describe("StylePackageContextRepository.resolve", () => {
       ...provenance,
       referenceTransferQuality: {
         ...(provenance.referenceTransferQuality as Record<string, unknown>),
-        referenceSimilarity: 0.95,
+        strongEdgeRatio: 0.11,
       },
     };
     validationUpload.provenance = validation.provenance;
@@ -149,6 +153,27 @@ describe("StylePackageContextRepository.resolve", () => {
     if (!projectsUpload) throw new Error("TEST_PROJECTS_UPLOAD_REQUIRED");
     projectsUpload.status = "authorized";
     const harness = repositoryHarness({ uploads });
+
+    await expect(harness.repository.resolve(jobId, request())).resolves.toEqual(
+      { status: "package-evidence-incomplete" },
+    );
+  });
+
+  it("rejects historical creative V3 evidence as new Package context input", async () => {
+    // Artifact 与 upload 两侧即使完全一致，历史 V3 也不能被当前 npk-package Job 再次消费。
+    const artifacts = validArtifacts("historical-v3");
+    const uploads = validUploads(artifacts);
+    const harness = repositoryHarness({ artifacts, uploads });
+
+    await expect(harness.repository.resolve(jobId, request())).resolves.toEqual(
+      { status: "package-evidence-incomplete" },
+    );
+  });
+
+  it("rejects V4 evidence carrying historical quality V3 as Package input", async () => {
+    const artifacts = validArtifacts("historical-quality-v3");
+    const uploads = validUploads(artifacts);
+    const harness = repositoryHarness({ artifacts, uploads });
 
     await expect(harness.repository.resolve(jobId, request())).resolves.toEqual(
       { status: "package-evidence-incomplete" },
@@ -341,7 +366,9 @@ function validProductions(): ProductionFixture[] {
   ];
 }
 
-function validArtifacts(): ArtifactFixture[] {
+function validArtifacts(
+  generation: StylePackageEvidenceGeneration = "current-v4",
+): ArtifactFixture[] {
   return [
     outputArtifact(
       firstSkillId,
@@ -350,6 +377,9 @@ function validArtifacts(): ArtifactFixture[] {
       firstProjectsId,
       "6",
       "projects",
+      undefined,
+      undefined,
+      generation,
     ),
     outputArtifact(
       firstSkillId,
@@ -360,6 +390,7 @@ function validArtifacts(): ArtifactFixture[] {
       "validation",
       firstProjectsId,
       "6",
+      generation,
     ),
     outputArtifact(
       secondSkillId,
@@ -368,6 +399,9 @@ function validArtifacts(): ArtifactFixture[] {
       secondProjectsId,
       "8",
       "projects",
+      undefined,
+      undefined,
+      generation,
     ),
     outputArtifact(
       secondSkillId,
@@ -378,13 +412,15 @@ function validArtifacts(): ArtifactFixture[] {
       "validation",
       secondProjectsId,
       "8",
+      generation,
     ),
   ];
 }
 
-function validUploads(): UploadFixture[] {
+function validUploads(
+  artifacts: ArtifactFixture[] = validArtifacts(),
+): UploadFixture[] {
   const productions = validProductions();
-  const artifacts = validArtifacts();
   return [
     createOutputUploadFixture(
       runId,
@@ -421,78 +457,18 @@ function outputArtifact(
   role: "projects" | "validation",
   projectsArtifactId?: string,
   projectsShaCharacter?: string,
+  generation: StylePackageEvidenceGeneration = "current-v4",
 ): ArtifactFixture {
-  const base = {
-    schemaVersion: 2 as const,
-    jobId: producingJobId,
-    attempt,
-    skillId,
-    source: {
-      runId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-      inventoryId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-      sourceSha256: "A".repeat(64),
-      frameManifestArtifactId: "12345678-1234-4234-8234-123456789abc",
-      frameManifestSha256: "B".repeat(64),
-      frameManifestToolSha256: "C".repeat(64),
-    },
-    engineerPlan: {
-      artifactId: "23456789-2345-4345-8345-23456789abcd",
-      sha256: "D".repeat(64),
-    },
-    referenceImage: {
-      imageAttemptId: "3456789a-3456-4456-8456-3456789abcde",
-      artifactId: "456789ab-4567-4567-8567-456789abcdef",
-      sha256: "E".repeat(64),
-    },
-    referenceTransferQuality: {
-      schemaVersion: 1 as const,
-      evaluatedFrameCount: 1,
-      evaluatedPixelCount: 2,
-      referenceCoverage: 1,
-      referenceSimilarity: 1,
-      sourceEdgeEnergy: 10,
-      runtimeEdgeEnergy: 20,
-      edgeEnergyRatio: 2,
-    },
-    aseprite: {
-      profileId: "aseprite-cli" as const,
-      binarySha256: "F".repeat(64),
-      adapterSha256: "0".repeat(64),
-    },
-    safety: {
-      referenceImageUsedAsRuntimeRgbSource: true as const,
-      referenceImageDirectPixelReplacement: false as const,
-      referenceTransferQualityPassed: true as const,
-      sourceGeometryPreserved: true as const,
-      sourceAlphaPreserved: true as const,
-      deploymentAuthorized: false as const,
-      deploymentPerformed: false as const,
-      fullSkillCoverageProven: false as const,
-      clientCompatibilityProven: false as const,
-    },
-  };
-  const sha256 = shaCharacter.repeat(64);
-  return {
-    id,
+  return createStylePackageOutputArtifact({
     runId,
-    storageKey: `artifacts/${id}`,
-    logicalName:
-      role === "projects"
-        ? "profession-aseprite-projects.zip"
-        : "profession-aseprite-validation.zip",
-    mediaType: "application/zip",
-    byteLength: 1_024,
-    sha256,
-    provenance:
-      role === "projects"
-        ? { ...base, kind: "profession-reference-projects-v2" as const }
-        : {
-            ...base,
-            kind: "profession-reference-validation-v2" as const,
-            asepriteProjects: {
-              artifactId: projectsArtifactId,
-              sha256: projectsShaCharacter?.repeat(64),
-            },
-          },
-  };
+    skillId,
+    producingJobId,
+    attempt,
+    id,
+    shaCharacter,
+    role,
+    ...(projectsArtifactId === undefined ? {} : { projectsArtifactId }),
+    ...(projectsShaCharacter === undefined ? {} : { projectsShaCharacter }),
+    generation,
+  });
 }

@@ -41,8 +41,8 @@ import {
   createProfessionEngineerStylePlan,
   encodeProfessionEngineerStylePlan,
   maxProfessionEngineerPlanBytes,
+  normalizeProfessionEngineerModelDecision,
   parseProfessionEngineerStylePlanBytes,
-  professionEngineerModelDecisionSchema,
   type EncodedProfessionEngineerStylePlan,
   type ProfessionEngineerModelWireDecision,
   type ProfessionEngineerStylePlan,
@@ -206,9 +206,7 @@ export class ProfessionEngineerExecutionService {
 
     let encoded: EncodedProfessionEngineerStylePlan;
     try {
-      const decision = professionEngineerModelDecisionSchema.parse(
-        result.value,
-      );
+      const decision = normalizeProfessionEngineerModelDecision(result.value);
       encoded = encodeProfessionEngineerStylePlan(
         createProfessionEngineerStylePlan(decision),
       );
