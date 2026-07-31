@@ -7,6 +7,7 @@
  */
 import { z } from "zod";
 import { createHash } from "node:crypto";
+import sharp from "sharp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ModelCallView,
@@ -333,6 +334,62 @@ describe("OpenAiService model evidence", () => {
       throw new Error("TEST_MODEL_CALL_REQUIRED");
     }
     expect(pending.requestSha256).toMatch(/^[A-F0-9]{64}$/u);
+  });
+
+  it("为 V6 target 协商画布、哈希策略并按实际 PNG 冻结无拉伸几何", async () => {
+    const providerBytes = await sharp({
+      create: {
+        width: 12,
+        height: 8,
+        channels: 4,
+        background: { r: 20, g: 40, b: 60, alpha: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
+    provider.image.mockResolvedValue({ bytes: providerBytes });
+
+    const first = await service.image({
+      runId: crypto.randomUUID(),
+      role: "artist",
+      prompt: "bounded prompt",
+      targetDimensions: { width: 4, height: 3 },
+    });
+    const second = await service.image({
+      runId: crypto.randomUUID(),
+      role: "artist",
+      prompt: "bounded prompt",
+      targetDimensions: { width: 3, height: 4 },
+    });
+
+    const firstOutbound = provider.image.mock.calls[0]?.[0];
+    const secondOutbound = provider.image.mock.calls[1]?.[0];
+    expect(firstOutbound).toMatchObject({
+      requestedCanvas: {
+        openAiSize: "1536x1024",
+        geminiAspectRatio: "3:2",
+      },
+    });
+    expect(firstOutbound?.prompt).toContain("exact aspect ratio is 4:3");
+    expect(secondOutbound).toMatchObject({
+      requestedCanvas: {
+        openAiSize: "1024x1536",
+        geminiAspectRatio: "2:3",
+      },
+    });
+    expect(first.targetGeometry).toMatchObject({
+      target: { width: 4, height: 3 },
+      providerCanvas: { width: 12, height: 8 },
+      contentRect: { left: 2, top: 1, width: 8, height: 6 },
+      uniformScale: { numerator: 1, denominator: 2 },
+    });
+    expect(second.targetGeometry).toMatchObject({
+      target: { width: 3, height: 4 },
+      contentRect: { left: 3, top: 0, width: 6, height: 8 },
+    });
+    const firstRecord = calls.create.mock.calls[0]?.[0] as ModelCallView;
+    const secondRecord = calls.create.mock.calls[1]?.[0] as ModelCallView;
+    expect(firstRecord.requestSha256).not.toBe(secondRecord.requestSha256);
   });
 });
 

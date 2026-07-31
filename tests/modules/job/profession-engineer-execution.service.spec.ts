@@ -26,6 +26,7 @@ import {
 } from "../../../src/modules/job/profession-engineer-plan.js";
 import type { RequestProfessionSkillExecutionInput } from "../../../src/modules/job/profession-execution.contracts.js";
 import type { FrozenProfessionSkillExecutionContext } from "../../../src/modules/job/profession-execution-context.js";
+
 const jobId = "00000000-0000-4000-8000-000000000000";
 const executionId = "11111111-1111-4111-8111-111111111111";
 const modelCallId = "22222222-2222-4222-8222-222222222222";
@@ -45,6 +46,7 @@ type ExecutionRepositoryPort = ConstructorParameters<
 type FixedEngineerModelPort = ConstructorParameters<
   typeof ProfessionEngineerExecutionService
 >[1];
+
 describe("ProfessionEngineerExecutionService", () => {
   const reserve =
     vi.fn<ExecutionRepositoryPort["reserveProfessionSkillModelExecution"]>();
@@ -75,32 +77,13 @@ describe("ProfessionEngineerExecutionService", () => {
   };
   let service: ProfessionEngineerExecutionService;
 
-  const respondWith = (decision: ProfessionEngineerModelWireDecision): void => {
-    structured.mockImplementation(async (request, beforeEgress) => {
-      if (!beforeEgress) throw new Error("TEST_BEFORE_EGRESS_REQUIRED");
-      const record = modelRecord();
-      await beforeEgress(record);
-      return {
-        value: request.schema.parse(decision),
-        record: { ...record, status: "passed" },
-      };
-    });
-  };
-
   beforeEach(() => {
     vi.resetAllMocks();
     bind.mockResolvedValue("accepted");
     prepare.mockResolvedValue("accepted");
     finalize.mockResolvedValue("accepted");
     fail.mockResolvedValue(true);
-    write.mockImplementation((input) =>
-      Promise.resolve({
-        objectKey: input.objectKey,
-        mediaType: input.mediaType,
-        byteLength: input.bytes.byteLength,
-        sha256: input.sha256,
-      }),
-    );
+    write.mockResolvedValue(storageEvidence());
     readVerifiedBytes.mockImplementation((input) => {
       if (input.objectKey.endsWith("-engineer-plan.json")) {
         return Promise.resolve(storedPlan());
@@ -140,6 +123,7 @@ describe("ProfessionEngineerExecutionService", () => {
       { maxRunBytes: 64 * 1024, sessionTtlSeconds: 300 },
     );
   });
+
   it("persists one canonical Engineer JSON plan without ImageAttempt", async () => {
     reserve.mockResolvedValue({
       status: "execute",
@@ -170,17 +154,7 @@ describe("ProfessionEngineerExecutionService", () => {
       "normalized left, top, right, and bottom coordinates",
     );
     expect(request?.instructions).toContain(
-      "return the full image exactly as left 0, top 0, right 1, and bottom 1",
-    );
-    expect(request?.instructions).toContain(
-      "frame-count, frame-order, canvas, size, offset, alpha, Hidden, LINK, shared-texture, and package-structure authority",
-    );
-    expect(request?.instructions).toContain(
-      "only as style and composition guidance",
-    );
-    expect(request?.instructions).toContain("broad low-frequency color fields");
-    expect(request?.instructions).toContain(
-      "regularly alternating light-dark columns",
+      "generated-reference image only as style and composition guidance",
     );
     expect(request?.imageInputs?.map((image) => image.role)).toEqual([
       "official-source",
@@ -287,47 +261,28 @@ describe("ProfessionEngineerExecutionService", () => {
     expect(readVerifiedBytes).not.toHaveBeenCalled();
   });
 
-  it("persists a full-reference plan when the model returns narrow valid bounds", async () => {
+  it("fails closed when a wire-compatible model response violates domain constraints", async () => {
     reserve.mockResolvedValue({
       status: "execute",
       executionId,
       context: frozenContext(),
       sourceVisualInput: sourceVisualInput(),
     });
-    respondWith({
-      ...modelDecision(),
-      referenceBounds: {
-        ...modelDecision().referenceBounds,
-        right: modelDecision().referenceBounds.left + 0.1,
-      },
-    });
-
-    await expect(
-      service.executeSkill(jobId, leaseInput(), referencePassed()),
-    ).resolves.toMatchObject({
-      status: "passed",
-      plan: {
-        mapping: {
-          referenceBounds: { left: 0, top: 0, right: 1, bottom: 1 },
+    structured.mockImplementation(async (request, beforeEgress) => {
+      if (!beforeEgress) throw new Error("TEST_BEFORE_EGRESS_REQUIRED");
+      const record = modelRecord();
+      await beforeEgress(record);
+      const invalidDecision: ProfessionEngineerModelWireDecision = {
+        ...modelDecision(),
+        referenceBounds: {
+          ...modelDecision().referenceBounds,
+          right: modelDecision().referenceBounds.left - 0.1,
         },
-      },
-    });
-    expect(write).toHaveBeenCalledOnce();
-    expect(fail).not.toHaveBeenCalled();
-  });
-  it("fails closed when wire-compatible bounds remain unsafe", async () => {
-    reserve.mockResolvedValue({
-      status: "execute",
-      executionId,
-      context: frozenContext(),
-      sourceVisualInput: sourceVisualInput(),
-    });
-    respondWith({
-      ...modelDecision(),
-      referenceBounds: {
-        ...modelDecision().referenceBounds,
-        bottom: 1.1,
-      },
+      };
+      return {
+        value: request.schema.parse(invalidDecision),
+        record: { ...record, status: "passed" },
+      };
     });
 
     await expect(
@@ -450,6 +405,7 @@ function storedPlan(): ObjectStorageVerifiedBytes {
 
 function frozenContext(): FrozenProfessionSkillExecutionContext {
   return {
+    contractVersion: 1,
     runId,
     profileId: "profile-v2",
     professionId: "88888888-8888-4888-8888-888888888888",

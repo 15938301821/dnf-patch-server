@@ -170,8 +170,8 @@ describe("StylePackageContextRepository.resolve", () => {
     );
   });
 
-  it("rejects V4 evidence carrying historical quality V3 as Package input", async () => {
-    const artifacts = validArtifacts("historical-quality-v3");
+  it("rejects complete V4 evidence as new Package context input", async () => {
+    const artifacts = validArtifacts("historical-v4");
     const uploads = validUploads(artifacts);
     const harness = repositoryHarness({ artifacts, uploads });
 
@@ -367,7 +367,7 @@ function validProductions(): ProductionFixture[] {
 }
 
 function validArtifacts(
-  generation: StylePackageEvidenceGeneration = "current-v4",
+  generation: StylePackageEvidenceGeneration = "current-v5",
 ): ArtifactFixture[] {
   return [
     outputArtifact(
@@ -457,7 +457,7 @@ function outputArtifact(
   role: "projects" | "validation",
   projectsArtifactId?: string,
   projectsShaCharacter?: string,
-  generation: StylePackageEvidenceGeneration = "current-v4",
+  generation: StylePackageEvidenceGeneration = "current-v5",
 ): ArtifactFixture {
   return createStylePackageOutputArtifact({
     runId,

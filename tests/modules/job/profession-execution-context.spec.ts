@@ -10,7 +10,10 @@
  * 非 profession Job、篡改 payload 与未冻结技能不能触发后续模型副作用；真实事务竞态仍需 Repository 测试证明。
  */
 import { describe, expect, it } from "vitest";
-import { sha256JcsV1, sha256Json } from "../../../src/common/utils/canonical.js";
+import {
+  sha256JcsV1,
+  sha256Json,
+} from "../../../src/common/utils/canonical.js";
 import {
   resolveProfessionExecutionContext,
   type ProfessionExecutionJobState,
@@ -34,11 +37,45 @@ describe("resolveProfessionExecutionContext", () => {
     expect(result).toMatchObject({
       status: "accepted",
       context: {
+        contractVersion: 1,
         runId,
         profileId: "aseprite-production-v1",
         professionId,
         styleId,
         skill: { skillId },
+      },
+    });
+  });
+
+  it("识别 V3 同尺寸合同但只返回显式代际上下文", () => {
+    const result = resolveProfessionExecutionContext(
+      job({
+        payload: createStyleSkillProductionJobPayload(
+          buildContext(),
+          "aseprite-production-v6",
+          2,
+        ),
+        payloadSha256: sha256Json(
+          createStyleSkillProductionJobPayload(
+            buildContext(),
+            "aseprite-production-v6",
+            2,
+          ),
+        ),
+      }),
+      input(),
+      now,
+    );
+
+    expect(result).toMatchObject({
+      status: "accepted",
+      context: {
+        contractVersion: 2,
+        profileId: "aseprite-production-v6",
+        targetFramePolicy: {
+          dimensions: "source-frame-exact",
+          alpha: "source-frame-exact",
+        },
       },
     });
   });

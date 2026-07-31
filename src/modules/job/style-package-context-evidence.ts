@@ -103,8 +103,8 @@ type PackageOutputProvenance = Extract<
   CurrentProfessionSkillOutputProvenance,
   {
     kind:
-      | "profession-creative-projects-v4"
-      | "profession-creative-validation-v4";
+      | "profession-creative-projects-v5"
+      | "profession-creative-validation-v5";
   }
 >;
 
@@ -155,8 +155,8 @@ export function resolveStylePackageSkillInputs(
     if (
       !projects ||
       !validation ||
-      projects.provenance.kind !== "profession-creative-projects-v4" ||
-      validation.provenance.kind !== "profession-creative-validation-v4" ||
+      projects.provenance.kind !== "profession-creative-projects-v5" ||
+      validation.provenance.kind !== "profession-creative-validation-v5" ||
       sha256JcsV1(validation.provenance.source) !==
         sha256JcsV1(projects.provenance.source) ||
       sha256JcsV1(validation.provenance.referenceTransferQuality) !==
@@ -267,8 +267,8 @@ function resolveFinalizedRole(
     currentProfessionSkillOutputProvenanceSchema.safeParse(upload.provenance);
   const expectedKind =
     role === "projects"
-      ? "profession-creative-projects-v4"
-      : "profession-creative-validation-v4";
+      ? "profession-creative-projects-v5"
+      : "profession-creative-validation-v5";
   const expectedName =
     role === "projects"
       ? "profession-aseprite-projects.zip"

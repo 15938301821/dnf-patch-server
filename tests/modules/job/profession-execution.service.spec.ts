@@ -450,6 +450,7 @@ function engineerPassed(): Extract<
 
 function frozenContext(): FrozenProfessionSkillExecutionContext {
   return {
+    contractVersion: 1,
     runId,
     profileId: "profile-v2",
     professionId: "99999999-9999-4999-8999-999999999999",

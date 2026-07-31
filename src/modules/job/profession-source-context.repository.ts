@@ -15,8 +15,6 @@
  */
 import { Injectable } from "@nestjs/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { z } from "zod";
-import { clientIdSchema, sha256Schema } from "../../common/contracts/index.js";
 import { DatabaseService } from "../../common/db/database.service.js";
 import { databaseUtcDate } from "../../common/db/mysql-datetime.js";
 import {
@@ -31,21 +29,10 @@ import {
   type ResolveProfessionExecutionContextResult,
 } from "./profession-execution-context.js";
 import {
+  professionSourceFrameManifestProvenanceSchema,
   professionSkillSourceContextViewSchema,
   type ProfessionSkillSourceContextView,
 } from "./profession-source-context.contracts.js";
-
-const sourceFrameManifestProvenanceSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    kind: z.literal("source-frame-manifest"),
-    sourceId: clientIdSchema,
-    sourceSha256: sha256Schema,
-    toolSha256: sha256Schema,
-    jobPayloadSha256: sha256Schema,
-    deploymentAuthorized: z.literal(false),
-  })
-  .strict();
 
 type ProfessionExecutionGateFailure = Exclude<
   ResolveProfessionExecutionContextResult,
@@ -129,9 +116,10 @@ export class ProfessionSourceContextRepository {
         )
         .limit(1);
       if (!source?.sourceId) return { status: "source-evidence-mismatch" };
-      const provenance = sourceFrameManifestProvenanceSchema.safeParse(
-        source.manifestProvenance,
-      );
+      const provenance =
+        professionSourceFrameManifestProvenanceSchema.safeParse(
+          source.manifestProvenance,
+        );
       if (
         !provenance.success ||
         source.manifestArtifactId !== expected.sourceFrameManifestArtifactId ||

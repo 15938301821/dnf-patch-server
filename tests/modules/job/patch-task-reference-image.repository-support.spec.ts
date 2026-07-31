@@ -24,6 +24,7 @@ import {
   currentStableFrameQualityEvidence,
   historicalStableFrameQualityEvidence,
   historicalStableFrameQualityV3Evidence,
+  historicalStableFrameQualityV4Evidence,
   productionPreviewPublicFrame,
 } from "./fixtures/patch-task-production-preview.fixture.js";
 
@@ -114,7 +115,7 @@ describe("findPatchTaskReferenceImage", () => {
 });
 
 describe("findPatchTaskSkillPreview", () => {
-  it("returns current V4 source preview with stable-frame quality V4", async () => {
+  it("returns current V5 source preview with stable-frame Quality V5", async () => {
     const validation = createCreativeValidationProvenance(
       previewEvidenceIdentity,
     );
@@ -137,6 +138,34 @@ describe("findPatchTaskSkillPreview", () => {
       artifactId: sourceArtifactId,
       role: "source-frame",
       referenceTransferQuality: currentStableFrameQualityEvidence(),
+    });
+  });
+
+  it("keeps complete historical V4 source preview readable", async () => {
+    const generation = "historical-v4" as const;
+    const validation = createCreativeValidationProvenance(
+      previewEvidenceIdentity,
+      generation,
+    );
+    const source = createCreativeSourcePreviewProvenance(
+      previewEvidenceIdentity,
+      generation,
+    );
+
+    await expect(
+      findPatchTaskSkillPreview(
+        sequentialDatabaseStub([
+          [productionContext(validation)],
+          [previewRow(sourceArtifactId, "source-frame", source)],
+        ]),
+        runId,
+        skillId,
+        "source-frame",
+        ownerUserId,
+      ),
+    ).resolves.toMatchObject({
+      artifactId: sourceArtifactId,
+      referenceTransferQuality: historicalStableFrameQualityV4Evidence(),
     });
   });
 
@@ -202,7 +231,7 @@ describe("findPatchTaskSkillPreview", () => {
     });
   });
 
-  it("returns current V4 result only when it binds the same V4 source frame", async () => {
+  it("returns current V5 result only when it binds the same V5 source frame", async () => {
     const validation = createCreativeValidationProvenance(
       previewEvidenceIdentity,
     );
@@ -310,7 +339,7 @@ describe("findPatchTaskSkillPreview", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("rejects a historical V3 source under current V4 validation", async () => {
+  it("rejects a historical V3 source under current V5 validation", async () => {
     const validation = createCreativeValidationProvenance(
       previewEvidenceIdentity,
     );

@@ -12,7 +12,8 @@
  * FactoryView，不是 Drizzle 数据库行或 Worker 可执行指令。
  * 副作用：本文件没有网络、数据库或任务副作用，只在解析边界拒绝未知字段和不一致配置。
  * 安全边界：Factory 只允许声明式 Job 白名单；arbitraryExecution 与 deploymentAuthorized 必须保持
- * false。v2 的 policy 哈希和逐 kind contract 必须完整冻结，缺失证据时由下游 fail-closed。
+ * false。v2 的 policy 哈希和逐 kind contract 必须完整冻结，Profession v2 只能映射已注册的
+ * `style-skill-production-v3`，缺失证据时由下游 fail-closed。
  */
 import { z } from "zod";
 import {
@@ -46,18 +47,22 @@ const factoryConfigV1Schema = z
   .strict();
 
 /**
- * 校验逐 kind Job contract 版本；当前只有 inventory 显式注册 v2 多来源 payload。
+ * 校验逐 kind Job contract 版本；inventory v2 对应多来源导入，profession v2 对应逐帧同尺寸 V6。
  * 其他 kind 继续固定为 v1，避免仅提高版本号却没有对应 Server/Worker 解析器。
  */
 function validateJobContractVersion(
   value: { kind: AllowedJobKind; schemaVersion: 1 | 2 },
   context: z.RefinementCtx,
 ): void {
-  if (value.schemaVersion === 2 && value.kind !== "inventory") {
+  if (
+    value.schemaVersion === 2 &&
+    value.kind !== "inventory" &&
+    value.kind !== "profession"
+  ) {
     context.addIssue({
       code: "custom",
       path: ["schemaVersion"],
-      message: "仅 inventory Job 注册了 schemaVersion 2。",
+      message: "仅 inventory 与 profession Job 注册了 schemaVersion 2。",
     });
   }
 }

@@ -13,6 +13,7 @@ export default defineConfig({
     "./dist/common/db/browser-session-schema.js",
     "./dist/common/db/manual-review-schema.js",
     "./dist/common/db/studio-schema.js",
+    "./dist/common/db/profession-frame-target-schema.js",
     "./dist/common/db/profession-model-execution-schema.js",
     "./dist/common/db/profession-source-schema.js",
     "./dist/common/db/style-package-schema.js",

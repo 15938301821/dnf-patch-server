@@ -15,6 +15,8 @@ import { z } from "zod";
 import type { Environment } from "../../config/environment.js";
 import type { ModelReasoningEffort } from "../model-configuration/model-configuration.contracts.js";
 import type { ModelImageInput, ModelUsage } from "./openai.contracts.js";
+import type { RequestedImageCanvas } from "./image-target-geometry.js";
+import { legacyRequestedImageCanvas } from "./image-target-geometry.js";
 
 const maxImageBytes = 32 * 1024 * 1024;
 const maxEncodedImageLength = 4 * Math.ceil(maxImageBytes / 3);
@@ -92,6 +94,8 @@ export interface ImageProviderRequest {
   model: string;
   prompt: string;
   sourceImage?: ModelImageInput;
+  /** 仅由 OpenAiService 从官方 target 选择；缺失表示历史 V5 固定画布。 */
+  requestedCanvas?: RequestedImageCanvas;
 }
 
 /** 结构化模型调用的已校验结果；usage 缺失时调用方必须显示为未计量。 */
@@ -186,6 +190,8 @@ export class OpenAiProvider implements OpenAiProviderPort {
     configuration: OpenAiCallConfiguration,
   ): Promise<ImageProviderResult> {
     const client = this.client(configuration);
+    const requestedCanvas =
+      request.requestedCanvas ?? legacyRequestedImageCanvas;
     try {
       const response = request.sourceImage
         ? await client.images.edit({
@@ -197,7 +203,7 @@ export class OpenAiProvider implements OpenAiProviderPort {
             ),
             prompt: request.prompt,
             n: 1,
-            size: "1536x1024",
+            size: requestedCanvas.openAiSize,
             quality: "high",
             background: "transparent",
             output_format: "png",
@@ -207,7 +213,7 @@ export class OpenAiProvider implements OpenAiProviderPort {
             model: request.model,
             prompt: request.prompt,
             n: 1,
-            size: "1536x1024",
+            size: requestedCanvas.openAiSize,
             quality: "high",
             background: "transparent",
             output_format: "png",
@@ -264,7 +270,12 @@ export class OpenAiProvider implements OpenAiProviderPort {
           ],
           generationConfig: {
             responseModalities: ["TEXT", "IMAGE"],
-            imageConfig: { aspectRatio: "3:2", imageSize: "1K" },
+            imageConfig: {
+              aspectRatio:
+                request.requestedCanvas?.geminiAspectRatio ??
+                legacyRequestedImageCanvas.geminiAspectRatio,
+              imageSize: "1K",
+            },
           },
         },
       },

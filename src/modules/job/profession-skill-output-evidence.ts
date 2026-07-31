@@ -91,16 +91,23 @@ const historicalStableFrameQualityV3Schema =
     periodicStripeRatio: z.number().min(0).max(0.08),
   });
 
-/** 当前稳定帧质量 V4；新增指标取单帧最坏值，防止跨帧聚合稀释灾难帧。 */
-const currentStableFrameQualitySchema =
+/** 历史稳定帧质量 V4；缺少官方低频能量拓扑相关性，不能进入新 passed 或 Package。 */
+const historicalStableFrameQualityV4Schema =
   historicalStableFrameQualityV3Schema.extend({
     schemaVersion: z.literal(4),
     maximumWhiteLineRatio: z.number().min(0).max(0.45),
     maximumDxt1BoundaryJumpRatio: z.number().min(0).max(0.05),
   });
+
+/** 当前稳定帧质量 V5；相关性取全部可评估帧的最坏值，统一横带不能被跨帧平均掩盖。 */
+const currentStableFrameQualitySchema =
+  historicalStableFrameQualityV4Schema.extend({
+    schemaVersion: z.literal(5),
+    sourceTopologyCorrelation: z.number().min(0.65).max(1),
+  });
 const readableStableFrameQualitySchema = z.discriminatedUnion("schemaVersion", [
   historicalStableFrameQualityV3Schema,
-  currentStableFrameQualitySchema,
+  historicalStableFrameQualityV4Schema,
 ]);
 
 const outputEvidenceIdentityFields = {
@@ -170,26 +177,27 @@ const historicalCreativeOutputEvidenceFields = {
 
 const currentCreativeOutputEvidenceFields = {
   ...historicalCreativeOutputEvidenceFields,
-  schemaVersion: z.literal(4),
+  schemaVersion: z.literal(5),
   referenceTransferQuality: currentStableFrameQualitySchema,
 };
 
-const readableCurrentCreativeOutputEvidenceFields = {
-  ...currentCreativeOutputEvidenceFields,
+const readableHistoricalV4CreativeOutputEvidenceFields = {
+  ...historicalCreativeOutputEvidenceFields,
+  schemaVersion: z.literal(4),
   referenceTransferQuality: readableStableFrameQualitySchema,
 };
 
 const currentCreativeProjectsProvenanceSchema = z
   .object({
     ...currentCreativeOutputEvidenceFields,
-    kind: z.literal("profession-creative-projects-v4"),
+    kind: z.literal("profession-creative-projects-v5"),
   })
   .strict();
 
 const currentCreativeValidationProvenanceSchema = z
   .object({
     ...currentCreativeOutputEvidenceFields,
-    kind: z.literal("profession-creative-validation-v4"),
+    kind: z.literal("profession-creative-validation-v5"),
     asepriteProjects: boundArtifactSchema,
   })
   .strict();
@@ -197,7 +205,7 @@ const currentCreativeValidationProvenanceSchema = z
 const currentCreativeSourcePreviewProvenanceSchema = z
   .object({
     ...currentCreativeOutputEvidenceFields,
-    kind: z.literal("profession-creative-source-frame-preview-v4"),
+    kind: z.literal("profession-creative-source-frame-preview-v5"),
     frame: comparisonFrameSchema,
     asepriteValidation: boundArtifactSchema,
   })
@@ -206,37 +214,37 @@ const currentCreativeSourcePreviewProvenanceSchema = z
 const currentCreativeResultPreviewProvenanceSchema = z
   .object({
     ...currentCreativeOutputEvidenceFields,
-    kind: z.literal("profession-creative-result-preview-v4"),
+    kind: z.literal("profession-creative-result-preview-v5"),
     frame: comparisonFrameSchema,
     asepriteValidation: boundArtifactSchema,
     sourcePreview: boundArtifactSchema,
   })
   .strict();
 
-const readableCurrentCreativeProjectsProvenanceSchema = z
+const readableHistoricalV4CreativeProjectsProvenanceSchema = z
   .object({
-    ...readableCurrentCreativeOutputEvidenceFields,
+    ...readableHistoricalV4CreativeOutputEvidenceFields,
     kind: z.literal("profession-creative-projects-v4"),
   })
   .strict();
-const readableCurrentCreativeValidationProvenanceSchema = z
+const readableHistoricalV4CreativeValidationProvenanceSchema = z
   .object({
-    ...readableCurrentCreativeOutputEvidenceFields,
+    ...readableHistoricalV4CreativeOutputEvidenceFields,
     kind: z.literal("profession-creative-validation-v4"),
     asepriteProjects: boundArtifactSchema,
   })
   .strict();
-const readableCurrentCreativeSourcePreviewProvenanceSchema = z
+const readableHistoricalV4CreativeSourcePreviewProvenanceSchema = z
   .object({
-    ...readableCurrentCreativeOutputEvidenceFields,
+    ...readableHistoricalV4CreativeOutputEvidenceFields,
     kind: z.literal("profession-creative-source-frame-preview-v4"),
     frame: comparisonFrameSchema,
     asepriteValidation: boundArtifactSchema,
   })
   .strict();
-const readableCurrentCreativeResultPreviewProvenanceSchema = z
+const readableHistoricalV4CreativeResultPreviewProvenanceSchema = z
   .object({
-    ...readableCurrentCreativeOutputEvidenceFields,
+    ...readableHistoricalV4CreativeOutputEvidenceFields,
     kind: z.literal("profession-creative-result-preview-v4"),
     frame: comparisonFrameSchema,
     asepriteValidation: boundArtifactSchema,
@@ -244,7 +252,7 @@ const readableCurrentCreativeResultPreviewProvenanceSchema = z
   })
   .strict();
 
-/** 当前生产入口专用联合；调用方不能借历史读取联合放宽 V4 kind 与 quality V3 的绑定。 */
+/** 当前生产入口专用联合；调用方不能借历史读取联合放宽 V5 kind 与 Quality V5 的绑定。 */
 export const currentProfessionSkillOutputProvenanceSchema =
   z.discriminatedUnion("kind", [
     currentCreativeProjectsProvenanceSchema,
@@ -253,7 +261,7 @@ export const currentProfessionSkillOutputProvenanceSchema =
     currentCreativeResultPreviewProvenanceSchema,
   ]);
 
-/** 当前 Worker 可生产、passed 接收事务与 Package context 可消费的 V4 来源元数据。 */
+/** 当前 Worker 可生产、passed 接收事务与 Package context 可消费的 V5 来源元数据。 */
 export type CurrentProfessionSkillOutputProvenance = z.infer<
   typeof currentProfessionSkillOutputProvenanceSchema
 >;
@@ -382,10 +390,14 @@ const legacyResultPreviewProvenanceSchema = z
 export const professionSkillOutputProvenanceSchema = z.discriminatedUnion(
   "kind",
   [
-    readableCurrentCreativeProjectsProvenanceSchema,
-    readableCurrentCreativeValidationProvenanceSchema,
-    readableCurrentCreativeSourcePreviewProvenanceSchema,
-    readableCurrentCreativeResultPreviewProvenanceSchema,
+    currentCreativeProjectsProvenanceSchema,
+    currentCreativeValidationProvenanceSchema,
+    currentCreativeSourcePreviewProvenanceSchema,
+    currentCreativeResultPreviewProvenanceSchema,
+    readableHistoricalV4CreativeProjectsProvenanceSchema,
+    readableHistoricalV4CreativeValidationProvenanceSchema,
+    readableHistoricalV4CreativeSourcePreviewProvenanceSchema,
+    readableHistoricalV4CreativeResultPreviewProvenanceSchema,
     historicalCreativeProjectsProvenanceSchema,
     historicalCreativeValidationProvenanceSchema,
     historicalCreativeSourcePreviewProvenanceSchema,

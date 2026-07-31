@@ -21,7 +21,10 @@ import {
   declarativeParametersSchema,
   type AllowedJobKind,
 } from "../guardrail/guardrail.contracts.js";
-import { styleSkillProductionJobPayloadV2Schema } from "./style-skill-production.contracts.js";
+import {
+  styleSkillProductionJobPayloadV2Schema,
+  styleSkillProductionJobPayloadV3Schema,
+} from "./style-skill-production.contracts.js";
 import { sharedFxJobPayloadV1Schema } from "./shared-fx.contracts.js";
 import { stylePackageProductionJobPayloadV3Schema } from "./style-package-production.contracts.js";
 
@@ -84,6 +87,7 @@ export type RegisteredJobPayload =
   | DeclarativeJobPayloadV1
   | InventoryJobPayloadV2
   | z.infer<typeof styleSkillProductionJobPayloadV2Schema>
+  | z.infer<typeof styleSkillProductionJobPayloadV3Schema>
   | z.infer<typeof sharedFxJobPayloadV1Schema>
   | z.infer<typeof stylePackageProductionJobPayloadV3Schema>;
 
@@ -106,6 +110,9 @@ export function parseJobPayload(
 ): RegisteredJobPayload {
   if (kind === "inventory" && schemaVersion === 2) {
     return inventoryJobPayloadV2Schema.parse(payload);
+  }
+  if (kind === "profession" && schemaVersion === 2) {
+    return styleSkillProductionJobPayloadV3Schema.parse(payload);
   }
   if (schemaVersion !== 1) {
     throw new Error("JOB_PAYLOAD_CONTRACT_NOT_REGISTERED");

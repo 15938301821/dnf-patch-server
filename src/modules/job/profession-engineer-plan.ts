@@ -184,8 +184,8 @@ const professionEngineerStylePlanV4Schema = z
   .strict();
 
 /**
- * 新任务使用的 v5 自创稳定帧计划。官方源只冻结资源结构与 Alpha，参考图只提供风格和构图，
- * 可见 RGB 由固定 Aseprite 算法重建，不能再逐像素复制参考图或继承官方颗粒。
+ * 当前生产使用的 V5 自创稳定帧计划。官方源仍冻结资源结构与 Alpha，参考图只提供风格和构图，
+ * 可见 RGB 由固定 Aseprite 算法重建，不能逐像素复制参考图或继承官方颗粒。
  */
 const professionEngineerStylePlanV5Schema = z
   .object({
@@ -211,6 +211,7 @@ const professionEngineerStylePlanV5Schema = z
         maximumPeriodicStripeRatio: z.literal(0.08),
         maximumWhiteLineRatio: z.literal(0.45),
         maximumDxt1BoundaryJumpRatio: z.literal(0.05),
+        minimumSourceTopologyCorrelation: z.literal(0.65),
         transparentRgbMustBeZero: z.literal(true),
         nonPlaceholderFrameTransferRequired: z.literal(true),
       })
@@ -269,10 +270,10 @@ export interface EncodedProfessionEngineerStylePlan {
 
 /**
  * 把 Provider 可表达的基础边界收束为领域可接受边界。
- * V5 只把参考图作为风格与构图提示，因此模型裁剪不足时使用整图比放宽最小覆盖或反复模型出站更稳定；
- * 越界、非有限、反向坐标及未知字段仍会被严格拒绝。
- * @param input 通过 Provider structured output 返回的基础数值边界。
- * @returns 可进入固定 V5 plan 的严格决策；窄边界固定替换为 `[0,0,1,1]`。
+ * V5 只把参考图作为风格与构图提示；模型裁剪过小时使用整图，比放宽覆盖门槛或再次出站更稳定。
+ * 越界、非有限、反向坐标及未知字段仍严格拒绝。
+ * @param input Provider structured output 返回且尚未进入领域计划的基础数值边界。
+ * @returns 可进入固定 V5 plan 的严格决策；窄边界固定替换为完整 `[0,0,1,1]`。
  */
 export function normalizeProfessionEngineerModelDecision(
   input: ProfessionEngineerModelWireDecision,
@@ -318,6 +319,7 @@ export function createProfessionEngineerStylePlan(
       maximumPeriodicStripeRatio: 0.08,
       maximumWhiteLineRatio: 0.45,
       maximumDxt1BoundaryJumpRatio: 0.05,
+      minimumSourceTopologyCorrelation: 0.65,
       transparentRgbMustBeZero: true,
       nonPlaceholderFrameTransferRequired: true,
     },

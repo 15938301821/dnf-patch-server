@@ -67,6 +67,10 @@ export async function reportProfessionSkillProduction(
           return { status: "skill-production-evidence-mismatch" };
       }
     }
+    // 当前报告 DTO 和四项 Artifact provenance 只定义 V5；V3 不能借旧入口写入 passed。
+    if (gate.context.contractVersion !== 1) {
+      return { status: "skill-production-evidence-mismatch" };
+    }
 
     // 第二步：锁定单技能 production，防止并发终态覆盖；数据库行必须仍属于冻结的 Run/style/source。
     const [production] = await transaction

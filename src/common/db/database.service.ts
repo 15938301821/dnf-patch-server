@@ -21,6 +21,7 @@ import * as artifactSchema from "./artifact-schema.js";
 import * as browserSessionSchema from "./browser-session-schema.js";
 import * as controlSchema from "./schema.js";
 import * as manualReviewSchema from "./manual-review-schema.js";
+import * as professionFrameTargetSchema from "./profession-frame-target-schema.js";
 import * as professionModelExecutionSchema from "./profession-model-execution-schema.js";
 import * as professionSourceSchema from "./profession-source-schema.js";
 import * as stylePackageSchema from "./style-package-schema.js";
@@ -33,6 +34,7 @@ const schema = {
   ...browserSessionSchema,
   ...manualReviewSchema,
   ...studioSchema,
+  ...professionFrameTargetSchema,
   ...professionModelExecutionSchema,
   ...professionSourceSchema,
   ...stylePackageSchema,

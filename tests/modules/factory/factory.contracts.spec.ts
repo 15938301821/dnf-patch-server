@@ -104,7 +104,7 @@ describe("factoryConfigSchema", () => {
     ).toBe(false);
   });
 
-  it("拒绝为尚未注册 v2 payload 的非 Inventory kind 提升版本", () => {
+  it("接受已注册逐帧同尺寸 payload 的 Profession v2 contract", () => {
     expect(
       factoryConfigSchema.safeParse({
         schemaVersion: 3,
@@ -115,7 +115,27 @@ describe("factoryConfigSchema", () => {
           {
             kind: "profession",
             schemaVersion: 2,
-            profileId: "aseprite-production-v1",
+            profileId: "aseprite-production-v6",
+          },
+        ],
+        arbitraryExecution: false,
+        deploymentAuthorized: false,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("拒绝为尚未注册 v2 payload 的其他 kind 提升版本", () => {
+    expect(
+      factoryConfigSchema.safeParse({
+        schemaVersion: 3,
+        policyId: "policy-v3",
+        policySha256,
+        allowedJobKinds: ["npk-package"],
+        jobContracts: [
+          {
+            kind: "npk-package",
+            schemaVersion: 2,
+            profileId: "package-production-v4",
           },
         ],
         arbitraryExecution: false,

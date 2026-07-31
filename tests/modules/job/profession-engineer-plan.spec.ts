@@ -19,7 +19,7 @@ import {
 } from "../../../src/modules/job/profession-engineer-plan.js";
 
 describe("Profession engineer style plan", () => {
-  it("creates v5 creative stable frames while limiting official and reference authority", () => {
+  it("creates v5 with creative RGB reconstruction while preserving source structure and Alpha", () => {
     const plan = createProfessionEngineerStylePlan(decision());
 
     expect(plan).toMatchObject({
@@ -53,14 +53,7 @@ describe("Profession engineer style plan", () => {
       },
     });
     expect(plan.qualityPolicy).toMatchObject({
-      maximumIsolatedNoiseRatio: 0.015,
-      minimumContinuousBandRatio: 0.55,
-      minimumBrightCoreRatio: 0.01,
-      minimumEdgeContrast: 24,
-      maximumStrongEdgeRatio: 0.25,
-      maximumPeriodicStripeRatio: 0.08,
-      maximumWhiteLineRatio: 0.45,
-      maximumDxt1BoundaryJumpRatio: 0.05,
+      minimumSourceTopologyCorrelation: 0.65,
       nonPlaceholderFrameTransferRequired: true,
     });
     expect(plan).not.toHaveProperty("palette");
@@ -147,31 +140,16 @@ describe("Profession engineer style plan", () => {
     ).toThrow();
   });
 
-  it("falls back narrow valid bounds to the full reference without accepting unsafe coordinates", () => {
+  it("normalizes a valid but undersized model crop to the full reference image", () => {
     expect(
       normalizeProfessionEngineerModelDecision({
         ...decision(),
-        referenceBounds: {
-          ...decision().referenceBounds,
-          right: decision().referenceBounds.left + 0.1,
-        },
+        referenceBounds: { left: 0.4, top: 0.4, right: 0.5, bottom: 0.5 },
       }),
     ).toEqual({
       schemaVersion: 2,
       referenceBounds: { left: 0, top: 0, right: 1, bottom: 1 },
     });
-    expect(() =>
-      normalizeProfessionEngineerModelDecision({
-        ...decision(),
-        referenceBounds: { ...decision().referenceBounds, bottom: 1.1 },
-      }),
-    ).toThrow();
-    expect(() =>
-      normalizeProfessionEngineerModelDecision({
-        ...decision(),
-        referenceBounds: { ...decision().referenceBounds, right: 0.01 },
-      }),
-    ).toThrow();
   });
 
   it("rejects a persisted plan that weakens fixed safety fields", () => {

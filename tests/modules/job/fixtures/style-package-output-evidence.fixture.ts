@@ -1,6 +1,6 @@
 /**
- * @fileoverview 构造 Package context Repository 测试使用的 Profession projects/validation Artifact；
- * 不模拟 production、upload session、对象存储或 Package 输出合同。
+ * @fileoverview 构造 Package context Repository 测试使用的 Profession projects/validation
+ * Artifact；不模拟 production、upload session、对象存储或 Package 输出合同。
  * @module modules/job/style-package-output-evidence-fixture
  * @author AI生成
  * @created 2026-07-30
@@ -8,13 +8,14 @@
  *
  * 调用关系：style-package-context.repository.spec 按技能与角色调用本函数，再从 Artifact 构造
  * finalized upload session。输入是固定测试身份和 generation，输出数据库 Artifact 投影。
- * 副作用：无。安全边界：默认 generation 是当前 V4/quality V4；历史质量只能由拒绝测试显式选择。
+ * 副作用：无。安全边界：默认 generation 是当前 V5/quality V5；历史质量只能由拒绝测试显式选择。
  */
 import type { ArtifactFixture } from "./style-package-context.repository.spec-support.js";
 
 /** 测试证据代际；历史值只用于验证新 Package context 失败关闭。 */
 export type StylePackageEvidenceGeneration =
-  | "current-v4"
+  | "current-v5"
+  | "historical-v4"
   | "historical-quality-v3"
   | "historical-v3";
 
@@ -31,9 +32,10 @@ export function createStylePackageOutputArtifact(input: {
   projectsShaCharacter?: string;
   generation?: StylePackageEvidenceGeneration;
 }): ArtifactFixture {
-  const generation = input.generation ?? "current-v4";
+  const generation = input.generation ?? "current-v5";
+  const version = generationVersion(generation);
   const base = {
-    schemaVersion: generation === "historical-v3" ? 3 : 4,
+    schemaVersion: version,
     jobId: input.producingJobId,
     attempt: input.attempt,
     skillId: input.skillId,
@@ -54,12 +56,7 @@ export function createStylePackageOutputArtifact(input: {
       artifactId: "456789ab-4567-4567-8567-456789abcdef",
       sha256: "E".repeat(64),
     },
-    referenceTransferQuality:
-      generation === "current-v4"
-        ? currentQuality()
-        : generation === "historical-quality-v3"
-          ? historicalQualityV3()
-          : historicalQuality(),
+    referenceTransferQuality: qualityForGeneration(generation),
     aseprite: {
       profileId: "aseprite-cli",
       binarySha256: "F".repeat(64),
@@ -79,10 +76,7 @@ export function createStylePackageOutputArtifact(input: {
       clientCompatibilityProven: false,
     },
   };
-  const roleKind =
-    input.role === "projects"
-      ? `profession-creative-projects-${generation === "historical-v3" ? "v3" : "v4"}`
-      : `profession-creative-validation-${generation === "historical-v3" ? "v3" : "v4"}`;
+  const roleKind = `profession-creative-${input.role}-${version === 3 ? "v3" : version === 4 ? "v4" : "v5"}`;
   const provenance =
     input.role === "projects"
       ? { ...base, kind: roleKind }
@@ -109,34 +103,61 @@ export function createStylePackageOutputArtifact(input: {
   };
 }
 
-function currentQuality(): Record<string, unknown> {
+function generationVersion(
+  generation: StylePackageEvidenceGeneration,
+): 3 | 4 | 5 {
+  return generation === "current-v5"
+    ? 5
+    : generation === "historical-v3"
+      ? 3
+      : 4;
+}
+
+function qualityForGeneration(
+  generation: StylePackageEvidenceGeneration,
+): Record<string, unknown> {
+  switch (generation) {
+    case "current-v5":
+      return {
+        ...historicalQualityV4(),
+        schemaVersion: 5,
+        sourceTopologyCorrelation: 0.8,
+      };
+    case "historical-v4":
+      return historicalQualityV4();
+    case "historical-quality-v3":
+      return historicalQualityV3();
+    case "historical-v3":
+      return historicalQualityV2();
+  }
+}
+
+function historicalQualityV2(): Record<string, unknown> {
   return {
-    schemaVersion: 4,
+    schemaVersion: 2,
     evaluatedFrameCount: 1,
     evaluatedPixelCount: 2,
     isolatedNoiseRatio: 0,
     continuousBandRatio: 0.8,
     brightCoreRatio: 0.1,
     edgeContrast: 64,
-    strongEdgeRatio: 0.1,
-    periodicStripeRatio: 0,
-    maximumWhiteLineRatio: 0,
-    maximumDxt1BoundaryJumpRatio: 0,
   };
 }
 
-function historicalQuality(): Record<string, unknown> {
-  const quality = historicalQualityV3();
-  delete quality.strongEdgeRatio;
-  delete quality.periodicStripeRatio;
-  quality.schemaVersion = 2;
-  return quality;
+function historicalQualityV3(): Record<string, unknown> {
+  return {
+    ...historicalQualityV2(),
+    schemaVersion: 3,
+    strongEdgeRatio: 0.1,
+    periodicStripeRatio: 0,
+  };
 }
 
-function historicalQualityV3(): Record<string, unknown> {
-  const quality = currentQuality();
-  delete quality.maximumWhiteLineRatio;
-  delete quality.maximumDxt1BoundaryJumpRatio;
-  quality.schemaVersion = 3;
-  return quality;
+function historicalQualityV4(): Record<string, unknown> {
+  return {
+    ...historicalQualityV3(),
+    schemaVersion: 4,
+    maximumWhiteLineRatio: 0,
+    maximumDxt1BoundaryJumpRatio: 0,
+  };
 }

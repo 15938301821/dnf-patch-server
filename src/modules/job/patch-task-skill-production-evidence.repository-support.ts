@@ -60,7 +60,7 @@ type ModelEvidence = Exclude<
 >;
 type CurrentProjectsProvenance = Extract<
   CurrentProfessionSkillOutputProvenance,
-  { kind: "profession-creative-projects-v4" }
+  { kind: "profession-creative-projects-v5" }
 >;
 type CurrentBaseProvenance = Omit<CurrentProjectsProvenance, "kind">;
 
@@ -130,7 +130,7 @@ export async function resolvePassedProductionEvidence(
     currentProfessionSkillOutputProvenanceSchema.safeParse(projectsProvenance);
   if (
     !currentProjects.success ||
-    currentProjects.data.kind !== "profession-creative-projects-v4"
+    currentProjects.data.kind !== "profession-creative-projects-v5"
   ) {
     return { status: "artifact-evidence-mismatch" };
   }
@@ -149,7 +149,7 @@ export async function resolvePassedProductionEvidence(
     input.asepriteArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-creative-projects-v4",
+      kind: "profession-creative-projects-v5",
     },
   );
   if (!projects) return { status: "artifact-evidence-mismatch" };
@@ -161,7 +161,7 @@ export async function resolvePassedProductionEvidence(
     input.validationArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-creative-validation-v4",
+      kind: "profession-creative-validation-v5",
       asepriteProjects: {
         artifactId: projects.artifactId,
         sha256: projects.sha256,
@@ -177,7 +177,7 @@ export async function resolvePassedProductionEvidence(
     currentProfessionSkillOutputProvenanceSchema.safeParse(sourceProvenance);
   if (
     !currentSource.success ||
-    currentSource.data.kind !== "profession-creative-source-frame-preview-v4"
+    currentSource.data.kind !== "profession-creative-source-frame-preview-v5"
   ) {
     return { status: "artifact-evidence-mismatch" };
   }
@@ -189,7 +189,7 @@ export async function resolvePassedProductionEvidence(
     input.sourcePreviewArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-creative-source-frame-preview-v4",
+      kind: "profession-creative-source-frame-preview-v5",
       frame: currentSource.data.frame,
       asepriteValidation: {
         artifactId: validation.artifactId,
@@ -207,7 +207,7 @@ export async function resolvePassedProductionEvidence(
     input.resultPreviewArtifactId,
     {
       ...baseProvenance,
-      kind: "profession-creative-result-preview-v4",
+      kind: "profession-creative-result-preview-v5",
       frame: currentSource.data.frame,
       asepriteValidation: {
         artifactId: validation.artifactId,
@@ -384,7 +384,7 @@ async function resolveSourceEvidence(
   };
 }
 
-/** 构造四个当前 V4 输出共享且可由 Server 独立复核的 provenance，不含 leaseId、路径或对象正文。 */
+/** 构造四个当前 V5 输出共享且可由 Server 独立复核的 provenance，不含 leaseId、路径或对象正文。 */
 function createBaseProvenance(
   jobId: string,
   input: PassedReport,
@@ -393,7 +393,7 @@ function createBaseProvenance(
   referenceTransferQuality: CurrentProjectsProvenance["referenceTransferQuality"],
 ): CurrentBaseProvenance {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     jobId,
     attempt: input.attempt,
     skillId: input.skillId,

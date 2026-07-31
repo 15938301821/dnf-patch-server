@@ -1,5 +1,5 @@
 /**
- * @fileoverview 定义结构化主题技能生产 Job V2 冻结包；不执行模型、图片或本机工具。
+ * @fileoverview 定义结构化主题技能生产 Job V2/V3 冻结包；不执行模型、图片或本机工具。
  * @module job
  * @author AI生成
  * @created 2026-07-23
@@ -115,42 +115,46 @@ export const styleSkillPromptPackageV2Schema = z
     });
   });
 
+const styleSkillProductionParameterFields = {
+  professionId: z.uuid(),
+  styleId: z.uuid(),
+  selectedSkillIds: uniqueSkillIdsSchema,
+  promptPackage: styleSkillPromptPackageV2Schema,
+  promptPackageSha256: sha256Schema,
+  deploymentAuthorized: z.literal(false),
+};
+
+/** V3 在模型出站前冻结的同尺寸逐帧策略；这些值不能由 Provider 或 Worker 自行放宽。 */
+export const professionTargetFramePolicyV1Schema = z
+  .object({
+    schemaVersion: z.literal(1),
+    dimensions: z.literal("source-frame-exact"),
+    alpha: z.literal("source-frame-exact"),
+    hiddenFrames: z.literal("preserve-source"),
+    linkFrames: z.literal("reuse-link-target"),
+    maximumTargetFrameCount: z.literal(2_048),
+    maximumTargetPixelCount: z.literal(134_217_728),
+  })
+  .strict();
+
 const styleSkillProductionParametersV2Schema = z
   .object({
     workflow: z.literal("style-skill-production-v2"),
-    professionId: z.uuid(),
-    styleId: z.uuid(),
-    selectedSkillIds: uniqueSkillIdsSchema,
-    promptPackage: styleSkillPromptPackageV2Schema,
-    promptPackageSha256: sha256Schema,
+    ...styleSkillProductionParameterFields,
     toolProfiles: z.tuple([z.literal("aseprite-cli")]),
-    deploymentAuthorized: z.literal(false),
   })
   .strict()
-  .superRefine((value, context) => {
-    const frozenSkillIds = value.promptPackage.skills.map(
-      (skill) => skill.skillId,
-    );
-    if (
-      JSON.stringify(frozenSkillIds) !== JSON.stringify(value.selectedSkillIds)
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["promptPackage", "skills"],
-        message: "冻结技能顺序必须与 selectedSkillIds 完全一致。",
-      });
-    }
-    if (
-      sha256JcsV1(value.promptPackage) !==
-      value.promptPackageSha256.toUpperCase()
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["promptPackageSha256"],
-        message: "主题 Prompt 包哈希与冻结内容不一致。",
-      });
-    }
-  });
+  .superRefine(validateStyleSkillProductionParameters);
+
+const styleSkillProductionParametersV3Schema = z
+  .object({
+    workflow: z.literal("style-skill-production-v3"),
+    ...styleSkillProductionParameterFields,
+    targetFramePolicy: professionTargetFramePolicyV1Schema,
+    toolProfiles: z.tuple([z.literal("aseprite-cli-v6")]),
+  })
+  .strict()
+  .superRefine(validateStyleSkillProductionParameters);
 
 export const styleSkillProductionJobPayloadV2Schema = z
   .object({
@@ -175,18 +179,51 @@ export const styleSkillProductionJobPayloadV2Schema = z
     }
   });
 
+/** Profession Factory contract v2 对应的 V3 payload；与 V2 使用不同顶层版本和 workflow。 */
+export const styleSkillProductionJobPayloadV3Schema = z
+  .object({
+    schemaVersion: z.literal(2),
+    profileId: clientIdSchema,
+    parameters: styleSkillProductionParametersV3Schema,
+  })
+  .strict()
+  .superRefine(validateStyleSkillProductionJobPayload);
+
 export type StyleSkillPromptPackageV2 = z.infer<
   typeof styleSkillPromptPackageV2Schema
 >;
 export type StyleSkillProductionJobPayloadV2 = z.infer<
   typeof styleSkillProductionJobPayloadV2Schema
 >;
+export type StyleSkillProductionJobPayloadV3 = z.infer<
+  typeof styleSkillProductionJobPayloadV3Schema
+>;
+/** V3 冻结的官方同尺寸逐帧策略，供服务内上下文与 target prepare 使用。 */
+export type ProfessionTargetFramePolicyV1 = z.infer<
+  typeof professionTargetFramePolicyV1Schema
+>;
+/** 当前 Server 可构造的 Profession payload 联合；消费方必须按 workflow 分流。 */
+export type StyleSkillProductionJobPayload =
+  | StyleSkillProductionJobPayloadV2
+  | StyleSkillProductionJobPayloadV3;
 
 /** 从已通过 Service 门禁的上下文生成唯一有序冻结包，并在返回前重新执行完整运行时校验。 */
 export function createStyleSkillProductionJobPayload(
   context: StyleBuildContext,
   profileId: string,
-): StyleSkillProductionJobPayloadV2 {
+  contractVersion?: 1,
+): StyleSkillProductionJobPayloadV2;
+/** Profession contract v2 必须显式传入，返回带同尺寸逐帧策略的 V3 payload。 */
+export function createStyleSkillProductionJobPayload(
+  context: StyleBuildContext,
+  profileId: string,
+  contractVersion: 2,
+): StyleSkillProductionJobPayloadV3;
+export function createStyleSkillProductionJobPayload(
+  context: StyleBuildContext,
+  profileId: string,
+  contractVersion: 1 | 2 = 1,
+): StyleSkillProductionJobPayload {
   const skillsById = new Map(context.skills.map((skill) => [skill.id, skill]));
   const themePromptsBySkillId = new Map(
     context.style.skillPrompts.map((prompt) => [prompt.skillId, prompt]),
@@ -227,20 +264,94 @@ export function createStyleSkillProductionJobPayload(
     themeDefinition: context.style.themeDefinition,
     skills,
   };
-  return styleSkillProductionJobPayloadV2Schema.parse({
-    schemaVersion: 1,
+  const commonParameters = {
+    professionId: context.profession.id,
+    styleId: context.style.id,
+    selectedSkillIds: context.style.selectedSkillIds,
+    promptPackage,
+    promptPackageSha256: sha256JcsV1(promptPackage),
+    deploymentAuthorized: false as const,
+  };
+  if (contractVersion === 1) {
+    return styleSkillProductionJobPayloadV2Schema.parse({
+      schemaVersion: 1,
+      profileId,
+      parameters: {
+        workflow: "style-skill-production-v2",
+        ...commonParameters,
+        toolProfiles: ["aseprite-cli"],
+      },
+    });
+  }
+  return styleSkillProductionJobPayloadV3Schema.parse({
+    schemaVersion: 2,
     profileId,
     parameters: {
-      workflow: "style-skill-production-v2",
-      professionId: context.profession.id,
-      styleId: context.style.id,
-      selectedSkillIds: context.style.selectedSkillIds,
-      promptPackage,
-      promptPackageSha256: sha256JcsV1(promptPackage),
-      toolProfiles: ["aseprite-cli"],
-      deploymentAuthorized: false,
+      workflow: "style-skill-production-v3",
+      ...commonParameters,
+      targetFramePolicy: {
+        schemaVersion: 1,
+        dimensions: "source-frame-exact",
+        alpha: "source-frame-exact",
+        hiddenFrames: "preserve-source",
+        linkFrames: "reuse-link-target",
+        maximumTargetFrameCount: 2_048,
+        maximumTargetPixelCount: 134_217_728,
+      },
+      toolProfiles: ["aseprite-cli-v6"],
     },
   });
+}
+
+function validateStyleSkillProductionParameters(
+  value: {
+    selectedSkillIds: readonly string[];
+    promptPackage: StyleSkillPromptPackageV2;
+    promptPackageSha256: string;
+  },
+  context: z.RefinementCtx,
+): void {
+  const frozenSkillIds = value.promptPackage.skills.map(
+    (skill) => skill.skillId,
+  );
+  if (
+    JSON.stringify(frozenSkillIds) !== JSON.stringify(value.selectedSkillIds)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["promptPackage", "skills"],
+      message: "冻结技能顺序必须与 selectedSkillIds 完全一致。",
+    });
+  }
+  if (
+    sha256JcsV1(value.promptPackage) !== value.promptPackageSha256.toUpperCase()
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["promptPackageSha256"],
+      message: "主题 Prompt 包哈希与冻结内容不一致。",
+    });
+  }
+}
+
+function validateStyleSkillProductionJobPayload(
+  value: Record<string, unknown>,
+  context: z.RefinementCtx,
+): void {
+  if (!boundedJobPayloadRecordSchema.safeParse(value).success) {
+    context.addIssue({
+      code: "custom",
+      message: "主题技能生产 Job 不能超过 Job JSON 预算。",
+    });
+  }
+  const parameters = value.parameters;
+  if (!declarativeParametersSchema.safeParse(parameters).success) {
+    context.addIssue({
+      code: "custom",
+      path: ["parameters"],
+      message: "主题技能生产 Job 包含不安全的非声明式字段。",
+    });
+  }
 }
 
 /** 返回写入逐技能审计哈希的精确 Prompt 组合，不包含可变执行状态。 */

@@ -77,5 +77,7 @@ export async function lockedProfessionModelExecution(
   }
   const now = await databaseNow(transaction);
   const gate = resolveProfessionExecutionContext(job, input, now);
-  return gate.status === "accepted" ? { job, execution, now } : undefined;
+  return gate.status === "accepted" && gate.context.contractVersion === 1
+    ? { job, execution, now }
+    : undefined;
 }

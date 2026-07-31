@@ -8,8 +8,8 @@
  *
  * 调用关系：预览 Repository 完成 Run 所有权与 finalized 上传查询后调用本文件；下游只接收
  * 已按 kind 判别的 provenance。输入是数据库 JSON，输出是历史只读或当前只读的有限类型。
- * 副作用：无。安全边界：V3 validation 只能与 V3 两项预览组合，V4 同理；跨代或共同基线
- * 漂移必须 fail-closed，历史 V3/quality V2 的可读性不表示它可成为新 passed 或 Package 输入。
+ * 副作用：无。安全边界：V3、V4、V5 validation 只能与各自同代的两项预览组合；跨代或共同
+ * 基线漂移必须 fail-closed，历史证据可读不表示它可成为新 passed 或 Package 输入。
  */
 import { sha256JcsV1 } from "../../common/utils/canonical.js";
 import {
@@ -25,7 +25,8 @@ export type PatchTaskValidationProvenance = Extract<
       | "profession-aseprite-validation-v1"
       | "profession-reference-validation-v2"
       | "profession-creative-validation-v3"
-      | "profession-creative-validation-v4";
+      | "profession-creative-validation-v4"
+      | "profession-creative-validation-v5";
   }
 >;
 
@@ -37,7 +38,8 @@ export type PatchTaskSourcePreviewProvenance = Extract<
       | "profession-source-frame-preview-v1"
       | "profession-source-frame-preview-v2"
       | "profession-creative-source-frame-preview-v3"
-      | "profession-creative-source-frame-preview-v4";
+      | "profession-creative-source-frame-preview-v4"
+      | "profession-creative-source-frame-preview-v5";
   }
 >;
 
@@ -49,7 +51,8 @@ export type PatchTaskResultPreviewProvenance = Extract<
       | "profession-aseprite-result-preview-v1"
       | "profession-reference-result-preview-v2"
       | "profession-creative-result-preview-v3"
-      | "profession-creative-result-preview-v4";
+      | "profession-creative-result-preview-v4"
+      | "profession-creative-result-preview-v5";
   }
 >;
 
@@ -67,6 +70,7 @@ export function parsePatchTaskValidationProvenance(
     case "profession-reference-validation-v2":
     case "profession-creative-validation-v3":
     case "profession-creative-validation-v4":
+    case "profession-creative-validation-v5":
       return parsed.data;
     default:
       return undefined;
@@ -84,6 +88,10 @@ export function isMatchingPatchTaskPreviewProvenance(
   | PatchTaskSourcePreviewProvenance
   | PatchTaskResultPreviewProvenance {
   switch (validation.kind) {
+    case "profession-creative-validation-v5":
+      return role === "source-frame"
+        ? provenance.kind === "profession-creative-source-frame-preview-v5"
+        : provenance.kind === "profession-creative-result-preview-v5";
     case "profession-creative-validation-v4":
       return role === "source-frame"
         ? provenance.kind === "profession-creative-source-frame-preview-v4"
@@ -113,7 +121,8 @@ export function isPatchTaskSourcePreviewProvenance(
     provenance.kind === "profession-source-frame-preview-v1" ||
     provenance.kind === "profession-source-frame-preview-v2" ||
     provenance.kind === "profession-creative-source-frame-preview-v3" ||
-    provenance.kind === "profession-creative-source-frame-preview-v4"
+    provenance.kind === "profession-creative-source-frame-preview-v4" ||
+    provenance.kind === "profession-creative-source-frame-preview-v5"
   );
 }
 
@@ -127,7 +136,8 @@ export function isPatchTaskResultPreviewProvenance(
     provenance.kind === "profession-aseprite-result-preview-v1" ||
     provenance.kind === "profession-reference-result-preview-v2" ||
     provenance.kind === "profession-creative-result-preview-v3" ||
-    provenance.kind === "profession-creative-result-preview-v4"
+    provenance.kind === "profession-creative-result-preview-v4" ||
+    provenance.kind === "profession-creative-result-preview-v5"
   );
 }
 
@@ -145,6 +155,7 @@ export function hasSamePatchTaskOutputEvidence(
   );
 }
 
+/** 删除角色专有绑定后，生成可作跨 Artifact 比较的有限公共证据。 */
 function commonOutputEvidence(
   provenance:
     | PatchTaskValidationProvenance

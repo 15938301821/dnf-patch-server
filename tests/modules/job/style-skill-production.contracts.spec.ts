@@ -12,6 +12,7 @@ import { parseJobPayload } from "../../../src/modules/job/job-payload-contracts.
 import {
   createStyleSkillPromptComposition,
   type StyleSkillProductionJobPayloadV2,
+  type StyleSkillProductionJobPayloadV3,
 } from "../../../src/modules/job/style-skill-production.contracts.js";
 
 const skillId = "11111111-1111-4111-8111-111111111111";
@@ -20,6 +21,23 @@ describe("style skill production V2 contract", () => {
   it("accepts a hash-bound structured prompt package", () => {
     const payload = validPayload();
     expect(parseJobPayload("profession", 1, payload)).toEqual(payload);
+  });
+
+  it("accepts Profession contract v2 only with the complete V3 same-size policy", () => {
+    const payload = validV3Payload();
+
+    expect(parseJobPayload("profession", 2, payload)).toEqual(payload);
+    expect(() => parseJobPayload("profession", 1, payload)).toThrow();
+  });
+
+  it("rejects V3 when target policy is missing or paired with contract v1", () => {
+    const payload = validV3Payload();
+    const { targetFramePolicy: _removed, ...parameters } = payload.parameters;
+
+    expect(() =>
+      parseJobPayload("profession", 2, { ...payload, parameters }),
+    ).toThrow();
+    expect(() => parseJobPayload("profession", 2, validPayload())).toThrow();
   });
 
   it("rejects profession prompt content changed after freezing", () => {
@@ -170,6 +188,33 @@ function validPayload(): StyleSkillProductionJobPayloadV2 {
       promptPackage,
       promptPackageSha256: sha256JcsV1(promptPackage),
       toolProfiles: ["aseprite-cli"],
+      deploymentAuthorized: false,
+    },
+  };
+}
+
+function validV3Payload(): StyleSkillProductionJobPayloadV3 {
+  const payload = validPayload();
+  return {
+    schemaVersion: 2,
+    profileId: "aseprite-production-v6",
+    parameters: {
+      workflow: "style-skill-production-v3",
+      professionId: payload.parameters.professionId,
+      styleId: payload.parameters.styleId,
+      selectedSkillIds: payload.parameters.selectedSkillIds,
+      promptPackage: payload.parameters.promptPackage,
+      promptPackageSha256: payload.parameters.promptPackageSha256,
+      targetFramePolicy: {
+        schemaVersion: 1,
+        dimensions: "source-frame-exact",
+        alpha: "source-frame-exact",
+        hiddenFrames: "preserve-source",
+        linkFrames: "reuse-link-target",
+        maximumTargetFrameCount: 2_048,
+        maximumTargetPixelCount: 134_217_728,
+      },
+      toolProfiles: ["aseprite-cli-v6"],
       deploymentAuthorized: false,
     },
   };

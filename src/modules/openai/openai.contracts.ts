@@ -19,6 +19,10 @@
  * 而不是尝试调用其他用户或默认模型。
  */
 import type { z } from "zod";
+import type {
+  ImageTargetDimensions,
+  ImageTargetGeometry,
+} from "./image-target-geometry.js";
 
 /** 服务端固定映射的模型职责；调用方不能借此传入任意角色或 Provider 能力。 */
 export type ModelRole = "orchestrator" | "engineer" | "artist";
@@ -78,8 +82,8 @@ export interface StructuredModelRequest<T> {
 
 /**
  * 图片模型调用的服务内输入。
- * 由受控生成流程提供，OpenAiService 仍会检查 Run 授权和配置所有权；不是允许指定尺寸、工具、存储或
- * 任意 endpoint 的通用图像 API。
+ * 由受控生成流程提供，OpenAiService 仍会检查 Run 授权和配置所有权；调用方只能提供官方 target
+ * 像素尺寸，不能直接指定 Provider 画布、工具、存储或任意 endpoint。
  */
 export interface ImageModelRequest {
   /** 已存在 Run 的标识，来自服务端业务流程，而非 Worker claim 或 lease。 */
@@ -90,6 +94,8 @@ export interface ImageModelRequest {
   prompt: string;
   /** Artist V2 以官方源图为视觉条件生成强对比参考图。 */
   sourceImage?: ModelImageInput;
+  /** V6 来自已核验 target-frame manifest 的官方宽高；缺失时严格保持 V5 图片画布语义。 */
+  targetDimensions?: ImageTargetDimensions;
 }
 
 /**
@@ -164,6 +170,8 @@ export interface StructuredModelResult<T> {
 export interface ImageModelResult {
   /** 成功返回的非空 PNG 字节；failed、blocked 时为 undefined，且不会写入数据库 BLOB。 */
   bytes?: Uint8Array;
+  /** V6 成功时基于实际解码 PNG 冻结的无拉伸几何；V5 或失败调用不存在。 */
+  targetGeometry?: ImageTargetGeometry;
   /** 本次调用的脱敏审计视图，记录授权、实际出站和稳定终态。 */
   record: ModelCallView;
 }

@@ -21,6 +21,22 @@ import {
 const maxSourceFrameManifestBytes = 64 * 1024 * 1024;
 const uppercaseSha256Schema = sha256Schema.regex(/^[A-F0-9]{64}$/u);
 
+/**
+ * Inventory Worker 上传 source-frame-manifest 时冻结的 Artifact provenance。
+ * Repository 读取数据库 JSON 后必须再次解析；它证明声明格式，不替代 Artifact 正文和来源复核。
+ */
+export const professionSourceFrameManifestProvenanceSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    kind: z.literal("source-frame-manifest"),
+    sourceId: clientIdSchema,
+    sourceSha256: sha256Schema,
+    toolSha256: sha256Schema,
+    jobPayloadSha256: sha256Schema,
+    deploymentAuthorized: z.literal(false),
+  })
+  .strict();
+
 /** 服务端冻结并规范化的 NPK 内部 IMG 路径；它不是 Worker 或 Server 的文件系统路径。 */
 const npkInternalPathViewSchema = repositoryRelativePathSchema.refine(
   (value) => {

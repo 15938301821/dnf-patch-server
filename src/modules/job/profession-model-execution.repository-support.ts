@@ -80,6 +80,10 @@ export async function reserveProfessionSkillModelExecution(
     const now = await databaseNow(transaction);
     const gate = resolveProfessionExecutionContext(job, input, now);
     if (gate.status !== "accepted") return gate;
+    // 本 Repository 只拥有历史 V5 代表帧两阶段表；V3 必须走独立逐帧 target/execution 表。
+    if (gate.context.contractVersion !== 1) {
+      return { status: "job-contract-mismatch" };
+    }
     const sourceVisualInput = await resolveSourceVisualInput(
       transaction,
       jobId,

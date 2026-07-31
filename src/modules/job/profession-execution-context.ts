@@ -17,6 +17,8 @@ import type { JobLeaseState } from "./job-lease.js";
 import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import {
   styleSkillProductionJobPayloadV2Schema,
+  styleSkillProductionJobPayloadV3Schema,
+  type ProfessionTargetFramePolicyV1,
   type StyleSkillPromptPackageV2,
 } from "./style-skill-production.contracts.js";
 
@@ -34,12 +36,16 @@ export interface ProfessionExecutionJobState extends JobLeaseState {
 
 /** 仅在服务进程内流转的单技能冻结上下文，不可作为 Worker HTTP ViewModel。 */
 export interface FrozenProfessionSkillExecutionContext {
+  /** 1 是历史代表帧 V2，2 是同尺寸逐帧 V3；消费方必须显式选择支持的代际。 */
+  contractVersion: 1 | 2;
   runId: string;
   profileId: string;
   professionId: string;
   styleId: string;
   themeDefinition: StyleSkillPromptPackageV2["themeDefinition"];
   skill: StyleSkillPromptPackageV2["skills"][number];
+  /** 仅 contract 2 存在；它约束逐帧预算和官方几何/Alpha 权威性。 */
+  targetFramePolicy?: ProfessionTargetFramePolicyV1;
 }
 
 /** 不产生模型或对象存储副作用的有限解析结果。 */
@@ -84,29 +90,33 @@ export function resolveProfessionExecutionContext(
     return { status: "job-kind-mismatch" };
   }
 
-  // 第二步：重新解析冻结 V2 payload 并核对外层哈希，防止领取后的数据库漂移进入模型出站。
-  const payload = styleSkillProductionJobPayloadV2Schema.safeParse(job.payload);
-  if (
-    !payload.success ||
-    sha256Json(payload.data) !== job.payloadSha256.toUpperCase()
-  ) {
+  // 第二步：按显式 schemaVersion 解析历史 V2 或当前 V3，并核对外层哈希；这里只识别代际，
+  // 不代表任一消费方已经获得 V3 生产能力，后续模型/产物入口仍须检查 contractVersion。
+  const v2 = styleSkillProductionJobPayloadV2Schema.safeParse(job.payload);
+  const v3 = styleSkillProductionJobPayloadV3Schema.safeParse(job.payload);
+  const payload = v2.success ? v2.data : v3.success ? v3.data : undefined;
+  if (!payload || sha256Json(payload) !== job.payloadSha256.toUpperCase()) {
     return { status: "job-integrity-failed" };
   }
 
   // 第三步：技能只能从已通过 V2 schema 的冻结有序集合中选择，未知 ID 不能变成任意 Prompt 入口。
-  const skill = payload.data.parameters.promptPackage.skills.find(
+  const skill = payload.parameters.promptPackage.skills.find(
     (candidate) => candidate.skillId === input.skillId,
   );
   if (!skill) return { status: "skill-not-found" };
   return {
     status: "accepted",
     context: {
+      contractVersion: payload.schemaVersion,
       runId: job.runId,
-      profileId: payload.data.profileId,
-      professionId: payload.data.parameters.professionId,
-      styleId: payload.data.parameters.styleId,
-      themeDefinition: payload.data.parameters.promptPackage.themeDefinition,
+      profileId: payload.profileId,
+      professionId: payload.parameters.professionId,
+      styleId: payload.parameters.styleId,
+      themeDefinition: payload.parameters.promptPackage.themeDefinition,
       skill,
+      ...(payload.schemaVersion === 2
+        ? { targetFramePolicy: payload.parameters.targetFramePolicy }
+        : {}),
     },
   };
 }

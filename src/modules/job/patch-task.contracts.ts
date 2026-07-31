@@ -368,6 +368,20 @@ export type PatchTaskReferenceTransferQualityView =
       periodicStripeRatio: number;
       maximumWhiteLineRatio: number;
       maximumDxt1BoundaryJumpRatio: number;
+    }
+  | {
+      schemaVersion: 5;
+      evaluatedFrameCount: number;
+      evaluatedPixelCount: number;
+      isolatedNoiseRatio: number;
+      continuousBandRatio: number;
+      brightCoreRatio: number;
+      edgeContrast: number;
+      strongEdgeRatio: number;
+      periodicStripeRatio: number;
+      maximumWhiteLineRatio: number;
+      maximumDxt1BoundaryJumpRatio: number;
+      sourceTopologyCorrelation: number;
     };
 
 /**

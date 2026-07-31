@@ -154,6 +154,7 @@ type ProfessionExecutionGateFailure = Exclude<
 
 export type ReserveProfessionModelExecutionResult =
   | ProfessionExecutionGateFailure
+  | { status: "job-contract-mismatch" }
   | { status: "prerequisite-not-passed" }
   | { status: "source-visual-input-mismatch" }
   | Exclude<

@@ -81,6 +81,30 @@ describe("OpenAiProvider image protocol", () => {
     expect(multipart.bytes.includes(pngBytes)).toBe(true);
   });
 
+  it("OpenAI Images 只使用服务端协商的离散纵向画布", async () => {
+    const fetchMock = stubFetch(
+      jsonResponse({ data: [{ b64_json: pngBase64 }] }),
+    );
+
+    await provider().image(
+      {
+        model: "gpt-image-1",
+        prompt: "bounded prompt",
+        requestedCanvas: {
+          openAiSize: "1024x1536",
+          geminiAspectRatio: "2:3",
+          expectedWidth: 1024,
+          expectedHeight: 1536,
+        },
+      },
+      configuration,
+    );
+
+    expect(requestBody(fetchMock.mock.calls[0]?.[1])).toMatchObject({
+      size: "1024x1536",
+    });
+  });
+
   it("Gemini 图片模型在 Images 404 后调用同源固定原生协议", async () => {
     const fetchMock = stubFetch(
       jsonResponse(
@@ -130,6 +154,46 @@ describe("OpenAiProvider image protocol", () => {
       generationConfig: {
         responseModalities: ["TEXT", "IMAGE"],
         imageConfig: { aspectRatio: "3:2", imageSize: "1K" },
+      },
+    });
+  });
+
+  it("Gemini fallback 使用服务端协商的离散方形画布", async () => {
+    const fetchMock = stubFetch(
+      jsonResponse(
+        { error: { message: "route unavailable", type: "not_found_error" } },
+        404,
+      ),
+      jsonResponse({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { inlineData: { mimeType: "image/png", data: pngBase64 } },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    await provider().image(
+      {
+        model: "gemini-3.1-flash-image-preview",
+        prompt: "bounded prompt",
+        requestedCanvas: {
+          openAiSize: "1024x1024",
+          geminiAspectRatio: "1:1",
+          expectedWidth: 1024,
+          expectedHeight: 1024,
+        },
+      },
+      configuration,
+    );
+
+    expect(requestBody(fetchMock.mock.calls[1]?.[1])).toMatchObject({
+      generationConfig: {
+        imageConfig: { aspectRatio: "1:1", imageSize: "1K" },
       },
     });
   });

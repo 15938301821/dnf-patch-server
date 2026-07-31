@@ -15,7 +15,8 @@ type SourcePreviewProvenance = Extract<
       | "profession-source-frame-preview-v1"
       | "profession-source-frame-preview-v2"
       | "profession-creative-source-frame-preview-v3"
-      | "profession-creative-source-frame-preview-v4";
+      | "profession-creative-source-frame-preview-v4"
+      | "profession-creative-source-frame-preview-v5";
   }
 >;
 

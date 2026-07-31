@@ -7,6 +7,7 @@
  */
 import { Inject, Injectable } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
+import sharp from "sharp";
 import { sha256Json } from "../../common/utils/canonical.js";
 import { resolveOpenAiEndpoint } from "../../config/openai-endpoint.js";
 import type {
@@ -32,12 +33,18 @@ import {
   type OpenAiProviderPort,
 } from "./openai.provider.js";
 import {
+  createImageTargetGeometry,
+  legacyRequestedImageCanvas,
+  selectRequestedImageCanvas,
+} from "./image-target-geometry.js";
+import {
   OpenAiRepository,
   type ModelCallCompletion,
   type OpenAiRepositoryPort,
 } from "./openai.repository.js";
 
 const maximumModelImageBytes = 64 * 1024 * 1024;
+const maximumModelImagePixels = 16 * 1024 * 1024;
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 interface ModelConfigurationLookupPort {
@@ -213,18 +220,40 @@ export class OpenAiService {
     beforeEgress?: ModelEgressGuard,
   ): Promise<ImageModelResult> {
     const context = await this.resolveContext(request.runId, "artist");
+    const requestedCanvas = request.targetDimensions
+      ? selectRequestedImageCanvas(request.targetDimensions)
+      : legacyRequestedImageCanvas;
+    const providerPrompt = request.targetDimensions
+      ? targetFramePrompt(
+          request.prompt,
+          request.targetDimensions.width,
+          request.targetDimensions.height,
+        )
+      : request.prompt;
     const requestSha256 = sha256Json({
       model: context.model,
       endpointIdentity: context.endpointIdentity,
       ...(context.blocked
         ? {}
         : { modelConfigurationVersion: context.modelConfigurationVersion }),
-      prompt: request.prompt,
+      prompt: providerPrompt,
       ...(request.sourceImage
         ? { sourceImage: imageIdentity(request.sourceImage) }
         : {}),
       n: 1,
-      size: "1536x1024",
+      size: requestedCanvas.openAiSize,
+      ...(request.targetDimensions
+        ? {
+            targetDimensions: request.targetDimensions,
+            requestedCanvas: {
+              schemaVersion: 1,
+              openAiSize: requestedCanvas.openAiSize,
+              geminiAspectRatio: requestedCanvas.geminiAspectRatio,
+              expectedWidth: requestedCanvas.expectedWidth,
+              expectedHeight: requestedCanvas.expectedHeight,
+            },
+          }
+        : {}),
       quality: "high",
       background: "transparent",
       outputFormat: "png",
@@ -248,15 +277,24 @@ export class OpenAiService {
       const response = await this.provider.image(
         {
           model: context.model,
-          prompt: request.prompt,
+          prompt: providerPrompt,
+          requestedCanvas,
           ...(request.sourceImage
             ? { sourceImage: verifiedImage(request.sourceImage) }
             : {}),
         },
         context.provider,
       );
+      const targetGeometry = request.targetDimensions
+        ? createImageTargetGeometry(
+            request.targetDimensions,
+            requestedCanvas,
+            await decodedPngDimensions(response.bytes),
+          )
+        : undefined;
       return {
         bytes: response.bytes,
+        ...(targetGeometry ? { targetGeometry } : {}),
         record: await this.finishRecord(egressRecord, {
           status: "passed",
           responseSha256: sha256Bytes(response.bytes),
@@ -448,6 +486,39 @@ function sha256Bytes(value: Uint8Array): string {
 }
 
 /**
+ * 向 V6 固定业务 Prompt 附加机器可审计的几何要求；调用方不能覆盖该段来请求任意画布行为。
+ * Provider 原始输出仍是不可信候选，后续正规化器会验证透明区域和官方 Alpha，而非相信文本遵循度。
+ */
+function targetFramePrompt(
+  prompt: string,
+  targetWidth: number,
+  targetHeight: number,
+): string {
+  return `${prompt}\n\nV6 target canvas contract: keep all visible artwork inside the largest centered rectangle whose exact aspect ratio is ${targetWidth}:${targetHeight}. Every pixel outside that rectangle must be fully transparent. Do not stretch the artwork. Return a transparent PNG.`;
+}
+
+/** 从真实 PNG 解析实际 Provider 画布，不能用请求值伪造返回尺寸。 */
+async function decodedPngDimensions(
+  bytes: Uint8Array,
+): Promise<{ width: number; height: number }> {
+  const metadata = await sharp(Buffer.from(bytes), {
+    failOn: "warning",
+    limitInputPixels: maximumModelImagePixels,
+    sequentialRead: true,
+  }).metadata();
+  if (
+    metadata.format !== "png" ||
+    !Number.isSafeInteger(metadata.width) ||
+    !Number.isSafeInteger(metadata.height) ||
+    !metadata.width ||
+    !metadata.height
+  ) {
+    throw new Error("IMAGE_PAYLOAD_DIMENSIONS_INVALID");
+  }
+  return { width: metadata.width, height: metadata.height };
+}
+
+/**
  * 把单调时钟差转换为可持久化的正整数毫秒。
  * 极快的测试替身也至少记为 1ms，避免后续吞吐计算出现除零；该值不包含数据库写入时间。
  */
@@ -456,7 +527,11 @@ function elapsedProviderMs(startedAt: number): number {
 }
 
 function classifyModelError(error: unknown): string {
-  if (error instanceof Error && error.message.startsWith("IMAGE_PAYLOAD_")) {
+  if (
+    error instanceof Error &&
+    (error.message.startsWith("IMAGE_PAYLOAD_") ||
+      error.message === "IMAGE_TARGET_GEOMETRY_INVALID")
+  ) {
     return error.message;
   }
   return "MODEL_PROVIDER_REQUEST_FAILED";
