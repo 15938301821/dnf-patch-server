@@ -129,7 +129,10 @@ function validManifest(): ProfessionSourceFrameManifest {
   };
 }
 
-function frame(index: number, hidden: boolean) {
+function frame(
+  index: number,
+  hidden: boolean,
+): ProfessionSourceFrameManifest["entries"][number]["frames"][number] {
   return {
     index,
     type: "ARGB_8888",
@@ -146,7 +149,10 @@ function frame(index: number, hidden: boolean) {
   };
 }
 
-function linkedFrame(index: number, linkTargetIndex: number) {
+function linkedFrame(
+  index: number,
+  linkTargetIndex: number,
+): ProfessionSourceFrameManifest["entries"][number]["frames"][number] {
   return {
     index,
     type: "LINK",

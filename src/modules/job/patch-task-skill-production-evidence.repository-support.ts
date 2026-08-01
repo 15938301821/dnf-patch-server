@@ -64,7 +64,8 @@ type CurrentProjectsProvenance = Extract<
 >;
 type CurrentBaseProvenance = Omit<CurrentProjectsProvenance, "kind">;
 
-interface SourceEvidence {
+/** V5/V6输出共同依赖的冻结官方来源摘要；由Server Inventory与manifest Artifact恢复。 */
+export interface SourceEvidence {
   runId: string;
   inventoryId: string;
   sourceSha256: string;
@@ -321,7 +322,7 @@ async function lockedExecution(
 }
 
 /** 从冻结 Inventory 与清单 Artifact 恢复 Worker 已见的来源摘要，不信任 output provenance 自报。 */
-async function resolveSourceEvidence(
+export async function resolveSourceEvidence(
   transaction: Transaction,
   context: FrozenProfessionSkillExecutionContext,
 ): Promise<SourceEvidence | undefined> {

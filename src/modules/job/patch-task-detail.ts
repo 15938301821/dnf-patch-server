@@ -19,7 +19,7 @@ import type {
   PatchTaskWorkflowStageView,
 } from "./patch-task.contracts.js";
 import {
-  mapPatchTaskProgress,
+  mapPatchTaskEvidenceProgress,
   mapPatchTaskStatus,
 } from "./patch-task-status.js";
 import {
@@ -65,12 +65,33 @@ export interface PatchTaskDetailExecutionRecord {
   outputMediaType: string | null;
 }
 
+/** 当前 Run 一个 Job 的聚合状态与当前 attempt 错误；attempt 为 0 表示从未被 Worker 领取。 */
+export interface PatchTaskDetailJobRecord {
+  kind: string;
+  status: string;
+  attempt: number;
+  errorCode: string | null;
+}
+
+/** 当前 Profession attempt 按技能聚合的 V6 帧证据；只包含计数，不暴露帧或 Artifact 身份。 */
+export interface PatchTaskDetailTargetFrameRecord {
+  skillId: string;
+  attempt: number;
+  targetFrameCount: number;
+  generationFrameCount: number;
+  sourceFrameCount: number;
+}
+
 /** 纯映射函数的完整输入；所有集合都已由 Repository 限定为同一 Run。 */
 export interface BuildPatchTaskDetailInput {
   task: PatchTaskDetailBase;
   skills: PatchTaskDetailSkillRecord[];
   executions: PatchTaskDetailExecutionRecord[];
   modelCalls: PatchTaskDetailModelCallRecord[];
+  /** 旧单元测试与异常历史可省略；缺失时保持原有保守映射，不能推断 Job 已执行。 */
+  jobs?: PatchTaskDetailJobRecord[];
+  /** 仅 V6 当前 attempt 有记录；空集合继续采用 V1-V5 映射。 */
+  targetFrames?: PatchTaskDetailTargetFrameRecord[];
 }
 
 /**
@@ -81,9 +102,18 @@ export interface BuildPatchTaskDetailInput {
 export function buildPatchTaskDetail(
   input: BuildPatchTaskDetailInput,
 ): PatchTaskDetailView {
+  const professionJob = input.jobs?.find((job) => job.kind === "profession");
+  const packageJob = input.jobs?.find((job) => job.kind === "npk-package");
   const skills = [...input.skills]
     .sort((left, right) => left.ordinal - right.ordinal)
-    .map((skill) => mapSkill(skill, input.executions));
+    .map((skill) =>
+      mapSkill(
+        skill,
+        input.executions,
+        professionJob,
+        input.targetFrames ?? [],
+      ),
+    );
   const passedSkills = skills.filter(
     (skill) => skill.status === "passed",
   ).length;
@@ -92,15 +122,20 @@ export function buildPatchTaskDetail(
     input.task.packageStatus,
   );
   const packageStatus = normalizePackageStatus(input.task.packageStatus);
-  const currentStage = resolveCurrentStage(status, packageStatus, skills);
+  const currentStage = resolveCurrentStage(
+    status,
+    packageStatus,
+    skills,
+    professionJob,
+    packageJob,
+  );
   return {
     id: input.task.id,
     professionName: input.task.professionName,
     styleName: input.task.styleName,
     status,
-    progress: mapPatchTaskProgress(
-      skills.length,
-      passedSkills,
+    progress: mapPatchTaskEvidenceProgress(
+      skills,
       input.task.runStatus,
       input.task.packageStatus,
     ),
@@ -116,7 +151,13 @@ export function buildPatchTaskDetail(
     currentStage,
     totalSkills: skills.length,
     passedSkills,
-    workflow: workflow(status, packageStatus, skills),
+    workflow: workflow(
+      status,
+      packageStatus,
+      skills,
+      professionJob,
+      packageJob,
+    ),
     skills,
     packageStatus,
     modelThroughput: aggregateModelThroughput(input.modelCalls),
@@ -127,7 +168,17 @@ export function buildPatchTaskDetail(
 function mapSkill(
   skill: PatchTaskDetailSkillRecord,
   executions: PatchTaskDetailExecutionRecord[],
+  professionJob: PatchTaskDetailJobRecord | undefined,
+  targetFrames: PatchTaskDetailTargetFrameRecord[],
 ): PatchTaskSkillProgressView {
+  const targetFrame = targetFrames.find(
+    (candidate) =>
+      candidate.skillId === skill.skillId &&
+      candidate.attempt === professionJob?.attempt,
+  );
+  if (targetFrame && professionJob) {
+    return mapTargetFrameSkill(skill, professionJob, targetFrame);
+  }
   const current = executions.filter(
     (execution) =>
       execution.skillId === skill.skillId &&
@@ -182,6 +233,54 @@ function mapSkill(
       reference.outputArtifactId !== null &&
       reference.outputMediaType === "image/png",
   };
+}
+
+/**
+ * 将当前 Profession attempt 的 V6 逐帧证据映射为用户可读阶段。
+ * target 表存在证明 manifest 已经由 Server 复读并原子登记；只有全部生成帧都有 source PNG 时，
+ * 才允许把源帧冻结标记为通过。Job 终态只落到证据链中第一个尚未通过的阶段。
+ */
+function mapTargetFrameSkill(
+  skill: PatchTaskDetailSkillRecord,
+  professionJob: PatchTaskDetailJobRecord,
+  targetFrame: PatchTaskDetailTargetFrameRecord,
+): PatchTaskSkillProgressView {
+  const sourceFramesReady =
+    targetFrame.sourceFrameCount === targetFrame.generationFrameCount;
+  const activeStatus = jobStepStatus(professionJob.status);
+  const sourceStatus = sourceFramesReady ? "passed" : activeStatus;
+  const generationStatus = sourceFramesReady ? activeStatus : "pending";
+  return {
+    skillId: skill.skillId,
+    displayName: skill.displayName,
+    status: activeStatus,
+    stages: [
+      { key: "target-manifest", status: "passed" },
+      { key: "source-frame-freeze", status: sourceStatus },
+      { key: "target-frame-generation", status: generationStatus },
+      {
+        key: "runtime-validation",
+        status: professionJob.status === "passed" ? "passed" : "pending",
+      },
+    ],
+    ...(professionJob.errorCode ? { errorCode: professionJob.errorCode } : {}),
+    referenceImageAvailable: false,
+    framePreparation: {
+      targetFrameCount: targetFrame.targetFrameCount,
+      generationFrameCount: targetFrame.generationFrameCount,
+      sourceFrameCount: targetFrame.sourceFrameCount,
+    },
+  };
+}
+
+/** 把 Profession Job 状态映射到当前尚未通过的 V6 阶段；未知值保持 unknown。 */
+function jobStepStatus(status: string): PatchTaskStepStatus {
+  if (status === "queued") return "pending";
+  if (status === "leased") return "running";
+  if (status === "passed") return "passed";
+  if (status === "failed") return "failed";
+  if (status === "blocked") return "blocked";
+  return "unknown";
 }
 
 /** 按新到旧选择同一逻辑阶段，避免数据库返回顺序让历史记录遮蔽当前 V3 证据。 */
@@ -266,6 +365,8 @@ function workflow(
   status: PatchTaskDetailView["status"],
   packageStatus: PatchTaskDetailView["packageStatus"],
   skills: PatchTaskSkillProgressView[],
+  professionJob: PatchTaskDetailJobRecord | undefined,
+  packageJob: PatchTaskDetailJobRecord | undefined,
 ): PatchTaskWorkflowStageView[] {
   const skillStatus = aggregateSkillStatus(skills);
   return [
@@ -274,12 +375,17 @@ function workflow(
       status:
         status === "queued"
           ? "running"
-          : status === "blocked" && skillStatus === "blocked"
+          : status === "blocked" &&
+              skillStatus === "blocked" &&
+              (professionJob?.attempt ?? 0) === 0
             ? "blocked"
             : "passed",
     },
     { key: "skill-production", status: skillStatus },
-    { key: "package-validation", status: packageStepStatus(packageStatus) },
+    {
+      key: "package-validation",
+      status: packageStepStatus(packageStatus, packageJob),
+    },
     {
       key: "complete",
       status:
@@ -296,7 +402,10 @@ function workflow(
 
 function packageStepStatus(
   status: PatchTaskDetailView["packageStatus"],
+  packageJob: PatchTaskDetailJobRecord | undefined,
 ): PatchTaskStepStatus {
+  // 上游失败会把未领取的 Package 联动为 blocked；attempt=0 必须显示“等待”，不能伪装成封包失败。
+  if (packageJob?.attempt === 0) return "pending";
   if (status === "queued") return "pending";
   if (status === "building") return "running";
   return status;
@@ -306,10 +415,22 @@ function resolveCurrentStage(
   status: PatchTaskDetailView["status"],
   packageStatus: PatchTaskDetailView["packageStatus"],
   skills: PatchTaskSkillProgressView[],
+  professionJob: PatchTaskDetailJobRecord | undefined,
+  packageJob: PatchTaskDetailJobRecord | undefined,
 ): PatchTaskWorkflowStageKey {
   if (status === "passed") return "complete";
-  if (["building", "failed", "blocked"].includes(packageStatus)) {
+  if (
+    ["building", "failed", "blocked"].includes(packageStatus) &&
+    packageJob?.attempt !== 0
+  ) {
     return "package-validation";
+  }
+  if (
+    status === "blocked" &&
+    aggregateSkillStatus(skills) === "blocked" &&
+    (professionJob?.attempt ?? 0) === 0
+  ) {
+    return "planning";
   }
   if (
     status === "queued" &&

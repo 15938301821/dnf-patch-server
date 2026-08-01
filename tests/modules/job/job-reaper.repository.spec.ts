@@ -49,6 +49,16 @@ describe("JobRepository.reapExpired Package terminal state", () => {
       finishedAt: now,
     });
   });
+
+  it("closes an already-dispatched legacy package when Profession exhausts", async () => {
+    const harness = createHarness(3, 3, new Date("2026-07-24T23:58:00.000Z"));
+
+    await expect(harness.repository.reapExpired(10)).resolves.toEqual([]);
+
+    expect(harness.updates).toContainEqual(
+      expect.objectContaining({ status: "failed", leaseId: null }),
+    );
+  });
 });
 
 interface ReaperHarness {
@@ -61,6 +71,7 @@ interface ReaperHarness {
 function createHarness(
   attemptCount: number,
   maxAttempts: number,
+  packageDispatchReadyAt: Date | null = null,
 ): ReaperHarness {
   const job = {
     id: jobId,
@@ -79,11 +90,19 @@ function createHarness(
       ? [
           [job],
           [{ value: now }],
+          [],
           [{ id: runId }],
+          [
+            {
+              id: "55555555-5555-4555-8555-555555555555",
+              status: "queued",
+              dispatchReadyAt: packageDispatchReadyAt,
+            },
+          ],
           [{ id: jobId, status: "failed" }],
           [{ sequence: null }],
         ]
-      : [[job], [{ value: now }]];
+      : [[job], [{ value: now }], []];
   let selectIndex = 0;
   const select = vi.fn(() => {
     const selectedRows = rows[selectIndex] ?? [];

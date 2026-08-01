@@ -33,10 +33,11 @@ const activeSkillProductionReportSchema = z
   })
   .strict();
 
-const passedSkillProductionReportSchema = z
+const passedSkillProductionReportV5Schema = z
   .object({
     ...workerSkillSchema,
     status: z.literal("passed"),
+    productionContractVersion: z.literal(5),
     asepriteBinarySha256: sha256Schema,
     asepriteAdapterSha256: sha256Schema,
     asepriteArtifactId: z.uuid(),
@@ -61,6 +62,42 @@ const passedSkillProductionReportSchema = z
     }
   });
 
+const passedSkillProductionReportV6Schema = z
+  .object({
+    ...workerSkillSchema,
+    status: z.literal("passed"),
+    productionContractVersion: z.literal(6),
+    asepriteBinarySha256: sha256Schema,
+    asepriteAdapterSha256: sha256Schema,
+    asepriteArtifactId: z.uuid(),
+    validationArtifactId: z.uuid(),
+    sourcePreviewArtifactId: z.uuid(),
+    resultPreviewArtifactId: z.uuid(),
+    targetFrameManifestArtifactId: z.uuid(),
+    targetFrameManifestSha256: sha256Schema,
+    targetSetSha256: sha256Schema,
+    targetFrameCount: z.number().int().min(1).max(2_048),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const outputArtifactIds = [
+      value.asepriteArtifactId,
+      value.validationArtifactId,
+      value.sourcePreviewArtifactId,
+      value.resultPreviewArtifactId,
+    ];
+    if (
+      new Set(outputArtifactIds).size !== outputArtifactIds.length ||
+      outputArtifactIds.includes(value.targetFrameManifestArtifactId)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["resultPreviewArtifactId"],
+        message: "V6四项输出与target manifest必须使用五个不同Artifact。",
+      });
+    }
+  });
+
 const failedSkillProductionReportSchema = z
   .object({
     ...workerSkillSchema,
@@ -78,14 +115,12 @@ const failedSkillProductionReportSchema = z
  * 进行中状态不能夹带终态证据；通过状态只提交本机工具摘要与两个 finalized Artifact，模型调用、
  * 图片尝试、固定 profile 和来源证据由 Server 从当前 attempt 反查；失败状态只允许稳定错误码。
  */
-export const reportPatchTaskSkillProductionSchema = z.discriminatedUnion(
-  "status",
-  [
-    activeSkillProductionReportSchema,
-    passedSkillProductionReportSchema,
-    failedSkillProductionReportSchema,
-  ],
-);
+export const reportPatchTaskSkillProductionSchema = z.union([
+  activeSkillProductionReportSchema,
+  passedSkillProductionReportV5Schema,
+  passedSkillProductionReportV6Schema,
+  failedSkillProductionReportSchema,
+]);
 
 export const reportPatchTaskPackageSchema = z
   .object({
@@ -180,11 +215,14 @@ export interface PatchTaskWorkflowStageView {
   status: PatchTaskStepStatus;
 }
 
-/** 单技能固定生产链；模型阶段与本机工具阶段都只能由服务端证据映射。 */
+/** 单技能版本化生产链；V1-V5 模型/工具阶段与 V6 逐帧阶段都只能由服务端证据映射。 */
 export type PatchTaskSkillStageKey =
   | "engineer-plan"
   | "reference-image"
   | "aseprite-adaptation"
+  | "target-manifest"
+  | "source-frame-freeze"
+  | "target-frame-generation"
   | "runtime-validation";
 
 /** 单技能一个固定阶段的浏览器 ViewModel。 */
@@ -193,7 +231,14 @@ export interface PatchTaskSkillStageView {
   status: PatchTaskStepStatus;
 }
 
-/** 任务详情中的单技能进度；参考图标记只说明可申请预览，不包含 Artifact ID 或 URL。 */
+/** V6 单技能帧准备摘要；计数来自当前 Profession attempt，不包含 Artifact ID 或对象定位。 */
+export interface PatchTaskSkillFramePreparationView {
+  targetFrameCount: number;
+  generationFrameCount: number;
+  sourceFrameCount: number;
+}
+
+/** 任务详情中的单技能进度；参考图和 V6 帧计数都不包含 Artifact ID 或 URL。 */
 export interface PatchTaskSkillProgressView {
   skillId: string;
   displayName: string;
@@ -201,6 +246,7 @@ export interface PatchTaskSkillProgressView {
   stages: PatchTaskSkillStageView[];
   errorCode?: string;
   referenceImageAvailable: boolean;
+  framePreparation?: PatchTaskSkillFramePreparationView;
 }
 
 /** 浏览器可见的固定模型角色；unknown 只用于数据库异常的保守展示。 */
@@ -417,6 +463,8 @@ export interface PatchTaskReferenceImageDownloadView extends PatchTaskReferenceI
 }
 
 export interface PlannedPatchTaskSkill {
+  /** 5表示单参考模型链，6表示同attempt逐帧目标集合；创建后不得改写。 */
+  productionContractVersion: 5 | 6;
   professionId: string;
   styleId: string;
   skillId: string;

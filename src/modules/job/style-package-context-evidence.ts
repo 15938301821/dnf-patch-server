@@ -22,6 +22,7 @@ import type { StylePackageContextV3 } from "./style-package-production.contracts
 /** Package context 复核所需的单技能 production 数据库字段。 */
 export interface StylePackageProductionEvidenceRow {
   skillId: string;
+  productionContractVersion: number;
   professionId: string;
   styleId: string;
   jobId: string | null;
@@ -32,6 +33,10 @@ export interface StylePackageProductionEvidenceRow {
   sourceFrameManifestArtifactId: string;
   promptSha256: string;
   imageAttemptId: string | null;
+  targetFrameManifestArtifactId: string | null;
+  targetFrameManifestSha256: string | null;
+  targetSetSha256: string | null;
+  targetFrameCount: number | null;
   asepriteProfileId: string | null;
   asepriteBinarySha256: string | null;
   asepriteAdapterSha256: string | null;
@@ -84,13 +89,11 @@ export interface StylePackageExpectedProductionSet {
   selectedSkillIds: string[];
 }
 
-type CompleteProduction = StylePackageProductionEvidenceRow & {
+type CompleteProductionBase = StylePackageProductionEvidenceRow & {
   jobId: string;
   workerId: string;
   leaseId: string;
   attempt: number;
-  imageAttemptId: string;
-  asepriteProfileId: "aseprite-cli";
   asepriteBinarySha256: string;
   asepriteAdapterSha256: string;
   asepriteArtifactId: string;
@@ -98,6 +101,21 @@ type CompleteProduction = StylePackageProductionEvidenceRow & {
   validationArtifactId: string;
   validationUploadId: string;
 };
+type CompleteProduction =
+  | (CompleteProductionBase & {
+      productionContractVersion: 5;
+      imageAttemptId: string;
+      asepriteProfileId: "aseprite-cli";
+    })
+  | (CompleteProductionBase & {
+      productionContractVersion: 6;
+      imageAttemptId: null;
+      targetFrameManifestArtifactId: string;
+      targetFrameManifestSha256: string;
+      targetSetSha256: string;
+      targetFrameCount: number;
+      asepriteProfileId: "aseprite-cli-v6";
+    });
 
 type PackageOutputProvenance = Extract<
   CurrentProfessionSkillOutputProvenance,
@@ -105,6 +123,12 @@ type PackageOutputProvenance = Extract<
     kind:
       | "profession-creative-projects-v5"
       | "profession-creative-validation-v5";
+  }
+>;
+type PackageV6OutputProvenance = Extract<
+  CurrentProfessionSkillOutputProvenance,
+  {
+    kind: "profession-target-projects-v6" | "profession-target-validation-v6";
   }
 >;
 
@@ -155,12 +179,9 @@ export function resolveStylePackageSkillInputs(
     if (
       !projects ||
       !validation ||
-      projects.provenance.kind !== "profession-creative-projects-v5" ||
-      validation.provenance.kind !== "profession-creative-validation-v5" ||
+      !("asepriteProjects" in validation.provenance) ||
       sha256JcsV1(validation.provenance.source) !==
         sha256JcsV1(projects.provenance.source) ||
-      sha256JcsV1(validation.provenance.referenceTransferQuality) !==
-        sha256JcsV1(projects.provenance.referenceTransferQuality) ||
       validation.provenance.asepriteProjects.artifactId !==
         projects.artifact.id ||
       validation.provenance.asepriteProjects.sha256 !==
@@ -168,13 +189,45 @@ export function resolveStylePackageSkillInputs(
     ) {
       return undefined;
     }
-    skills.push({
+    const common = {
       skillId: production.skillId,
       sourceSha256: projects.provenance.source.sourceSha256,
       promptSha256: production.promptSha256.toUpperCase(),
       productionAttempt: production.attempt,
       projectBundle: artifactSummary(projects.artifact),
       validationBundle: artifactSummary(validation.artifact),
+    };
+    if (production.productionContractVersion === 5) {
+      if (
+        projects.provenance.kind !== "profession-creative-projects-v5" ||
+        validation.provenance.kind !== "profession-creative-validation-v5" ||
+        sha256JcsV1(validation.provenance.referenceTransferQuality) !==
+          sha256JcsV1(projects.provenance.referenceTransferQuality)
+      ) {
+        return undefined;
+      }
+      skills.push({ productionContractVersion: 5, ...common });
+      continue;
+    }
+    if (
+      projects.provenance.kind !== "profession-target-projects-v6" ||
+      validation.provenance.kind !== "profession-target-validation-v6" ||
+      sha256JcsV1(validation.provenance.targetFrameManifest) !==
+        sha256JcsV1(projects.provenance.targetFrameManifest) ||
+      sha256JcsV1(validation.provenance.targetSet) !==
+        sha256JcsV1(projects.provenance.targetSet)
+    ) {
+      return undefined;
+    }
+    skills.push({
+      productionContractVersion: 6,
+      ...common,
+      targetFrameManifest: {
+        artifactId: production.targetFrameManifestArtifactId,
+        sha256: production.targetFrameManifestSha256.toUpperCase(),
+      },
+      targetSetSha256: production.targetSetSha256.toUpperCase(),
+      targetFrameCount: production.targetFrameCount,
     });
   }
   return skills;
@@ -206,8 +259,6 @@ function orderCompleteProductions(
       !row.leaseId ||
       row.attempt === null ||
       row.attempt < 1 ||
-      !row.imageAttemptId ||
-      row.asepriteProfileId !== "aseprite-cli" ||
       !row.asepriteBinarySha256 ||
       !row.asepriteAdapterSha256 ||
       !row.asepriteArtifactId ||
@@ -217,6 +268,21 @@ function orderCompleteProductions(
     ) {
       return undefined;
     }
+    const v5Complete =
+      row.productionContractVersion === 5 &&
+      row.imageAttemptId !== null &&
+      row.asepriteProfileId === "aseprite-cli";
+    const v6Complete =
+      row.productionContractVersion === 6 &&
+      row.imageAttemptId === null &&
+      row.targetFrameManifestArtifactId !== null &&
+      row.targetFrameManifestSha256 !== null &&
+      row.targetSetSha256 !== null &&
+      row.targetFrameCount !== null &&
+      row.targetFrameCount >= 1 &&
+      row.targetFrameCount <= 2_048 &&
+      row.asepriteProfileId === "aseprite-cli-v6";
+    if (!v5Complete && !v6Complete) return undefined;
     const roleArtifactIds = [row.asepriteArtifactId, row.validationArtifactId];
     const roleUploadIds = [row.asepriteUploadId, row.validationUploadId];
     if (
@@ -228,21 +294,7 @@ function orderCompleteProductions(
     roleArtifactIds.forEach((id) => artifactIds.add(id));
     roleUploadIds.forEach((id) => uploadIds.add(id));
     producingJobIds.add(row.jobId);
-    ordered.push({
-      ...row,
-      jobId: row.jobId,
-      workerId: row.workerId,
-      leaseId: row.leaseId,
-      attempt: row.attempt,
-      imageAttemptId: row.imageAttemptId,
-      asepriteProfileId: "aseprite-cli",
-      asepriteBinarySha256: row.asepriteBinarySha256,
-      asepriteAdapterSha256: row.asepriteAdapterSha256,
-      asepriteArtifactId: row.asepriteArtifactId,
-      asepriteUploadId: row.asepriteUploadId,
-      validationArtifactId: row.validationArtifactId,
-      validationUploadId: row.validationUploadId,
-    });
+    ordered.push(row as CompleteProduction);
   }
   return producingJobIds.size === 1 ? ordered : undefined;
 }
@@ -257,7 +309,7 @@ function resolveFinalizedRole(
 ):
   | {
       artifact: StylePackageArtifactEvidenceRow;
-      provenance: PackageOutputProvenance;
+      provenance: PackageOutputProvenance | PackageV6OutputProvenance;
     }
   | undefined {
   if (!artifact || !upload) return undefined;
@@ -266,9 +318,13 @@ function resolveFinalizedRole(
   const uploadProvenance =
     currentProfessionSkillOutputProvenanceSchema.safeParse(upload.provenance);
   const expectedKind =
-    role === "projects"
-      ? "profession-creative-projects-v5"
-      : "profession-creative-validation-v5";
+    production.productionContractVersion === 6
+      ? role === "projects"
+        ? "profession-target-projects-v6"
+        : "profession-target-validation-v6"
+      : role === "projects"
+        ? "profession-creative-projects-v5"
+        : "profession-creative-validation-v5";
   const expectedName =
     role === "projects"
       ? "profession-aseprite-projects.zip"
@@ -317,21 +373,35 @@ function resolveFinalizedRole(
 
 /** 将严格 provenance 与 production 中保存的来源、attempt 和 Aseprite 工具身份交叉核对。 */
 function matchesProductionIdentity(
-  provenance: CurrentProfessionSkillOutputProvenance,
+  provenance: PackageOutputProvenance | PackageV6OutputProvenance,
   production: CompleteProduction,
 ): boolean {
-  return (
+  const common =
     provenance.jobId === production.jobId &&
     provenance.attempt === production.attempt &&
     provenance.skillId === production.skillId &&
     provenance.source.runId === production.sourceRunId &&
     provenance.source.frameManifestArtifactId ===
       production.sourceFrameManifestArtifactId &&
-    provenance.referenceImage.imageAttemptId === production.imageAttemptId &&
     provenance.aseprite.binarySha256 ===
       production.asepriteBinarySha256.toUpperCase() &&
     provenance.aseprite.adapterSha256 ===
-      production.asepriteAdapterSha256.toUpperCase()
+      production.asepriteAdapterSha256.toUpperCase();
+  if (!common) return false;
+  if (production.productionContractVersion === 5) {
+    return (
+      "referenceImage" in provenance &&
+      provenance.referenceImage.imageAttemptId === production.imageAttemptId
+    );
+  }
+  return (
+    "targetFrameManifest" in provenance &&
+    provenance.targetFrameManifest.artifactId ===
+      production.targetFrameManifestArtifactId &&
+    provenance.targetFrameManifest.sha256 ===
+      production.targetFrameManifestSha256.toUpperCase() &&
+    provenance.targetSet.sha256 === production.targetSetSha256.toUpperCase() &&
+    provenance.targetSet.targetFrameCount === production.targetFrameCount
   );
 }
 

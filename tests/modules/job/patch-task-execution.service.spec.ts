@@ -77,6 +77,7 @@ describe("PatchTaskService worker-facing execution", () => {
         attempt: 2,
         skillId: crypto.randomUUID(),
         status: "passed",
+        productionContractVersion: 5,
         asepriteBinarySha256: "A".repeat(64),
         asepriteAdapterSha256: "B".repeat(64),
         asepriteArtifactId: crypto.randomUUID(),

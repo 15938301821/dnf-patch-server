@@ -11,7 +11,10 @@ import { sha256JcsV1 } from "../../../src/common/utils/canonical.js";
 import { PatchTaskService } from "../../../src/modules/job/patch-task.service.js";
 import type { StyleBuildContext } from "../../../src/modules/profession/profession.contracts.js";
 import { createRunSchema } from "../../../src/modules/run/run.contracts.js";
-import { styleSkillProductionJobPayloadV2Schema } from "../../../src/modules/job/style-skill-production.contracts.js";
+import {
+  styleSkillProductionJobPayloadV2Schema,
+  styleSkillProductionJobPayloadV3Schema,
+} from "../../../src/modules/job/style-skill-production.contracts.js";
 import { stylePackageProductionJobPayloadV3Schema } from "../../../src/modules/job/style-package-production.contracts.js";
 
 const professionId = "11111111-1111-4111-8111-111111111111";
@@ -217,6 +220,56 @@ describe("PatchTaskService", () => {
     );
     expect(payload.profileId).toBe("aseprite-production-v1");
     expect(createInput.policyId).toBe("policy-v3");
+  });
+
+  it("freezes the V3 target-frame policy for profession contract v2", async () => {
+    factories.get.mockResolvedValue({
+      config: {
+        schemaVersion: 3,
+        policyId: "policy-v6",
+        policySha256: "C".repeat(64),
+        allowedJobKinds: ["profession", "npk-package"],
+        jobContracts: [
+          {
+            kind: "profession",
+            schemaVersion: 2,
+            profileId: "aseprite-production-v6",
+          },
+          {
+            kind: "npk-package",
+            schemaVersion: 1,
+            profileId: "npk-package-v3",
+          },
+        ],
+      },
+    });
+
+    await service.create(
+      { professionId, styleId },
+      idempotencyKey,
+      ownerUserId,
+    );
+
+    const createInput = createRunSchema.parse(
+      runs.create.mock.calls[0]?.[0] as unknown,
+    );
+    const payload = styleSkillProductionJobPayloadV3Schema.parse(
+      createInput.jobs[0]?.payload,
+    );
+    expect(payload).toMatchObject({
+      schemaVersion: 2,
+      profileId: "aseprite-production-v6",
+      parameters: {
+        workflow: "style-skill-production-v3",
+        targetFramePolicy: {
+          dimensions: "source-frame-exact",
+          alpha: "source-frame-exact",
+          hiddenFrames: "preserve-source",
+          linkFrames: "reuse-link-target",
+        },
+        toolProfiles: ["aseprite-cli-v6"],
+      },
+    });
   });
 
   it("persists an auditable blocked plan without dispatching it", async () => {

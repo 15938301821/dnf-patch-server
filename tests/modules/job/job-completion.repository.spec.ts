@@ -12,7 +12,10 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { DatabaseService } from "../../../src/common/db/database.service.js";
-import { sha256JcsV1, sha256Json } from "../../../src/common/utils/canonical.js";
+import {
+  sha256JcsV1,
+  sha256Json,
+} from "../../../src/common/utils/canonical.js";
 import {
   resolveProfessionCompletionEvidence,
   type ProfessionCompletionJobState,
@@ -298,6 +301,7 @@ function passedProduction(
   const skill = payload.parameters.promptPackage.skills[0];
   if (!skill) throw new Error("TEST_SKILL_REQUIRED");
   return {
+    productionContractVersion: 5,
     runId,
     professionId,
     styleId,
@@ -312,6 +316,10 @@ function passedProduction(
     promptSha256: skill.promptSha256,
     modelCallId: "99999999-9999-4999-8999-999999999999",
     imageAttemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    targetFrameManifestArtifactId: null,
+    targetFrameManifestSha256: null,
+    targetSetSha256: null,
+    targetFrameCount: null,
     asepriteProfileId: "aseprite-cli",
     asepriteBinarySha256: "1".repeat(64),
     asepriteAdapterSha256: "2".repeat(64),

@@ -104,13 +104,13 @@ describe("parseProfessionTargetFrameManifestBytes", () => {
 
 describe("assertProfessionTargetFrameManifestMatchesSource", () => {
   it("accepts a target whose frozen entry and every source frame field match", () => {
-    expect(() =>
+    expect(() => {
       assertProfessionTargetFrameManifestMatchesSource(
         validManifest(),
         sourceManifest(),
         [{ sourceMetadataSha256: "E".repeat(64) }],
-      ),
-    ).not.toThrow();
+      );
+    }).not.toThrow();
   });
 
   it("rejects target geometry or BGRA evidence drift from the source manifest", () => {
@@ -119,23 +119,23 @@ describe("assertProfessionTargetFrameManifestMatchesSource", () => {
     if (!frame) throw new Error("TEST_FRAME_REQUIRED");
     frame.canvasWidth += 1;
 
-    expect(() =>
+    expect(() => {
       assertProfessionTargetFrameManifestMatchesSource(
         target,
         sourceManifest(),
         [{ sourceMetadataSha256: "E".repeat(64) }],
-      ),
-    ).toThrow(ProfessionTargetFrameManifestError);
+      );
+    }).toThrow(ProfessionTargetFrameManifestError);
   });
 
   it("rejects an entry selected by path instead of the payload-frozen metadata digest", () => {
-    expect(() =>
+    expect(() => {
       assertProfessionTargetFrameManifestMatchesSource(
         validManifest(),
         sourceManifest(),
         [{ sourceMetadataSha256: "F".repeat(64) }],
-      ),
-    ).toThrow(ProfessionTargetFrameManifestError);
+      );
+    }).toThrow(ProfessionTargetFrameManifestError);
   });
 });
 

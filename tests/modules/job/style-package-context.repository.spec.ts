@@ -68,12 +68,14 @@ describe("StylePackageContextRepository.resolve", () => {
           skills: [
             {
               skillId: firstSkillId,
+              productionContractVersion: 5,
               productionAttempt: 1,
               projectBundle: { artifactId: firstProjectsId },
               validationBundle: { artifactId: firstValidationId },
             },
             {
               skillId: secondSkillId,
+              productionContractVersion: 5,
               productionAttempt: 3,
               projectBundle: { artifactId: secondProjectsId },
               validationBundle: { artifactId: secondValidationId },
@@ -319,6 +321,7 @@ function validProductions(): ProductionFixture[] {
   return [
     {
       skillId: firstSkillId,
+      productionContractVersion: 5,
       professionId,
       styleId,
       jobId: productionJobId,
@@ -329,6 +332,10 @@ function validProductions(): ProductionFixture[] {
       sourceFrameManifestArtifactId: "12345678-1234-4234-8234-123456789abc",
       promptSha256: "4".repeat(64),
       imageAttemptId: "3456789a-3456-4456-8456-3456789abcde",
+      targetFrameManifestArtifactId: null,
+      targetFrameManifestSha256: null,
+      targetSetSha256: null,
+      targetFrameCount: null,
       asepriteProfileId: "aseprite-cli",
       asepriteBinarySha256: "F".repeat(64),
       asepriteAdapterSha256: "0".repeat(64),
@@ -342,6 +349,7 @@ function validProductions(): ProductionFixture[] {
     },
     {
       skillId: secondSkillId,
+      productionContractVersion: 5,
       professionId,
       styleId,
       jobId: productionJobId,
@@ -352,6 +360,10 @@ function validProductions(): ProductionFixture[] {
       sourceFrameManifestArtifactId: "12345678-1234-4234-8234-123456789abc",
       promptSha256: "5".repeat(64),
       imageAttemptId: "3456789a-3456-4456-8456-3456789abcde",
+      targetFrameManifestArtifactId: null,
+      targetFrameManifestSha256: null,
+      targetSetSha256: null,
+      targetFrameCount: null,
       asepriteProfileId: "aseprite-cli",
       asepriteBinarySha256: "F".repeat(64),
       asepriteAdapterSha256: "0".repeat(64),

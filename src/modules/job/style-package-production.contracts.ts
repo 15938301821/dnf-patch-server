@@ -239,26 +239,61 @@ const packageInputArtifactV3Schema = z
   })
   .strict();
 
-/** 单个技能进入最终封包阶段的精确工程与验证证据。 */
-const stylePackageSkillInputV3Schema = z
+const stylePackageSkillInputFields = {
+  skillId: z.uuid(),
+  sourceSha256: sha256Schema,
+  promptSha256: sha256Schema,
+  productionAttempt: stylePackageAttemptV3Schema,
+  projectBundle: packageInputArtifactV3Schema,
+  validationBundle: packageInputArtifactV3Schema,
+};
+
+/** V5单参考生产进入最终封包阶段的双ZIP证据。 */
+const stylePackageSkillInputV5Schema = z
   .object({
-    skillId: z.uuid(),
-    sourceSha256: sha256Schema,
-    promptSha256: sha256Schema,
-    productionAttempt: stylePackageAttemptV3Schema,
-    projectBundle: packageInputArtifactV3Schema,
-    validationBundle: packageInputArtifactV3Schema,
+    productionContractVersion: z.literal(5),
+    ...stylePackageSkillInputFields,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (value.projectBundle.artifactId === value.validationBundle.artifactId) {
-      context.addIssue({
-        code: "custom",
-        path: ["validationBundle", "artifactId"],
-        message: "逐技能工程 ZIP 与验证 ZIP 必须使用不同 Artifact。",
-      });
-    }
-  });
+  .superRefine(validatePackageSkillArtifacts);
+
+/** V6逐帧生产进入最终封包阶段的双ZIP与target-set绑定。 */
+const stylePackageSkillInputV6Schema = z
+  .object({
+    productionContractVersion: z.literal(6),
+    ...stylePackageSkillInputFields,
+    targetFrameManifest: z
+      .object({
+        artifactId: z.uuid(),
+        sha256: sha256Schema,
+      })
+      .strict(),
+    targetSetSha256: sha256Schema,
+    targetFrameCount: z.number().int().min(1).max(2_048),
+  })
+  .strict()
+  .superRefine(validatePackageSkillArtifacts);
+
+const stylePackageSkillInputV3Schema = z.discriminatedUnion(
+  "productionContractVersion",
+  [stylePackageSkillInputV5Schema, stylePackageSkillInputV6Schema],
+);
+
+function validatePackageSkillArtifacts(
+  value: {
+    projectBundle: { artifactId: string };
+    validationBundle: { artifactId: string };
+  },
+  context: z.RefinementCtx,
+): void {
+  if (value.projectBundle.artifactId === value.validationBundle.artifactId) {
+    context.addIssue({
+      code: "custom",
+      path: ["validationBundle", "artifactId"],
+      message: "逐技能工程 ZIP 与验证 ZIP 必须使用不同 Artifact。",
+    });
+  }
+}
 
 /**
  * Server 交给当前 package attempt 的冻结上下文正文。

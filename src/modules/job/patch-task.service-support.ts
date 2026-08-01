@@ -17,7 +17,7 @@ import type {
   ResolveProfessionExecutionContextResult,
 } from "./profession-execution-context.js";
 import type { ProfessionProductionProgressView } from "./profession-production-progress.contracts.js";
-import type { StyleSkillProductionJobPayloadV2 } from "./style-skill-production.contracts.js";
+import type { StyleSkillProductionJobPayload } from "./style-skill-production.contracts.js";
 import {
   createStylePackageProductionJobPayloadV3,
   type StylePackageProductionJobPayloadV3,
@@ -90,7 +90,7 @@ export function createPatchTaskRunInput(
   context: StyleBuildContext,
   factoryConfig: RunnableFactoryConfig,
   idempotencyKey: string,
-  payload: StyleSkillProductionJobPayloadV2,
+  payload: StyleSkillProductionJobPayload,
   packagePayload: StylePackageProductionJobPayloadV3,
 ): CreateRunInput {
   if (

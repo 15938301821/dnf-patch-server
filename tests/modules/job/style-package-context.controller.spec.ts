@@ -91,6 +91,7 @@ function validEnvelope(): StylePackageContextEnvelopeV3 {
     packageProfileSha256: sha256JcsV1(packageProfile),
     skills: [
       {
+        productionContractVersion: 5 as const,
         skillId: "77777777-7777-4777-8777-777777777777",
         sourceSha256: "3".repeat(64),
         promptSha256: "4".repeat(64),

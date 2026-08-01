@@ -13,6 +13,7 @@ import type {
   ModelCallView,
   StructuredModelRequest,
 } from "../../../src/modules/openai/openai.contracts.js";
+import type { OpenAiProviderPort } from "../../../src/modules/openai/openai.provider.js";
 import { OpenAiService } from "../../../src/modules/openai/openai.service.js";
 
 describe("OpenAiService model evidence", () => {
@@ -27,7 +28,7 @@ describe("OpenAiService model evidence", () => {
   const configurations = { resolve: vi.fn() };
   const provider = {
     structured: vi.fn(),
-    image: vi.fn(),
+    image: vi.fn<OpenAiProviderPort["image"]>(),
   };
   let service: OpenAiService;
 

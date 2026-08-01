@@ -96,6 +96,8 @@ export async function resolveStylePackageContextInTransaction(
   const productions = await transaction
     .select({
       skillId: styleSkillProductions.skillId,
+      productionContractVersion:
+        styleSkillProductions.productionContractVersion,
       professionId: styleSkillProductions.professionId,
       styleId: styleSkillProductions.styleId,
       jobId: styleSkillProductions.jobId,
@@ -107,6 +109,12 @@ export async function resolveStylePackageContextInTransaction(
         styleSkillProductions.sourceFrameManifestArtifactId,
       promptSha256: styleSkillProductions.promptSha256,
       imageAttemptId: styleSkillProductions.imageAttemptId,
+      targetFrameManifestArtifactId:
+        styleSkillProductions.targetFrameManifestArtifactId,
+      targetFrameManifestSha256:
+        styleSkillProductions.targetFrameManifestSha256,
+      targetSetSha256: styleSkillProductions.targetSetSha256,
+      targetFrameCount: styleSkillProductions.targetFrameCount,
       asepriteProfileId: styleSkillProductions.asepriteProfileId,
       asepriteBinarySha256: styleSkillProductions.asepriteBinarySha256,
       asepriteAdapterSha256: styleSkillProductions.asepriteAdapterSha256,

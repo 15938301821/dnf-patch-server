@@ -14,7 +14,11 @@
  */
 import { randomUUID } from "node:crypto";
 import type { professionSkillFrameTargets } from "../../common/db/profession-frame-target-schema.js";
-import type { ProfessionTargetFramePreparationView } from "./profession-target-frame-prepare.contracts.js";
+import type {
+  PrepareProfessionTargetFramesInput,
+  ProfessionTargetFrameManifestProvenance,
+  ProfessionTargetFramePreparationView,
+} from "./profession-target-frame-prepare.contracts.js";
 import type { ProfessionTargetFrameManifest } from "./profession-target-frame-manifest.js";
 
 type TargetFrameInsert = typeof professionSkillFrameTargets.$inferInsert;
@@ -78,6 +82,39 @@ export interface PreparedProfessionTargetFrameExpectation extends Omit<
   frameCount: number;
   targetFrameCount: number;
   targetPixelCount: number;
+}
+
+/** target manifest 的固定逻辑名；Worker 上传和 Repository 复核必须使用同一规则。 */
+export function professionTargetFrameManifestLogicalName(
+  skillId: string,
+): string {
+  return `profession-target-frame-manifest-${skillId}.json`;
+}
+
+/** 比较上传 provenance 与当前锁内 Job/skill/source 身份；正文摘要和计数由 parser/commit 复核。 */
+export function matchesProfessionTargetFrameProvenance(
+  provenance: ProfessionTargetFrameManifestProvenance,
+  jobId: string,
+  runId: string,
+  jobPayloadSha256: string,
+  input: PrepareProfessionTargetFramesInput,
+  source: {
+    sourceRunId: string;
+    sourceInventoryId: string;
+    sourceFrameManifestArtifactId: string;
+  },
+): boolean {
+  return (
+    provenance.jobId === jobId &&
+    provenance.runId === runId &&
+    provenance.jobPayloadSha256 === jobPayloadSha256.toUpperCase() &&
+    provenance.attempt === input.attempt &&
+    provenance.skillId === input.skillId &&
+    provenance.sourceRunId === source.sourceRunId &&
+    provenance.sourceInventoryId === source.sourceInventoryId &&
+    provenance.sourceFrameManifestArtifactId ===
+      source.sourceFrameManifestArtifactId
+  );
 }
 
 /**
@@ -241,8 +278,7 @@ function topologicallyOrderTargetRows(
     let progressed = false;
     for (const row of remaining) {
       const targetKey =
-        row.linkTargetFrameIndex === null ||
-        row.linkTargetFrameIndex === undefined
+        row.linkTargetFrameIndex === null
           ? undefined
           : frameKey(row.entryIndex, row.linkTargetFrameIndex);
       if (targetKey !== undefined && !inserted.has(targetKey)) {
@@ -262,5 +298,5 @@ function topologicallyOrderTargetRows(
 }
 
 function frameKey(entryIndex: number, frameIndex: number): string {
-  return `${entryIndex}:${frameIndex}`;
+  return [entryIndex, frameIndex].join(":");
 }

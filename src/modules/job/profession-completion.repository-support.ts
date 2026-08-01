@@ -41,6 +41,8 @@ export async function resolveProfessionCompletionInTransaction(
       professionId: styleSkillProductions.professionId,
       styleId: styleSkillProductions.styleId,
       skillId: styleSkillProductions.skillId,
+      productionContractVersion:
+        styleSkillProductions.productionContractVersion,
       jobId: styleSkillProductions.jobId,
       workerId: styleSkillProductions.workerId,
       leaseId: styleSkillProductions.leaseId,
@@ -51,6 +53,12 @@ export async function resolveProfessionCompletionInTransaction(
       promptSha256: styleSkillProductions.promptSha256,
       modelCallId: styleSkillProductions.modelCallId,
       imageAttemptId: styleSkillProductions.imageAttemptId,
+      targetFrameManifestArtifactId:
+        styleSkillProductions.targetFrameManifestArtifactId,
+      targetFrameManifestSha256:
+        styleSkillProductions.targetFrameManifestSha256,
+      targetSetSha256: styleSkillProductions.targetSetSha256,
+      targetFrameCount: styleSkillProductions.targetFrameCount,
       asepriteProfileId: styleSkillProductions.asepriteProfileId,
       asepriteBinarySha256: styleSkillProductions.asepriteBinarySha256,
       asepriteAdapterSha256: styleSkillProductions.asepriteAdapterSha256,

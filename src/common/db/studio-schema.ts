@@ -284,6 +284,12 @@ export const styleSkillProductions = mysqlTable(
   "style_skill_productions",
   {
     id: id("id").primaryKey(),
+    /** 历史行默认V5；V6创建时显式写6，终态事务不得跨版本复用证据。 */
+    productionContractVersion: int("production_contract_version", {
+      unsigned: true,
+    })
+      .notNull()
+      .default(5),
     professionId: id("profession_id").notNull(),
     styleId: id("style_id").notNull(),
     skillId: id("skill_id").notNull(),
@@ -307,6 +313,11 @@ export const styleSkillProductions = mysqlTable(
     promptSha256: sha256("prompt_sha256").notNull(),
     modelCallId: id("model_call_id"),
     imageAttemptId: id("image_attempt_id"),
+    /** V6当前attempt的target manifest与完整generate帧集合摘要；V5必须保持为空。 */
+    targetFrameManifestArtifactId: id("target_frame_manifest_artifact_id"),
+    targetFrameManifestSha256: sha256("target_frame_manifest_sha256"),
+    targetSetSha256: sha256("target_set_sha256"),
+    targetFrameCount: int("target_frame_count", { unsigned: true }),
     /** Worker 已登记的固定工具 profile；不能来自任意可执行路径。 */
     asepriteProfileId: varchar("aseprite_profile_id", { length: 128 }),
     asepriteBinarySha256: sha256("aseprite_binary_sha256"),
@@ -333,12 +344,16 @@ export const styleSkillProductions = mysqlTable(
       sql`${table.status} in ('planned', 'generating', 'adapting', 'validating', 'passed', 'failed', 'blocked')`,
     ),
     check(
+      "style_skill_productions_contract_version_ck",
+      sql`${table.productionContractVersion} in (5, 6)`,
+    ),
+    check(
       "style_skill_productions_finished_ck",
       sql`(${table.status} in ('passed', 'failed', 'blocked') and ${table.finishedAt} is not null) or (${table.status} not in ('passed', 'failed', 'blocked') and ${table.finishedAt} is null)`,
     ),
     check(
       "style_skill_productions_passed_evidence_ck",
-      sql`${table.status} <> 'passed' or (${table.jobId} is not null and ${table.workerId} is not null and ${table.leaseId} is not null and ${table.attempt} is not null and ${table.modelCallId} is not null and ${table.imageAttemptId} is not null and ${table.asepriteProfileId} is not null and ${table.asepriteBinarySha256} is not null and ${table.asepriteAdapterSha256} is not null and ${table.asepriteArtifactId} is not null and ${table.asepriteUploadId} is not null and ${table.validationArtifactId} is not null and ${table.validationUploadId} is not null and ${table.errorCode} is null)`,
+      sql`${table.status} <> 'passed' or (${table.jobId} is not null and ${table.workerId} is not null and ${table.leaseId} is not null and ${table.attempt} is not null and ${table.asepriteProfileId} is not null and ${table.asepriteBinarySha256} is not null and ${table.asepriteAdapterSha256} is not null and ${table.asepriteArtifactId} is not null and ${table.asepriteUploadId} is not null and ${table.validationArtifactId} is not null and ${table.validationUploadId} is not null and ${table.errorCode} is null and ((${table.productionContractVersion} = 5 and ${table.modelCallId} is not null and ${table.imageAttemptId} is not null and ${table.targetFrameManifestArtifactId} is null and ${table.targetFrameManifestSha256} is null and ${table.targetSetSha256} is null and ${table.targetFrameCount} is null) or (${table.productionContractVersion} = 6 and ${table.modelCallId} is null and ${table.imageAttemptId} is null and ${table.targetFrameManifestArtifactId} is not null and ${table.targetFrameManifestSha256} is not null and ${table.targetSetSha256} is not null and ${table.targetFrameCount} between 1 and 2048)))`,
     ),
     check(
       "style_skill_productions_error_evidence_ck",
@@ -391,6 +406,11 @@ export const styleSkillProductions = mysqlTable(
       columns: [table.sourceRunId, table.sourceFrameManifestArtifactId],
       foreignColumns: [artifacts.runId, artifacts.id],
       name: "style_skill_productions_source_artifact_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.targetFrameManifestArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "style_skill_productions_target_manifest_artifact_run_fk",
     }).onDelete("restrict"),
     foreignKey({
       columns: [table.runId, table.asepriteArtifactId],

@@ -1,5 +1,4 @@
-/** @fileoverview 使用窄端口 mock 验证 Artist 模型出站、对象持久化和幂等恢复顺序。
- */
+/** @fileoverview 使用窄端口 mock 验证 Artist 模型出站、对象持久化和幂等恢复顺序。 */
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";

@@ -6,8 +6,7 @@
  * @relatedPlan /memories/session/plan.md Phase 2 model evidence
  */
 import { Inject, Injectable } from "@nestjs/common";
-import { createHash, randomUUID } from "node:crypto";
-import sharp from "sharp";
+import { randomUUID } from "node:crypto";
 import { sha256Json } from "../../common/utils/canonical.js";
 import { resolveOpenAiEndpoint } from "../../config/openai-endpoint.js";
 import type {
@@ -20,7 +19,6 @@ import { RunService } from "../run/run.service.js";
 import type {
   ImageModelRequest,
   ImageModelResult,
-  ModelImageInput,
   ModelEgressGuard,
   ModelCallView,
   ModelRole,
@@ -33,6 +31,15 @@ import {
   type OpenAiProviderPort,
 } from "./openai.provider.js";
 import {
+  decodedPngDimensions,
+  imageIdentities,
+  imageIdentity,
+  sha256Bytes,
+  targetFramePrompt,
+  verifiedImage,
+  verifiedImages,
+} from "./openai-image-call.support.js";
+import {
   createImageTargetGeometry,
   legacyRequestedImageCanvas,
   selectRequestedImageCanvas,
@@ -43,64 +50,11 @@ import {
   type OpenAiRepositoryPort,
 } from "./openai.repository.js";
 
-const maximumModelImageBytes = 64 * 1024 * 1024;
-const maximumModelImagePixels = 16 * 1024 * 1024;
-const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-
 interface ModelConfigurationLookupPort {
   resolve(
     userId: string,
     role: ConfigurationRole,
   ): ReturnType<ModelConfigurationService["resolve"]>;
-}
-
-function verifiedImages(
-  images: readonly ModelImageInput[],
-): readonly ModelImageInput[] {
-  if (images.length < 1 || images.length > 2) {
-    throw new Error("MODEL_IMAGE_INPUT_COUNT_INVALID");
-  }
-  const verified = images.map(verifiedImage);
-  if (new Set(verified.map((image) => image.role)).size !== verified.length) {
-    throw new Error("MODEL_IMAGE_INPUT_ROLE_DUPLICATED");
-  }
-  return verified;
-}
-
-function verifiedImage(image: ModelImageInput): ModelImageInput {
-  const bytes = Buffer.from(image.bytes);
-  if (
-    bytes.byteLength <= 0 ||
-    bytes.byteLength > maximumModelImageBytes ||
-    bytes.byteLength < pngSignature.byteLength ||
-    !bytes.subarray(0, pngSignature.byteLength).equals(pngSignature) ||
-    !/^[A-F0-9]{64}$/u.test(image.sha256) ||
-    sha256Bytes(bytes) !== image.sha256
-  ) {
-    throw new Error("MODEL_IMAGE_INPUT_INVALID");
-  }
-  return { ...image, bytes };
-}
-
-function imageIdentities(
-  images: readonly ModelImageInput[],
-): readonly ReturnType<typeof imageIdentity>[] {
-  return verifiedImages(images).map(imageIdentity);
-}
-
-function imageIdentity(image: ModelImageInput): {
-  role: ModelImageInput["role"];
-  mediaType: "image/png";
-  byteLength: number;
-  sha256: string;
-} {
-  const verified = verifiedImage(image);
-  return {
-    role: verified.role,
-    mediaType: verified.mediaType,
-    byteLength: verified.bytes.byteLength,
-    sha256: verified.sha256,
-  };
 }
 
 interface RunLookupPort {
@@ -479,43 +433,6 @@ function configurationRoleFor(role: ModelRole): ConfigurationRole {
     : role === "engineer"
       ? "spriteProcessor"
       : "referenceGenerator";
-}
-
-function sha256Bytes(value: Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex").toUpperCase();
-}
-
-/**
- * 向 V6 固定业务 Prompt 附加机器可审计的几何要求；调用方不能覆盖该段来请求任意画布行为。
- * Provider 原始输出仍是不可信候选，后续正规化器会验证透明区域和官方 Alpha，而非相信文本遵循度。
- */
-function targetFramePrompt(
-  prompt: string,
-  targetWidth: number,
-  targetHeight: number,
-): string {
-  return `${prompt}\n\nV6 target canvas contract: keep all visible artwork inside the largest centered rectangle whose exact aspect ratio is ${targetWidth}:${targetHeight}. Every pixel outside that rectangle must be fully transparent. Do not stretch the artwork. Return a transparent PNG.`;
-}
-
-/** 从真实 PNG 解析实际 Provider 画布，不能用请求值伪造返回尺寸。 */
-async function decodedPngDimensions(
-  bytes: Uint8Array,
-): Promise<{ width: number; height: number }> {
-  const metadata = await sharp(Buffer.from(bytes), {
-    failOn: "warning",
-    limitInputPixels: maximumModelImagePixels,
-    sequentialRead: true,
-  }).metadata();
-  if (
-    metadata.format !== "png" ||
-    !Number.isSafeInteger(metadata.width) ||
-    !Number.isSafeInteger(metadata.height) ||
-    !metadata.width ||
-    !metadata.height
-  ) {
-    throw new Error("IMAGE_PAYLOAD_DIMENSIONS_INVALID");
-  }
-  return { width: metadata.width, height: metadata.height };
 }
 
 /**

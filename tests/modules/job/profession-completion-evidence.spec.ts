@@ -10,7 +10,10 @@
  * 真实事务锁、外键、对象 finalize 与数据库时间仍需 Repository/MySQL 验证。
  */
 import { describe, expect, it } from "vitest";
-import { sha256JcsV1, sha256Json } from "../../../src/common/utils/canonical.js";
+import {
+  sha256JcsV1,
+  sha256Json,
+} from "../../../src/common/utils/canonical.js";
 import {
   resolveProfessionCompletionEvidence,
   type ProfessionCompletionArtifactRow,
@@ -20,6 +23,7 @@ import {
 import {
   createStyleSkillPromptComposition,
   type StyleSkillProductionJobPayloadV2,
+  styleSkillProductionJobPayloadV3Schema,
 } from "../../../src/modules/job/style-skill-production.contracts.js";
 
 const jobId = uuid(1);
@@ -30,6 +34,62 @@ const workerId = uuid(5);
 const skillIds = [uuid(10), uuid(20)] as const;
 
 describe("resolveProfessionCompletionEvidence", () => {
+  it("accepts V6 planned productions on the first progress read", () => {
+    const fixture = evidenceFixture();
+    const payload = styleSkillProductionJobPayloadV3Schema.parse({
+      schemaVersion: 2,
+      profileId: "aseprite-production-v6",
+      parameters: {
+        ...validPayload().parameters,
+        workflow: "style-skill-production-v3",
+        targetFramePolicy: {
+          schemaVersion: 1,
+          dimensions: "source-frame-exact",
+          alpha: "source-frame-exact",
+          hiddenFrames: "preserve-source",
+          linkFrames: "reuse-link-target",
+          maximumTargetFrameCount: 2_048,
+          maximumTargetPixelCount: 134_217_728,
+        },
+        toolProfiles: ["aseprite-cli-v6"],
+      },
+    });
+    const productions = fixture.productions.map((production) => ({
+      ...production,
+      productionContractVersion: 6,
+      status: "planned",
+      jobId: null,
+      workerId: null,
+      leaseId: null,
+      attempt: null,
+      modelCallId: null,
+      imageAttemptId: null,
+      asepriteProfileId: null,
+      asepriteBinarySha256: null,
+      asepriteAdapterSha256: null,
+      asepriteArtifactId: null,
+      validationArtifactId: null,
+    }));
+
+    expect(
+      resolveProfessionCompletionEvidence(
+        {
+          ...fixture.job,
+          payload,
+          payloadSha256: sha256Json(payload),
+        },
+        productions,
+        [],
+      ),
+    ).toEqual({
+      status: "accepted",
+      progress: {
+        schemaVersion: 1,
+        skills: skillIds.map((skillId) => ({ skillId, status: "pending" })),
+      },
+    });
+  });
+
   it("returns frozen order without a result while any skill is pending", () => {
     const fixture = evidenceFixture();
     fixture.productions[1] = {
@@ -163,6 +223,7 @@ function evidenceFixture(): {
   const payload = validPayload();
   const productions = payload.parameters.promptPackage.skills.map(
     (skill, index): ProfessionProductionEvidenceRow => ({
+      productionContractVersion: 5,
       runId,
       professionId,
       styleId,
@@ -177,6 +238,10 @@ function evidenceFixture(): {
       promptSha256: skill.promptSha256,
       modelCallId: uuid(40 + index),
       imageAttemptId: uuid(50 + index),
+      targetFrameManifestArtifactId: null,
+      targetFrameManifestSha256: null,
+      targetSetSha256: null,
+      targetFrameCount: null,
       asepriteProfileId: "aseprite-cli",
       asepriteBinarySha256: "A".repeat(64),
       asepriteAdapterSha256: "B".repeat(64),

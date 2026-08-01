@@ -71,6 +71,66 @@ export const professionTargetFramePreparationViewSchema = z
   })
   .strict();
 
+/** Worker 为单个 `generate-same-size` target 登记 finalized 官方 PNG 时提交的严格声明。 */
+export const registerProfessionTargetFrameSourceSchema =
+  professionSkillLeaseSchema
+    .extend({
+      skillId: z.uuid(),
+      entryIndex: z.number().int().min(0).max(999_999),
+      frameIndex: z.number().int().min(0).max(999_999),
+      sourceArtifactId: z.uuid(),
+      sourceMediaType: z.literal("image/png"),
+      sourceByteLength: z
+        .number()
+        .int()
+        .positive()
+        .max(64 * 1024 * 1024),
+      sourceSha256: sha256Schema,
+    })
+    .strict();
+
+/**
+ * 官方逐帧 PNG 上传会话与 Artifact 共用的 provenance。
+ * 几何和两个源摘要必须与已 prepared target 行完全一致；PNG 只是模型输入载体，不能改变官方事实。
+ */
+export const professionTargetFrameSourceProvenanceSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    kind: z.literal("profession-target-frame-source-v1"),
+    jobId: z.uuid(),
+    runId: z.uuid(),
+    jobPayloadSha256: sha256Schema,
+    attempt: z.number().int().min(1).max(10),
+    skillId: z.uuid(),
+    entryIndex: z.number().int().min(0).max(999_999),
+    frameIndex: z.number().int().min(0).max(999_999),
+    width: z.number().int().positive().max(1_000_000),
+    height: z.number().int().positive().max(1_000_000),
+    sourceDecodedBgraSha256: sha256Schema,
+    sourceAlphaSha256: sha256Schema,
+    targetPolicy: z.literal("generate-same-size"),
+    deploymentAuthorized: z.literal(false),
+  })
+  .strict();
+
+/** 单帧官方 PNG 首次登记或同证据幂等重报后的脱敏回执。 */
+export const professionTargetFrameSourceViewSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    status: z.literal("registered"),
+    skillId: z.uuid(),
+    entryIndex: z.number().int().min(0).max(999_999),
+    frameIndex: z.number().int().min(0).max(999_999),
+    sourceArtifactId: z.uuid(),
+    sourceByteLength: z
+      .number()
+      .int()
+      .positive()
+      .max(64 * 1024 * 1024),
+    sourceSha256: sha256Schema,
+  })
+  .strict();
+
 /** Controller 解析后的 exact lease 与 target manifest Artifact 声明。 */
 export type PrepareProfessionTargetFramesInput = z.infer<
   typeof prepareProfessionTargetFramesSchema
@@ -84,4 +144,19 @@ export type ProfessionTargetFramePreparationView = z.infer<
 /** Repository 从数据库 JSON 再次解析后使用的 manifest provenance。 */
 export type ProfessionTargetFrameManifestProvenance = z.infer<
   typeof professionTargetFrameManifestProvenanceSchema
+>;
+
+/** Controller 解析后的单帧官方 PNG finalized Artifact 声明。 */
+export type RegisterProfessionTargetFrameSourceInput = z.infer<
+  typeof registerProfessionTargetFrameSourceSchema
+>;
+
+/** Artifact 授权、finalize 与登记事务必须共享的官方帧 PNG provenance。 */
+export type ProfessionTargetFrameSourceProvenance = z.infer<
+  typeof professionTargetFrameSourceProvenanceSchema
+>;
+
+/** Worker 可依赖的单帧输入冻结回执；不含对象 key 或模型配置。 */
+export type ProfessionTargetFrameSourceView = z.infer<
+  typeof professionTargetFrameSourceViewSchema
 >;

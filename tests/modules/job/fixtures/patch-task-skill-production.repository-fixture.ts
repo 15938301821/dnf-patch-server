@@ -65,6 +65,7 @@ export function createSkillProductionReportHarness(
     attempt: scenario === "old-attempt" ? 1 : 2,
     skillId: skillProductionFixture.skillId,
     status: "passed",
+    productionContractVersion: 5,
     asepriteBinarySha256: "1".repeat(64),
     asepriteAdapterSha256: "2".repeat(64),
     asepriteArtifactId: skillProductionFixture.projectsArtifactId,
@@ -153,6 +154,7 @@ function production(
   const skill = requiredSkill(payload);
   return {
     id: "40404040-4040-4040-8040-404040404040",
+    productionContractVersion: 5,
     professionId: skillProductionFixture.professionId,
     styleId: skillProductionFixture.styleId,
     skillId: skillProductionFixture.skillId,
@@ -214,7 +216,7 @@ function modelExecution(
   };
 }
 
-function sourceEvidenceRow(): Record<string, unknown> {
+export function sourceEvidenceRow(): Record<string, unknown> {
   return {
     runId: skillProductionFixture.sourceRunId,
     inventoryId: skillProductionFixture.sourceInventoryId,
@@ -278,7 +280,7 @@ function resultPreviewUploadRow(): Record<string, unknown> {
   );
 }
 
-function uploadRow(
+export function uploadRow(
   uploadId: string,
   artifactId: string,
   logicalName: string,
@@ -323,7 +325,7 @@ function requiredSkill(
   return skill;
 }
 
-function validPayload(): StyleSkillProductionJobPayloadV2 {
+export function validPayload(): StyleSkillProductionJobPayloadV2 {
   const themeDefinition = {
     schemaVersion: 1 as const,
     goal: "统一暗蓝剑气主题",

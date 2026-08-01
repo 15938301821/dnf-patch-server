@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  mapPatchTaskEvidenceProgress,
   mapPatchTaskProgress,
   mapPatchTaskStatus,
 } from "../../../src/modules/job/patch-task-status.js";
@@ -30,5 +31,37 @@ describe("mapPatchTaskStatus", () => {
     expect(mapPatchTaskStatus("passed", "building")).toBe("blocked");
     expect(mapPatchTaskProgress(2, 2, "passed", "queued")).toBe(90);
     expect(mapPatchTaskProgress(2, 2, "passed", "passed")).toBe(100);
+  });
+
+  it("counts a complete V6 manifest and source freeze as half of skill production", () => {
+    expect(
+      mapPatchTaskEvidenceProgress(
+        [
+          {
+            status: "blocked",
+            framePreparation: {
+              generationFrameCount: 211,
+              sourceFrameCount: 211,
+            },
+          },
+          {
+            status: "blocked",
+            framePreparation: {
+              generationFrameCount: 37,
+              sourceFrameCount: 37,
+            },
+          },
+          {
+            status: "blocked",
+            framePreparation: {
+              generationFrameCount: 4,
+              sourceFrameCount: 4,
+            },
+          },
+        ],
+        "blocked",
+        "blocked",
+      ),
+    ).toBe(45);
   });
 });

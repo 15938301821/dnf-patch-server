@@ -15,7 +15,18 @@
  */
 import { z } from "zod";
 import { sha256Json, sha256JcsV1 } from "../../common/utils/canonical.js";
-import { styleSkillProductionJobPayloadV2Schema } from "./style-skill-production.contracts.js";
+import {
+  styleSkillProductionJobPayloadV2Schema,
+  styleSkillProductionJobPayloadV3Schema,
+} from "./style-skill-production.contracts.js";
+
+const styleSkillProductionJobPayloadSchema = z.discriminatedUnion(
+  "schemaVersion",
+  [
+    styleSkillProductionJobPayloadV2Schema,
+    styleSkillProductionJobPayloadV3Schema,
+  ],
+);
 
 const sha256Schema = z.string().regex(/^[A-Fa-f0-9]{64}$/u);
 const productionStatusSchema = z.enum([
@@ -39,6 +50,7 @@ export interface ProfessionCompletionJobState {
 
 /** 单技能生产行中用于复核冻结上下文和终态证据的有限字段。 */
 export interface ProfessionProductionEvidenceRow {
+  productionContractVersion: number;
   runId: string;
   professionId: string;
   styleId: string;
@@ -52,6 +64,10 @@ export interface ProfessionProductionEvidenceRow {
   promptSha256: string;
   modelCallId: string | null;
   imageAttemptId: string | null;
+  targetFrameManifestArtifactId: string | null;
+  targetFrameManifestSha256: string | null;
+  targetSetSha256: string | null;
+  targetFrameCount: number | null;
   asepriteProfileId: string | null;
   asepriteBinarySha256: string | null;
   asepriteAdapterSha256: string | null;
@@ -102,7 +118,7 @@ export function resolveProfessionCompletionEvidence(
   productions: readonly ProfessionProductionEvidenceRow[],
   artifactRows: readonly ProfessionCompletionArtifactRow[],
 ): ResolveProfessionCompletionEvidenceResult {
-  const payload = styleSkillProductionJobPayloadV2Schema.safeParse(job.payload);
+  const payload = styleSkillProductionJobPayloadSchema.safeParse(job.payload);
   if (
     job.kind !== "profession" ||
     !payload.success ||
@@ -143,6 +159,7 @@ export function resolveProfessionCompletionEvidence(
 
     const evidence = passedProductionEvidence(
       job,
+      payload.data.schemaVersion === 2 ? 6 : 5,
       frozen,
       production,
       artifactsById,
@@ -186,9 +203,9 @@ export function resolveProfessionCompletionEvidence(
 
 function matchesFrozenSkill(
   job: ProfessionCompletionJobState,
-  payload: z.infer<typeof styleSkillProductionJobPayloadV2Schema>,
+  payload: z.infer<typeof styleSkillProductionJobPayloadSchema>,
   frozen: z.infer<
-    typeof styleSkillProductionJobPayloadV2Schema
+    typeof styleSkillProductionJobPayloadSchema
   >["parameters"]["promptPackage"]["skills"][number],
   production: ProfessionProductionEvidenceRow,
 ): boolean {
@@ -215,22 +232,21 @@ function progressStatus(
 
 function passedProductionEvidence(
   job: ProfessionCompletionJobState,
+  expectedContractVersion: 5 | 6,
   frozen: z.infer<
-    typeof styleSkillProductionJobPayloadV2Schema
+    typeof styleSkillProductionJobPayloadSchema
   >["parameters"]["promptPackage"]["skills"][number],
   production: ProfessionProductionEvidenceRow,
   artifactsById: ReadonlyMap<string, ProfessionCompletionArtifactRow>,
   usedArtifactIds: Set<string>,
 ): Record<string, unknown> | undefined {
   if (
+    production.productionContractVersion !== expectedContractVersion ||
     production.jobId !== job.id ||
     !production.workerId ||
     !production.leaseId ||
     production.attempt === null ||
     production.attempt < 1 ||
-    !production.modelCallId ||
-    !production.imageAttemptId ||
-    production.asepriteProfileId !== "aseprite-cli" ||
     !production.asepriteBinarySha256 ||
     !production.asepriteAdapterSha256 ||
     !production.asepriteArtifactId ||
@@ -256,17 +272,15 @@ function passedProductionEvidence(
   }
   usedArtifactIds.add(projects.id);
   usedArtifactIds.add(validation.id);
-  return {
+  const common = {
     skillId: frozen.skillId,
     promptSha256: frozen.promptSha256.toUpperCase(),
     sourceRunId: frozen.sourceEvidence.sourceRunId,
     sourceFrameManifestArtifactId:
       frozen.sourceEvidence.sourceFrameManifestArtifactId,
     productionAttempt: production.attempt,
-    modelCallId: production.modelCallId,
-    imageAttemptId: production.imageAttemptId,
     aseprite: {
-      profileId: "aseprite-cli",
+      profileId: production.asepriteProfileId,
       binarySha256: production.asepriteBinarySha256.toUpperCase(),
       adapterSha256: production.asepriteAdapterSha256.toUpperCase(),
     },
@@ -278,5 +292,41 @@ function passedProductionEvidence(
       artifactId: validation.id,
       sha256: validation.sha256.toUpperCase(),
     },
+  };
+  if (expectedContractVersion === 6) {
+    if (
+      production.asepriteProfileId !== "aseprite-cli-v6" ||
+      !production.targetFrameManifestArtifactId ||
+      !production.targetFrameManifestSha256 ||
+      !production.targetSetSha256 ||
+      production.targetFrameCount === null ||
+      production.targetFrameCount < 1
+    ) {
+      return undefined;
+    }
+    return {
+      productionContractVersion: 6,
+      ...common,
+      targetFrameManifest: {
+        artifactId: production.targetFrameManifestArtifactId,
+        sha256: production.targetFrameManifestSha256.toUpperCase(),
+      },
+      targetSetSha256: production.targetSetSha256.toUpperCase(),
+      targetFrameCount: production.targetFrameCount,
+    };
+  }
+  if (
+    expectedContractVersion !== 5 ||
+    !production.modelCallId ||
+    !production.imageAttemptId ||
+    production.asepriteProfileId !== "aseprite-cli"
+  ) {
+    return undefined;
+  }
+  return {
+    productionContractVersion: 5,
+    ...common,
+    modelCallId: production.modelCallId,
+    imageAttemptId: production.imageAttemptId,
   };
 }

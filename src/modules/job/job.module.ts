@@ -34,6 +34,14 @@ import { ProfessionModelExecutionRepository } from "./profession-model-execution
 import { ProfessionSourceContextController } from "./profession-source-context.controller.js";
 import { ProfessionSourceContextRepository } from "./profession-source-context.repository.js";
 import { ProfessionSourceContextService } from "./profession-source-context.service.js";
+import { ProfessionTargetFramePrepareController } from "./profession-target-frame-prepare.controller.js";
+import { ProfessionTargetFramePrepareRepository } from "./profession-target-frame-prepare.repository.js";
+import { ProfessionTargetFramePrepareService } from "./profession-target-frame-prepare.service.js";
+import { ProfessionTargetFrameGenerationController } from "./profession-target-frame-generation.controller.js";
+import { ProfessionTargetFrameGenerationRepository } from "./profession-target-frame-generation.repository.js";
+import { ProfessionTargetFrameGenerationService } from "./profession-target-frame-generation.service.js";
+import { ProfessionTargetFrameSourceRepository } from "./profession-target-frame-source.repository.js";
+import { ProfessionTargetFrameSourceService } from "./profession-target-frame-source.service.js";
 import { PatchTaskRepository } from "./patch-task.repository.js";
 import { PatchTaskArchiveService } from "./patch-task-archive.service.js";
 import { PatchTaskService } from "./patch-task.service.js";
@@ -64,6 +72,8 @@ import { StylePackageProductionService } from "./style-package-production.servic
     JobController,
     ProfessionExecutionController,
     ProfessionSourceContextController,
+    ProfessionTargetFramePrepareController,
+    ProfessionTargetFrameGenerationController,
     StylePackageContextController,
     StylePackageProductionController,
     SharedFxTaskController,
@@ -80,6 +90,12 @@ import { StylePackageProductionService } from "./style-package-production.servic
     ProfessionModelExecutionRepository,
     ProfessionSourceContextRepository,
     ProfessionSourceContextService,
+    ProfessionTargetFrameGenerationRepository,
+    ProfessionTargetFrameGenerationService,
+    ProfessionTargetFramePrepareRepository,
+    ProfessionTargetFramePrepareService,
+    ProfessionTargetFrameSourceRepository,
+    ProfessionTargetFrameSourceService,
     StylePackageContextRepository,
     StylePackageContextService,
     StylePackageProductionRepository,

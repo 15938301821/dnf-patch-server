@@ -11,19 +11,23 @@
  * 安全边界：只有 Gemini 图片模型的 404 可进入同源固定 fallback，未知 JSON、非 PNG 和其他错误
  * 必须拒绝，测试数据不得包含真实 API Key。
  */
-import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Environment } from "../../../src/config/environment.js";
-import { OpenAiProvider } from "../../../src/modules/openai/openai.provider.js";
-
-const configuration = {
-  apiKey: "test-api-key",
-  baseUrl: "https://models.example.com/v1",
-};
-const pngBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
-const pngBase64 = pngBytes.toString("base64");
+import {
+  configuration,
+  findFetchCall,
+  imageInput,
+  jsonResponse,
+  pngBase64,
+  pngBytes,
+  provider,
+  requestBody,
+  requestJson,
+  requestMultipart,
+  requestUrl,
+  stubFetch,
+} from "./fixtures/openai-provider.fixture.js";
 
 describe("OpenAiProvider image protocol", () => {
   afterEach(() => {
@@ -434,96 +438,3 @@ describe("OpenAiProvider image protocol", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
-
-function provider(): OpenAiProvider {
-  return new OpenAiProvider(
-    new ConfigService<Environment, true>({
-      OPENAI_REQUEST_TIMEOUT_MS: 1_000,
-      OPENAI_REQUEST_MAX_RETRIES: 0,
-    }),
-  );
-}
-
-function stubFetch(
-  ...responses: Response[]
-): ReturnType<typeof vi.fn<typeof fetch>> {
-  const fetchMock = vi.fn<typeof fetch>();
-  for (const response of responses) fetchMock.mockResolvedValueOnce(response);
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
-function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-function imageInput(role: "official-source" | "generated-reference"): {
-  role: "official-source" | "generated-reference";
-  mediaType: "image/png";
-  bytes: Buffer;
-  sha256: string;
-} {
-  return {
-    role,
-    mediaType: "image/png" as const,
-    bytes: pngBytes,
-    sha256: "A".repeat(64),
-  };
-}
-
-function requestUrl(input: Parameters<typeof fetch>[0] | undefined): string {
-  if (!input) throw new Error("FETCH_REQUEST_MISSING");
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.toString();
-  return input.url;
-}
-
-function requestBody(init: RequestInit | undefined): unknown {
-  if (typeof init?.body !== "string") {
-    throw new Error("FETCH_REQUEST_BODY_MISSING");
-  }
-  const value: unknown = JSON.parse(init.body);
-  return value;
-}
-
-function findFetchCall(
-  fetchMock: ReturnType<typeof vi.fn<typeof fetch>>,
-  urlPart: string,
-): Parameters<typeof fetch> | undefined {
-  return fetchMock.mock.calls.find((call) =>
-    requestUrl(call[0]).includes(urlPart),
-  );
-}
-
-async function requestMultipart(
-  input: Parameters<typeof fetch>[0] | undefined,
-  init: RequestInit | undefined,
-): Promise<{ contentType: string; bytes: Buffer }> {
-  const request =
-    input instanceof Request
-      ? input.clone()
-      : init?.body instanceof FormData
-        ? new Request("https://multipart.test", {
-            method: "POST",
-            body: init.body,
-          })
-        : undefined;
-  if (request) {
-    return {
-      contentType: request.headers.get("content-type") ?? "",
-      bytes: Buffer.from(await request.arrayBuffer()),
-    };
-  }
-  throw new Error("FETCH_MULTIPART_BODY_MISSING");
-}
-
-async function requestJson(
-  input: Parameters<typeof fetch>[0] | undefined,
-  init: RequestInit | undefined,
-): Promise<unknown> {
-  if (input instanceof Request) return input.clone().json();
-  return requestBody(init);
-}

@@ -27,6 +27,7 @@ import {
   type FrozenProfessionSkillExecutionContext,
 } from "./profession-execution-context.js";
 import { resolvePassedProductionEvidence } from "./patch-task-skill-production-evidence.repository-support.js";
+import { resolvePassedProductionV6Evidence } from "./patch-task-skill-production-v6-evidence.repository-support.js";
 
 type Transaction = Parameters<
   Parameters<DatabaseService["database"]["transaction"]>[0]
@@ -67,11 +68,6 @@ export async function reportProfessionSkillProduction(
           return { status: "skill-production-evidence-mismatch" };
       }
     }
-    // 当前报告 DTO 和四项 Artifact provenance 只定义 V5；V3 不能借旧入口写入 passed。
-    if (gate.context.contractVersion !== 1) {
-      return { status: "skill-production-evidence-mismatch" };
-    }
-
     // 第二步：锁定单技能 production，防止并发终态覆盖；数据库行必须仍属于冻结的 Run/style/source。
     const [production] = await transaction
       .select()
@@ -91,6 +87,11 @@ export async function reportProfessionSkillProduction(
     if (!matchesProductionContext(production, gate.context, jobId)) {
       return { status: "skill-production-evidence-mismatch" };
     }
+    const expectedProductionVersion =
+      gate.context.contractVersion === 2 ? 6 : 5;
+    if (production.productionContractVersion !== expectedProductionVersion) {
+      return { status: "skill-production-evidence-mismatch" };
+    }
 
     if (input.status !== "passed") {
       await updateNonPassedProduction(
@@ -103,7 +104,31 @@ export async function reportProfessionSkillProduction(
       return { status: "accepted" };
     }
 
-    // 第三步：Worker 不再自报模型 ID；两阶段必须来自当前 attempt 且完整匹配冻结 Prompt 身份。
+    if (input.productionContractVersion !== expectedProductionVersion) {
+      return { status: "skill-production-evidence-mismatch" };
+    }
+    if (input.productionContractVersion === 6) {
+      // V6不接受单一代表模型证据；Server锁定完整逐帧集合并独立复算target-set后才写终态。
+      const evidence = await resolvePassedProductionV6Evidence(
+        transaction,
+        jobId,
+        gate.context.runId,
+        input,
+        gate.context,
+      );
+      if (evidence.status !== "accepted") return evidence;
+      await updatePassedV6Production(
+        transaction,
+        production.id,
+        jobId,
+        input,
+        evidence,
+        now,
+      );
+      return { status: "accepted" };
+    }
+
+    // V5 Worker不自报模型ID；两阶段必须来自当前attempt且完整匹配冻结Prompt身份。
     const evidence = await resolvePassedProductionEvidence(
       transaction,
       jobId,
@@ -123,6 +148,10 @@ export async function reportProfessionSkillProduction(
         attempt: input.attempt,
         modelCallId: evidence.modelCallId,
         imageAttemptId: evidence.imageAttemptId,
+        targetFrameManifestArtifactId: null,
+        targetFrameManifestSha256: null,
+        targetSetSha256: null,
+        targetFrameCount: null,
         asepriteProfileId: "aseprite-cli",
         asepriteBinarySha256: input.asepriteBinarySha256.toUpperCase(),
         asepriteAdapterSha256: input.asepriteAdapterSha256.toUpperCase(),
@@ -141,6 +170,52 @@ export async function reportProfessionSkillProduction(
     }
     return { status: "accepted" };
   });
+}
+
+/** V6一次写入逐帧集合与双ZIP上传绑定；数据库CHECK同时要求单模型字段为空。 */
+async function updatePassedV6Production(
+  transaction: Transaction,
+  productionId: string,
+  jobId: string,
+  input: Extract<
+    ReportPatchTaskSkillProductionInput,
+    { status: "passed"; productionContractVersion: 6 }
+  >,
+  evidence: Extract<
+    Awaited<ReturnType<typeof resolvePassedProductionV6Evidence>>,
+    { status: "accepted" }
+  >,
+  now: Date,
+): Promise<void> {
+  const update = await transaction
+    .update(styleSkillProductions)
+    .set({
+      jobId,
+      workerId: input.workerId,
+      leaseId: input.leaseId,
+      attempt: input.attempt,
+      modelCallId: null,
+      imageAttemptId: null,
+      targetFrameManifestArtifactId: evidence.manifestArtifactId,
+      targetFrameManifestSha256: evidence.manifestSha256,
+      targetSetSha256: evidence.targetSetSha256,
+      targetFrameCount: evidence.targetFrameCount,
+      asepriteProfileId: "aseprite-cli-v6",
+      asepriteBinarySha256: input.asepriteBinarySha256.toUpperCase(),
+      asepriteAdapterSha256: input.asepriteAdapterSha256.toUpperCase(),
+      asepriteArtifactId: evidence.projects.artifactId,
+      asepriteUploadId: evidence.projects.uploadId,
+      validationArtifactId: evidence.validation.artifactId,
+      validationUploadId: evidence.validation.uploadId,
+      status: "passed",
+      errorCode: null,
+      updatedAt: now,
+      finishedAt: now,
+    })
+    .where(eq(styleSkillProductions.id, productionId));
+  if (update[0].affectedRows !== 1) {
+    throw new Error("STYLE_SKILL_PRODUCTION_UPDATE_CONFLICT");
+  }
 }
 
 /** 非 passed 状态仍保存当前 fencing 身份；失败/阻断只接受 DTO 中的稳定错误码。 */
@@ -163,6 +238,10 @@ async function updateNonPassedProduction(
       errorCode: terminal ? input.errorCode : null,
       modelCallId: null,
       imageAttemptId: null,
+      targetFrameManifestArtifactId: null,
+      targetFrameManifestSha256: null,
+      targetSetSha256: null,
+      targetFrameCount: null,
       asepriteProfileId: null,
       asepriteBinarySha256: null,
       asepriteAdapterSha256: null,

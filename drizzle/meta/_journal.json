@@ -225,6 +225,27 @@
       "when": 1785485619412,
       "tag": "0031_minor_matthew_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1785495312564,
+      "tag": "0032_secret_shriek",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1785506154418,
+      "tag": "0033_cute_sunset_bain",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "5",
+      "when": 1785522035335,
+      "tag": "0034_flat_mad_thinker",
+      "breakpoints": true
     }
   ]
 }

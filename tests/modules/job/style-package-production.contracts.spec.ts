@@ -219,6 +219,7 @@ function validContext(): StylePackageContextV3 {
     packageProfileSha256: sha256JcsV1(packageProfile),
     skills: [
       {
+        productionContractVersion: 5,
         skillId: ids.skill,
         sourceSha256: sha("3"),
         promptSha256: sha("4"),

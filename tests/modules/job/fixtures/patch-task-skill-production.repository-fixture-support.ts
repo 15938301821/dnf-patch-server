@@ -81,6 +81,7 @@ function queryBuilder(
   const query = {
     innerJoin: vi.fn(() => query),
     where: vi.fn(() => query),
+    orderBy: vi.fn(() => query),
     limit: vi.fn(() => query),
     for: vi.fn((lock: string) => {
       recordForUpdate(lock);

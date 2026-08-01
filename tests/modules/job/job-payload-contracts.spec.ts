@@ -7,7 +7,7 @@
  *
  * 调用关系：Vitest 直接调用 parseJobPayload，不创建 Run、Job、Worker 或 Inventory。
  * 输入输出：输入为固定 JSON fixture，输出为已解析 payload 或异常；无网络、数据库和文件副作用。
- * 安全边界：本测试只证明 Server 契约拒绝路径和未注册版本，不证明 Worker 注册表或真实 NPK 可用。
+ * 安全边界：本测试只证明 Server 契约拒绝路径和跨 kind payload，不证明 Worker 注册表或真实 NPK 可用。
  */
 import { describe, expect, it } from "vitest";
 import { parseJobPayload } from "../../../src/modules/job/job-payload-contracts.js";
@@ -51,9 +51,9 @@ describe("parseJobPayload inventory v2", () => {
     ).toThrow();
   });
 
-  it("拒绝把 v2 版本用于未注册的 Profession payload", () => {
-    expect(() => parseJobPayload("profession", 2, inventoryPayload())).toThrow(
-      "JOB_PAYLOAD_CONTRACT_NOT_REGISTERED",
-    );
+  it("拒绝把 Inventory v2 payload 用作 Profession v2", () => {
+    expect(() =>
+      parseJobPayload("profession", 2, inventoryPayload()),
+    ).toThrow();
   });
 });

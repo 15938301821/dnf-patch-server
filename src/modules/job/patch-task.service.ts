@@ -18,7 +18,6 @@ import { ProfessionService } from "../profession/profession.service.js";
 import { ProjectService } from "../project/project.service.js";
 import { RunService } from "../run/run.service.js";
 import { WorkerService } from "../worker/worker.service.js";
-import type { CreateRunInput, RunCreateOptions } from "../run/run.contracts.js";
 import type {
   CreatePatchTaskInput,
   PatchTaskArtifactDownloadView,
@@ -28,7 +27,6 @@ import type {
   PatchTaskReferenceImageDownloadView,
   PatchTaskSkillPreviewDownloadView,
   PatchTaskSkillPreviewRole,
-  PatchTaskReportResult,
   PatchTaskView,
   PlannedPatchTaskSkill,
   ReportPatchTaskPackageInput,
@@ -36,13 +34,10 @@ import type {
 } from "./patch-task.contracts.js";
 import { PatchTaskRepository } from "./patch-task.repository.js";
 import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
-import type {
-  FrozenProfessionSkillExecutionContext,
-  ResolveProfessionExecutionContextResult,
-} from "./profession-execution-context.js";
+import type { FrozenProfessionSkillExecutionContext } from "./profession-execution-context.js";
 import {
   createStyleSkillProductionJobPayload,
-  type StyleSkillProductionJobPayloadV2,
+  type StyleSkillProductionJobPayload,
 } from "./style-skill-production.contracts.js";
 import type {
   ProfessionProductionProgressInput,
@@ -60,90 +55,16 @@ import {
 import {
   authorizePatchTaskReferenceImageDownload,
   authorizePatchTaskSkillPreviewDownload,
-  type PatchTaskPreviewArtifactDownloadPort,
-  type PatchTaskPreviewRepositoryPort,
 } from "./patch-task-preview-authorization.service-support.js";
-
-interface PatchTaskRepositoryPort extends PatchTaskPreviewRepositoryPort {
-  list(ownerUserId: string): Promise<PatchTaskView[]>;
-  findDetail(
-    runId: string,
-    ownerUserId: string,
-  ): Promise<PatchTaskDetailView | undefined>;
-  createPlan(
-    pack: Parameters<PatchTaskRepository["createPlan"]>[0],
-    skills: PlannedPatchTaskSkill[],
-    disposition: "dispatch" | "blocked",
-  ): Promise<void>;
-  findArtifact(
-    runId: string,
-    ownerUserId: string,
-  ): Promise<PatchTaskArtifactView | undefined>;
-  findArtifacts(
-    runId: string,
-    ownerUserId: string,
-  ): Promise<PatchTaskArtifactView[] | undefined>;
-  reportSkillProduction(
-    jobId: string,
-    input: ReportPatchTaskSkillProductionInput,
-  ): Promise<PatchTaskReportResult>;
-  reportPackage(
-    jobId: string,
-    input: ReportPatchTaskPackageInput,
-  ): Promise<PatchTaskReportResult>;
-  resolveProfessionSkillExecution(
-    jobId: string,
-    input: ProfessionSkillLeaseInput,
-  ): Promise<ResolveProfessionExecutionContextResult>;
-  resolveProfessionProductionProgress(
-    jobId: string,
-    input: ProfessionProductionProgressInput,
-  ): Promise<
-    | { status: "accepted"; progress: ProfessionProductionProgressView }
-    | {
-        status:
-          | "lease-mismatch"
-          | "job-kind-mismatch"
-          | "job-integrity-failed"
-          | "production-integrity-failed";
-      }
-  >;
-}
-
-interface ProfessionBuildContextPort {
-  getStyleBuildContext(
-    professionId: string,
-    styleId: string,
-    ownerUserId: string,
-  ): ReturnType<ProfessionService["getStyleBuildContext"]>;
-}
-
-interface FactoryLookupPort {
-  get(id: string): ReturnType<FactoryService["get"]>;
-}
-
-interface ProjectLookupPort {
-  get(id: string): ReturnType<ProjectService["get"]>;
-}
-
-interface RunCreatePort {
-  create(
-    input: CreateRunInput,
-    idempotencyKey: string,
-    options?: RunCreateOptions,
-  ): ReturnType<RunService["create"]>;
-  blockDeferredDispatch(
-    runId: string,
-  ): ReturnType<RunService["blockDeferredDispatch"]>;
-}
-
-interface PatchTaskWorkerCapabilityPort {
-  hasEnabledCapability(
-    capability: "profession" | "npk-package",
-  ): ReturnType<WorkerService["hasEnabledCapability"]>;
-}
-
-type PatchTaskArtifactDownloadPort = PatchTaskPreviewArtifactDownloadPort;
+import type {
+  FactoryLookupPort,
+  PatchTaskArtifactDownloadPort,
+  PatchTaskRepositoryPort,
+  PatchTaskWorkerCapabilityPort,
+  ProfessionBuildContextPort,
+  ProjectLookupPort,
+  RunCreatePort,
+} from "./patch-task.service-ports.js";
 
 @Injectable()
 export class PatchTaskService {
@@ -265,10 +186,13 @@ export class PatchTaskService {
       factory.config,
       "profession",
     );
-    if (professionContract?.schemaVersion !== 1) {
+    if (
+      professionContract?.schemaVersion !== 1 &&
+      professionContract?.schemaVersion !== 2
+    ) {
       throw new ConflictException({
         code: "PROFESSION_CONTRACT_REQUIRED",
-        message: "Factory 未启用 profession v1 声明式契约。",
+        message: "Factory 未启用受支持的 profession 声明式契约。",
       });
     }
     const packageContract = resolveFactoryJobContract(
@@ -297,12 +221,20 @@ export class PatchTaskService {
         message: "尚无启用的 Worker 声明最终候选 NPK 制作能力。",
       });
     }
-    let payload: StyleSkillProductionJobPayloadV2;
+    let payload: StyleSkillProductionJobPayload;
     try {
-      payload = createStyleSkillProductionJobPayload(
-        context,
-        professionContract.profileId,
-      );
+      payload =
+        professionContract.schemaVersion === 2
+          ? createStyleSkillProductionJobPayload(
+              context,
+              professionContract.profileId,
+              2,
+            )
+          : createStyleSkillProductionJobPayload(
+              context,
+              professionContract.profileId,
+              1,
+            );
     } catch {
       throw new ConflictException({
         code: "STYLE_JOB_PAYLOAD_INVALID",
@@ -344,6 +276,7 @@ export class PatchTaskService {
         },
         payload.parameters.promptPackage.skills.map(
           (skill): PlannedPatchTaskSkill => ({
+            productionContractVersion: payload.schemaVersion === 2 ? 6 : 5,
             professionId: context.profession.id,
             styleId: context.style.id,
             skillId: skill.skillId,

@@ -1,14 +1,14 @@
 /**
- * @fileoverview 定义 Profession V6 从官方 target manifest 冻结的逐帧事实表；不保存图片正文、
- * 模型执行状态、Provider 参数或本机路径，也不执行查询或 migration。
+ * @fileoverview 定义 Profession V6 从官方 target manifest 冻结的逐帧事实及其有界模型生成状态；
+ * 不保存图片正文、Provider 参数或本机路径，也不执行查询或 migration。
  * @module common/db/profession-frame-target-schema
  * @author AI生成
  * @created 2026-07-30
  * @relatedPlan N/A - 用户直接要求 V6 按官方帧尺寸生成目标图
  *
- * 调用关系：Job 模块的 target prepare Repository 在事务中写入本表，逐帧模型执行与 Worker 进度
- * 查询只读消费；DatabaseService 合并 schema，drizzle-kit 据此生成 migration。输入来自 Server 已完整
- * 复读并严格解析的 target manifest，输出是内部数据库行，不是 Worker DTO 或浏览器 ViewModel。
+ * 调用关系：Job 模块的 target prepare Repository 在事务中写入本表，逐帧模型 Repository 再以状态机
+ * 更新同一 attempt 的生成证据；DatabaseService 合并 schema，drizzle-kit 据此生成 migration。输入来自
+ * Server 已完整复读的 manifest、ModelCall 与正规化 PNG，输出是内部数据库行，不是 Worker DTO。
  * 副作用只由调用方 transaction（要么全部提交、要么全部回滚的数据库操作）产生。
  * 安全边界：Artifact 与 finalized upload session 的复合外键保留同一 Run/Job/Worker/lease/attempt
  * 归属；唯一键阻止重复帧；CHECK 固定生成、Hidden 和 LINK 的互斥证据。表中事实不能授权模型出站、
@@ -22,17 +22,38 @@ import {
   foreignKey,
   index,
   int,
+  type MySqlDateTimeBuilderInitial,
+  type MySqlVarCharBuilderInitial,
   mysqlTable,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 import { artifactUploadSessions } from "./artifact-schema.js";
-import { artifacts, jobAttempts, jobs, runs, workers } from "./schema.js";
+import {
+  artifacts,
+  imageAttempts,
+  jobAttempts,
+  jobs,
+  modelCalls,
+  runs,
+  workers,
+} from "./schema.js";
 import { styleSkillProductions } from "./studio-schema.js";
 
-const id = (name: string) => varchar(name, { length: 64 });
-const sha256 = (name: string) => varchar(name, { length: 64 });
-const utc = (name: string) => datetime(name, { mode: "date", fsp: 3 });
+type Varchar64Builder<TName extends string> = MySqlVarCharBuilderInitial<
+  TName,
+  [string, ...string[]],
+  64
+>;
+
+const id = <TName extends string>(name: TName): Varchar64Builder<TName> =>
+  varchar(name, { length: 64 });
+const sha256 = <TName extends string>(name: TName): Varchar64Builder<TName> =>
+  varchar(name, { length: 64 });
+const utc = <TName extends string>(
+  name: TName,
+): MySqlDateTimeBuilderInitial<TName> =>
+  datetime(name, { mode: "date", fsp: 3 });
 
 /**
  * 一个 Profession Job attempt 的不可变官方帧目标。
@@ -89,6 +110,25 @@ export const professionSkillFrameTargets = mysqlTable(
     linkTargetFrameIndex: int("link_target_frame_index", { unsigned: true }),
     sourceDecodedBgraSha256: sha256("source_decoded_bgra_sha256"),
     sourceAlphaSha256: sha256("source_alpha_sha256"),
+    /** Worker 从同一 BGRA 导出的官方 PNG；只有 finalize 且登记成功后整组写入。 */
+    sourcePngArtifactId: id("source_png_artifact_id"),
+    sourcePngUploadId: id("source_png_upload_id"),
+    sourcePngSha256: sha256("source_png_sha256"),
+    sourcePngByteLength: int("source_png_byte_length", { unsigned: true }),
+    sourcePngRegisteredAt: utc("source_png_registered_at"),
+    /** null 表示尚未生成；其余状态由逐帧模型 Repository 按 CHECK 允许的顺序推进。 */
+    generationStatus: varchar("generation_status", { length: 32 }),
+    generationModelCallId: id("generation_model_call_id"),
+    generationImageAttemptId: id("generation_image_attempt_id"),
+    targetPngArtifactId: id("target_png_artifact_id"),
+    targetPngSha256: sha256("target_png_sha256"),
+    targetPngByteLength: int("target_png_byte_length", { unsigned: true }),
+    targetNormalizationAlgorithm: varchar("target_normalization_algorithm", {
+      length: 100,
+    }),
+    generationErrorCode: varchar("generation_error_code", { length: 100 }),
+    generationStartedAt: utc("generation_started_at"),
+    generationFinishedAt: utc("generation_finished_at"),
     createdAt: utc("created_at").notNull(),
   },
   (table) => [
@@ -138,6 +178,18 @@ export const professionSkillFrameTargets = mysqlTable(
     check(
       "profession_skill_frame_targets_link_not_self_ck",
       sql`${table.linkTargetFrameIndex} is null or ${table.linkTargetFrameIndex} <> ${table.frameIndex}`,
+    ),
+    check(
+      "profession_skill_frame_targets_source_png_ck",
+      sql`(${table.sourcePngArtifactId} is null and ${table.sourcePngUploadId} is null and ${table.sourcePngSha256} is null and ${table.sourcePngByteLength} is null and ${table.sourcePngRegisteredAt} is null) or (${table.targetPolicy} = 'generate-same-size' and ${table.sourcePngArtifactId} is not null and ${table.sourcePngUploadId} is not null and ${table.sourcePngSha256} is not null and ${table.sourcePngByteLength} > 0 and ${table.sourcePngRegisteredAt} is not null)`,
+    ),
+    check(
+      "profession_skill_frame_targets_generation_status_ck",
+      sql`${table.generationStatus} is null or (${table.targetPolicy} = 'generate-same-size' and ${table.generationStatus} in ('reserved', 'egressing', 'persisting', 'passed', 'blocked'))`,
+    ),
+    check(
+      "profession_skill_frame_targets_generation_evidence_ck",
+      sql`(${table.generationStatus} is null and ${table.generationModelCallId} is null and ${table.generationImageAttemptId} is null and ${table.targetPngArtifactId} is null and ${table.targetPngSha256} is null and ${table.targetPngByteLength} is null and ${table.targetNormalizationAlgorithm} is null and ${table.generationErrorCode} is null and ${table.generationStartedAt} is null and ${table.generationFinishedAt} is null) or (${table.generationStatus} = 'reserved' and ${table.generationModelCallId} is null and ${table.generationImageAttemptId} is null and ${table.targetPngArtifactId} is null and ${table.targetPngSha256} is null and ${table.targetPngByteLength} is null and ${table.targetNormalizationAlgorithm} is null and ${table.generationErrorCode} is null and ${table.generationStartedAt} is not null and ${table.generationFinishedAt} is null) or (${table.generationStatus} = 'egressing' and ${table.generationModelCallId} is not null and ${table.generationImageAttemptId} is null and ${table.targetPngArtifactId} is null and ${table.targetPngSha256} is null and ${table.targetPngByteLength} is null and ${table.targetNormalizationAlgorithm} is null and ${table.generationErrorCode} is null and ${table.generationStartedAt} is not null and ${table.generationFinishedAt} is null) or (${table.generationStatus} = 'persisting' and ${table.generationModelCallId} is not null and ${table.generationImageAttemptId} is null and ${table.targetPngArtifactId} is null and ${table.targetPngSha256} is not null and ${table.targetPngByteLength} > 0 and ${table.targetNormalizationAlgorithm} is not null and ${table.generationErrorCode} is null and ${table.generationStartedAt} is not null and ${table.generationFinishedAt} is null) or (${table.generationStatus} = 'passed' and ${table.generationModelCallId} is not null and ${table.generationImageAttemptId} is not null and ${table.targetPngArtifactId} is not null and ${table.targetPngSha256} is not null and ${table.targetPngByteLength} > 0 and ${table.targetNormalizationAlgorithm} is not null and ${table.generationErrorCode} is null and ${table.generationStartedAt} is not null and ${table.generationFinishedAt} is not null) or (${table.generationStatus} = 'blocked' and ${table.generationImageAttemptId} is null and ${table.targetPngArtifactId} is null and ${table.targetPngSha256} is null and ${table.targetPngByteLength} is null and ${table.targetNormalizationAlgorithm} is null and ${table.generationErrorCode} is not null and ${table.generationStartedAt} is not null and ${table.generationFinishedAt} is not null)`,
     ),
     foreignKey({
       columns: [table.runId, table.jobId],
@@ -209,6 +261,47 @@ export const professionSkillFrameTargets = mysqlTable(
         table.frameIndex,
       ],
       name: "profession_skill_frame_targets_link_target_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.sourcePngArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "profession_skill_frame_targets_source_png_artifact_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.generationModelCallId],
+      foreignColumns: [modelCalls.runId, modelCalls.id],
+      name: "profession_skill_frame_targets_model_call_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.generationImageAttemptId],
+      foreignColumns: [imageAttempts.runId, imageAttempts.id],
+      name: "profession_skill_frame_targets_image_attempt_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.runId, table.targetPngArtifactId],
+      foreignColumns: [artifacts.runId, artifacts.id],
+      name: "profession_skill_frame_targets_target_png_artifact_run_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.sourcePngUploadId,
+        table.runId,
+        table.jobId,
+        table.workerId,
+        table.leaseId,
+        table.attempt,
+        table.sourcePngArtifactId,
+      ],
+      foreignColumns: [
+        artifactUploadSessions.id,
+        artifactUploadSessions.runId,
+        artifactUploadSessions.jobId,
+        artifactUploadSessions.workerId,
+        artifactUploadSessions.leaseId,
+        artifactUploadSessions.attempt,
+        artifactUploadSessions.artifactId,
+      ],
+      name: "profession_skill_frame_targets_source_png_upload_fk",
     }).onDelete("restrict"),
   ],
 );

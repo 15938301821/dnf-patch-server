@@ -1,6 +1,6 @@
 /**
- * @fileoverview 关闭当前 Job attempt，并使同一 attempt 尚未完成的 Profession 模型执行失效；
- * 不领取新任务、不决定 Job/Run 终态，也不提交独立事务。
+ * @fileoverview 关闭当前 Job attempt，并使同一 attempt 尚未完成的 Profession 模型执行与
+ * V6逐帧生成失效；不领取新任务、不决定 Job/Run 终态，也不提交独立事务。
  * @module modules/job
  * @author AI生成
  * @created 2026-07-24
@@ -13,7 +13,8 @@
  * persisting 执行标记为 indeterminate，防止旧 lease 在重领后继续写入。
  */
 import { and, eq, inArray } from "drizzle-orm";
-import { jobAttempts } from "../../common/db/schema.js";
+import { professionSkillFrameTargets } from "../../common/db/profession-frame-target-schema.js";
+import { jobAttempts, modelCalls } from "../../common/db/schema.js";
 import type { jobs } from "../../common/db/schema.js";
 import { professionSkillModelExecutions } from "../../common/db/profession-model-execution-schema.js";
 import type { JobTransaction } from "./job-run-event.repository-support.js";
@@ -47,6 +48,7 @@ export async function closeJobAttempt(
       ),
     );
   await invalidateProfessionModelExecutions(transaction, job, now);
+  await invalidateProfessionTargetFrameGenerations(transaction, job, now);
 }
 
 /**
@@ -78,6 +80,75 @@ export async function invalidateProfessionModelExecutions(
           "egressing",
           "persisting",
         ]),
+      ),
+    );
+}
+
+/**
+ * 关闭旧attempt仍在reserved/egressing/persisting的V6帧，并终结它们尚未完成的模型调用。
+ * @param transaction 调用方持有Job行锁的事务；先锁目标帧、再更新ModelCall，保持生成链锁序一致。
+ * @param job 当前关闭的Job与attempt；passed/blocked帧及其他attempt不在查询范围内。
+ * @param now 数据库统一时间，同时作为逐帧与ModelCall终结时间。
+ */
+async function invalidateProfessionTargetFrameGenerations(
+  transaction: JobTransaction,
+  job: typeof jobs.$inferSelect,
+  now: Date,
+): Promise<void> {
+  if (job.attemptCount === 0) return;
+  const activeStatuses = ["reserved", "egressing", "persisting"] as const;
+  const activeTargets = await transaction
+    .select({
+      id: professionSkillFrameTargets.id,
+      modelCallId: professionSkillFrameTargets.generationModelCallId,
+    })
+    .from(professionSkillFrameTargets)
+    .where(
+      and(
+        eq(professionSkillFrameTargets.jobId, job.id),
+        eq(professionSkillFrameTargets.attempt, job.attemptCount),
+        inArray(professionSkillFrameTargets.generationStatus, activeStatuses),
+      ),
+    )
+    .for("update");
+  if (activeTargets.length === 0) return;
+
+  const modelCallIds = activeTargets.flatMap((target) =>
+    target.modelCallId ? [target.modelCallId] : [],
+  );
+  if (modelCallIds.length > 0) {
+    await transaction
+      .update(modelCalls)
+      .set({
+        status: "abandoned",
+        errorCode: "MODEL_CALL_ABANDONED_AFTER_ATTEMPT_CLOSED",
+        finishedAt: now,
+      })
+      .where(
+        and(
+          inArray(modelCalls.id, modelCallIds),
+          eq(modelCalls.status, "running"),
+        ),
+      );
+  }
+
+  await transaction
+    .update(professionSkillFrameTargets)
+    .set({
+      generationStatus: "blocked",
+      generationErrorCode: "PROFESSION_EXECUTION_ATTEMPT_CLOSED",
+      targetPngSha256: null,
+      targetPngByteLength: null,
+      targetNormalizationAlgorithm: null,
+      generationFinishedAt: now,
+    })
+    .where(
+      and(
+        inArray(
+          professionSkillFrameTargets.id,
+          activeTargets.map((target) => target.id),
+        ),
+        inArray(professionSkillFrameTargets.generationStatus, activeStatuses),
       ),
     );
 }

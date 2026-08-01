@@ -12,10 +12,17 @@
  * 安全边界：有效登录不等于拥有目标 Run；首个查询必须同时约束 ownerUserId，失败后禁止继续读取
  * 技能或模型信息。后续查询只消费已通过所有权检查的同一 runId，且不把内部关联 ID 放入响应。
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { DatabaseService } from "../../common/db/database.service.js";
+import { professionSkillFrameTargets } from "../../common/db/profession-frame-target-schema.js";
 import { professionSkillModelExecutions } from "../../common/db/profession-model-execution-schema.js";
-import { artifacts, modelCalls, runs } from "../../common/db/schema.js";
+import {
+  artifacts,
+  jobAttempts,
+  jobs,
+  modelCalls,
+  runs,
+} from "../../common/db/schema.js";
 import {
   professionSkills,
   professions,
@@ -28,7 +35,9 @@ import type { PatchTaskDetailView } from "./patch-task.contracts.js";
 import {
   buildPatchTaskDetail,
   type PatchTaskDetailExecutionRecord,
+  type PatchTaskDetailJobRecord,
   type PatchTaskDetailSkillRecord,
+  type PatchTaskDetailTargetFrameRecord,
 } from "./patch-task-detail.js";
 import type { PatchTaskDetailModelCallRecord } from "./patch-task-model-throughput.js";
 
@@ -75,12 +84,22 @@ export async function findPatchTaskDetail(
   if (!task) return undefined;
 
   // 第二步：所有权已确认后并行读取同 Run 的有限投影；集合顺序和状态含义由纯映射层收口。
-  const [skills, executions, calls] = await Promise.all([
-    readSkills(connection, runId),
-    readExecutions(connection, runId),
-    readModelCalls(connection, runId),
-  ]);
-  return buildPatchTaskDetail({ task, skills, executions, modelCalls: calls });
+  const [skills, executions, calls, jobRecords, targetFrames] =
+    await Promise.all([
+      readSkills(connection, runId),
+      readExecutions(connection, runId),
+      readModelCalls(connection, runId),
+      readJobRecords(connection, runId),
+      readTargetFrames(connection, runId),
+    ]);
+  return buildPatchTaskDetail({
+    task,
+    skills,
+    executions,
+    modelCalls: calls,
+    jobs: jobRecords,
+    targetFrames,
+  });
 }
 
 /** 读取风格冻结顺序中的技能名称和生产状态，不读取结构化 Prompt。 */
@@ -143,6 +162,64 @@ async function readExecutions(
       ),
     )
     .where(eq(professionSkillModelExecutions.runId, runId));
+}
+
+/**
+ * 读取当前 Run 的 Job 与当前 attempt 错误。
+ * attempt=0 时 LEFT JOIN 必须保留 Job 行，使详情能区分“上游联动 blocked”和“Package 实际执行失败”。
+ */
+async function readJobRecords(
+  connection: DatabaseService,
+  runId: string,
+): Promise<PatchTaskDetailJobRecord[]> {
+  return connection.database
+    .select({
+      kind: jobs.kind,
+      status: jobs.status,
+      attempt: jobs.attemptCount,
+      errorCode: jobAttempts.errorCode,
+    })
+    .from(jobs)
+    .leftJoin(
+      jobAttempts,
+      and(
+        eq(jobAttempts.jobId, jobs.id),
+        eq(jobAttempts.attempt, jobs.attemptCount),
+      ),
+    )
+    .where(eq(jobs.runId, runId));
+}
+
+/**
+ * 按技能与 attempt 聚合 V6 帧准备证据。
+ * target 行来自原子提交的 manifest；sourceFrameCount 只统计需要生成目标图且已登记 PNG 的帧，
+ * 避免 Hidden/LINK 帧没有独立 PNG 时被误判为冻结失败。
+ */
+async function readTargetFrames(
+  connection: DatabaseService,
+  runId: string,
+): Promise<PatchTaskDetailTargetFrameRecord[]> {
+  const rows = await connection.database
+    .select({
+      skillId: professionSkillFrameTargets.skillId,
+      attempt: professionSkillFrameTargets.attempt,
+      targetFrameCount: sql<string>`count(${professionSkillFrameTargets.id})`,
+      generationFrameCount: sql<string>`sum(case when ${professionSkillFrameTargets.targetPolicy} = 'generate-same-size' then 1 else 0 end)`,
+      sourceFrameCount: sql<string>`sum(case when ${professionSkillFrameTargets.targetPolicy} = 'generate-same-size' and ${professionSkillFrameTargets.sourcePngArtifactId} is not null then 1 else 0 end)`,
+    })
+    .from(professionSkillFrameTargets)
+    .where(eq(professionSkillFrameTargets.runId, runId))
+    .groupBy(
+      professionSkillFrameTargets.skillId,
+      professionSkillFrameTargets.attempt,
+    );
+  return rows.map((row) => ({
+    skillId: row.skillId,
+    attempt: row.attempt,
+    targetFrameCount: Number(row.targetFrameCount),
+    generationFrameCount: Number(row.generationFrameCount),
+    sourceFrameCount: Number(row.sourceFrameCount),
+  }));
 }
 
 /** 读取模型调用的脱敏计量与时间，不读取请求/响应哈希、endpoint 或 Provider response ID。 */

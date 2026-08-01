@@ -32,8 +32,9 @@ describe("style skill production V2 contract", () => {
 
   it("rejects V3 when target policy is missing or paired with contract v1", () => {
     const payload = validV3Payload();
-    const { targetFramePolicy: _removed, ...parameters } = payload.parameters;
+    const { targetFramePolicy, ...parameters } = payload.parameters;
 
+    expect(targetFramePolicy).toBeDefined();
     expect(() =>
       parseJobPayload("profession", 2, { ...payload, parameters }),
     ).toThrow();

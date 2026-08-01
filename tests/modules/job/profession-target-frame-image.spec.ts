@@ -1,6 +1,6 @@
 /**
  * @fileoverview 验证 V6 Provider 画布只能等比正规化为官方同尺寸 target，并逐字节保留官方 Alpha。
- * 测试使用 Sharp 内存图片替代外部模型，不证明 Provider 会遵守透明 padding Prompt。
+ * 测试使用 Sharp 内存图片替代外部模型，不证明 Provider 居中构图的视觉质量。
  */
 import { createHash } from "node:crypto";
 import sharp from "sharp";
@@ -96,7 +96,7 @@ describe("normalizeProfessionTargetFrame", () => {
     expect(decoded.data.subarray(0, 4)).toEqual(Buffer.from([0, 0, 0, 0]));
   });
 
-  it("rejects visible model pixels outside the exact-aspect content rectangle", async () => {
+  it("discards visible pixels outside the exact-aspect content rectangle", async () => {
     const target = { width: 4, height: 3 };
     const requested = selectRequestedImageCanvas(target);
     const geometry = createImageTargetGeometry(target, requested, {
@@ -105,16 +105,26 @@ describe("normalizeProfessionTargetFrame", () => {
     });
     const sourceRgba = Buffer.alloc(4 * 3 * 4, 255);
     const providerRgba = Buffer.alloc(12 * 8 * 4);
-    providerRgba[3] = 255;
+    providerRgba.set([255, 0, 0, 255], 0);
+    for (let y = 0; y < geometry.contentRect.height; y += 1) {
+      for (let x = 0; x < geometry.contentRect.width; x += 1) {
+        const offset =
+          ((geometry.contentRect.top + y) * 12 +
+            geometry.contentRect.left +
+            x) *
+          4;
+        providerRgba.set([20, 80, 160, 255], offset);
+      }
+    }
 
-    await expect(
-      normalizeProfessionTargetFrame({
-        sourcePng: await rawPng(sourceRgba, 4, 3),
-        providerPng: await rawPng(providerRgba, 12, 8),
-        sourceAlphaSha256: alphaSha256(sourceRgba),
-        geometry,
-      }),
-    ).rejects.toBeInstanceOf(ProfessionTargetFrameImageError);
+    const result = await normalizeProfessionTargetFrame({
+      sourcePng: await rawPng(sourceRgba, 4, 3),
+      providerPng: await rawPng(providerRgba, 12, 8),
+      sourceAlphaSha256: alphaSha256(sourceRgba),
+      geometry,
+    });
+    const decoded = await sharp(result.bytes).ensureAlpha().raw().toBuffer();
+    expect(decoded.subarray(0, 4)).toEqual(Buffer.from([20, 80, 160, 255]));
   });
 
   it("rejects a source Alpha digest that is not bound to the official frame", async () => {

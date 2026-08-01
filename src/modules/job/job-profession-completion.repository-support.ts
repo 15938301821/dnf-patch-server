@@ -90,7 +90,10 @@ export async function advanceProfessionPackageStage(
   }
   const packageJob = packageJobs[0];
   if (packageJob) {
-    if (packageJob.status !== "queued" || packageJob.dispatchReadyAt !== null) {
+    if (
+      packageJob.status !== "queued" ||
+      (jobStatus === "passed" && packageJob.dispatchReadyAt !== null)
+    ) {
       throw new Error("STYLE_PACKAGE_JOB_NOT_DEFERRED");
     }
     const packageJobUpdate =
@@ -104,7 +107,7 @@ export async function advanceProfessionPackageStage(
         and(
           eq(jobs.id, packageJob.id),
           eq(jobs.status, "queued"),
-          isNull(jobs.dispatchReadyAt),
+          ...(jobStatus === "passed" ? [isNull(jobs.dispatchReadyAt)] : []),
         ),
       );
     if (result[0].affectedRows !== 1) {

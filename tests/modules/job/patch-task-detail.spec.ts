@@ -20,6 +20,71 @@ import {
 } from "../../../src/modules/job/patch-task-model-throughput.js";
 
 describe("buildPatchTaskDetail", () => {
+  it("按 V6 帧证据展示准备完成并保持未领取 Package 为等待", () => {
+    const skillId = "11111111-1111-4111-8111-111111111111";
+    const detail = buildPatchTaskDetail({
+      task: task("blocked", "blocked"),
+      skills: [
+        {
+          skillId,
+          displayName: "技术组件 illusionslash",
+          ordinal: 0,
+          status: "planned",
+          attempt: null,
+          errorCode: null,
+        },
+      ],
+      executions: [],
+      modelCalls: [],
+      jobs: [
+        {
+          kind: "profession",
+          status: "blocked",
+          attempt: 1,
+          errorCode: "PROFESSION_TARGET_FRAME_EXECUTION_UNAVAILABLE",
+        },
+        {
+          kind: "npk-package",
+          status: "blocked",
+          attempt: 0,
+          errorCode: null,
+        },
+      ],
+      targetFrames: [
+        {
+          skillId,
+          attempt: 1,
+          targetFrameCount: 211,
+          generationFrameCount: 211,
+          sourceFrameCount: 211,
+        },
+      ],
+    });
+
+    expect(detail).toMatchObject({
+      currentStage: "skill-production",
+      progress: 45,
+      workflow: [
+        { key: "planning", status: "passed" },
+        { key: "skill-production", status: "blocked" },
+        { key: "package-validation", status: "pending" },
+        { key: "complete", status: "blocked" },
+      ],
+      skills: [
+        {
+          status: "blocked",
+          errorCode: "PROFESSION_TARGET_FRAME_EXECUTION_UNAVAILABLE",
+          stages: [
+            { key: "target-manifest", status: "passed" },
+            { key: "source-frame-freeze", status: "passed" },
+            { key: "target-frame-generation", status: "blocked" },
+            { key: "runtime-validation", status: "pending" },
+          ],
+        },
+      ],
+    });
+  });
+
   it("按当前 attempt 映射模型、适配与验证阶段", () => {
     const detail = buildPatchTaskDetail({
       task: task("running", "queued"),

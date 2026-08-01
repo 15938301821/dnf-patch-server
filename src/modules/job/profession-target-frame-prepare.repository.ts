@@ -41,6 +41,8 @@ import {
 } from "./profession-target-frame-prepare.contracts.js";
 import {
   createProfessionTargetFrameRows,
+  matchesProfessionTargetFrameProvenance,
+  professionTargetFrameManifestLogicalName,
   resolvePreparedProfessionTargetFrames,
   type PreparedProfessionTargetFrameExpectation,
 } from "./profession-target-frame-prepare.repository-support.js";
@@ -255,7 +257,14 @@ async function resolveLockedPreparation(
       gate.context.skill.sourceEvidence.sourceFrameManifestArtifactId ||
     production.promptSha256.toUpperCase() !==
       gate.context.skill.promptSha256.toUpperCase() ||
-    production.status !== "planned" ||
+    !(
+      production.status === "planned" ||
+      (production.status === "generating" &&
+        production.jobId === job.id &&
+        production.workerId === input.workerId &&
+        production.leaseId === input.leaseId &&
+        production.attempt === input.attempt)
+    ) ||
     production.finishedAt !== null
   ) {
     return { status: "skill-production-evidence-mismatch" };
@@ -308,7 +317,9 @@ async function resolveLockedPreparation(
     professionTargetFrameManifestProvenanceSchema.safeParse(
       target?.artifactProvenance,
     );
-  const expectedLogicalName = targetManifestLogicalName(input.skillId);
+  const expectedLogicalName = professionTargetFrameManifestLogicalName(
+    input.skillId,
+  );
   if (
     !target ||
     !targetProvenance.success ||
@@ -326,7 +337,7 @@ async function resolveLockedPreparation(
     target.artifactByteLength !== input.manifestByteLength ||
     target.uploadSha256.toUpperCase() !== input.manifestSha256 ||
     target.artifactSha256.toUpperCase() !== input.manifestSha256 ||
-    !matchesTargetProvenance(
+    !matchesProfessionTargetFrameProvenance(
       targetProvenance.data,
       jobId,
       job.runId,
@@ -436,35 +447,6 @@ async function resolveLockedPreparation(
       ),
     },
   };
-}
-
-function targetManifestLogicalName(skillId: string): string {
-  return `profession-target-frame-manifest-${skillId}.json`;
-}
-
-function matchesTargetProvenance(
-  provenance: ProfessionTargetFrameManifestProvenance,
-  jobId: string,
-  runId: string,
-  jobPayloadSha256: string,
-  input: PrepareProfessionTargetFramesInput,
-  source: {
-    sourceRunId: string;
-    sourceInventoryId: string;
-    sourceFrameManifestArtifactId: string;
-  },
-): boolean {
-  return (
-    provenance.jobId === jobId &&
-    provenance.runId === runId &&
-    provenance.jobPayloadSha256 === jobPayloadSha256.toUpperCase() &&
-    provenance.attempt === input.attempt &&
-    provenance.skillId === input.skillId &&
-    provenance.sourceRunId === source.sourceRunId &&
-    provenance.sourceInventoryId === source.sourceInventoryId &&
-    provenance.sourceFrameManifestArtifactId ===
-      source.sourceFrameManifestArtifactId
-  );
 }
 
 function expectedRows(

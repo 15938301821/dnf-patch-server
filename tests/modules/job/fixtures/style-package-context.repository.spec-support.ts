@@ -19,6 +19,7 @@ export interface ArtifactFixture {
 
 export interface ProductionFixture {
   skillId: string;
+  productionContractVersion: 5 | 6;
   professionId: string;
   styleId: string;
   jobId: string;
@@ -28,7 +29,11 @@ export interface ProductionFixture {
   sourceRunId: string;
   sourceFrameManifestArtifactId: string;
   promptSha256: string;
-  imageAttemptId: string;
+  imageAttemptId: string | null;
+  targetFrameManifestArtifactId: string | null;
+  targetFrameManifestSha256: string | null;
+  targetSetSha256: string | null;
+  targetFrameCount: number | null;
   asepriteProfileId: string;
   asepriteBinarySha256: string;
   asepriteAdapterSha256: string;

@@ -12,8 +12,8 @@
  * 输入输出：输入是受控 kind、Factory 注册版本与未知 JSON；输出是对应的已解析联合类型，失败时抛出 Zod/
  * 注册错误，不返回 Worker 命令、工具路径、游戏资源或数据库信息。
  * 副作用：纯内存 schema 解析，无网络、数据库、对象存储、事件或进程副作用。
- * 安全边界：kind 在 enum 中出现不等于可任意解析；仅 schemaVersion=1 且本表显式注册的契约可接受。
- * `profession`、`shared-fx`、`npk-package` 使用更具体的冻结 payload，其他 kind 只能使用有界声明式 v1 结构。
+ * 安全边界：kind 在 enum 中出现不等于可任意解析；只有本表显式注册的 kind/version 组合可接受。
+ * `profession`、`inventory`、`shared-fx`、`npk-package` 使用更具体的冻结 payload，其他 kind 只能使用有界声明式 v1 结构。
  */
 import { z } from "zod";
 import { clientIdSchema, sha256Schema } from "../../common/contracts/index.js";
@@ -97,7 +97,7 @@ export type RegisteredJobPayloadV1 = RegisteredJobPayload;
 /**
  * 解析 Factory 已冻结的 Job payload。
  * @param kind Factory 允许的 Job kind；调用方仍需先确认该 kind 位于 Factory.allowedJobKinds。
- * @param schemaVersion Factory jobContracts 中冻结的版本，当前只注册版本 1。
+ * @param schemaVersion Factory jobContracts 中冻结的版本；Inventory 与 Profession 显式注册版本 2，其余组合必须拒绝。
  * @param payload 不可信 JSON，必须在执行前解析；不能从类型断言绕过本函数。
  * @returns 对应 kind 的已解析 RegisteredJobPayloadV1。
  * @throws JOB_PAYLOAD_CONTRACT_NOT_REGISTERED 或 Zod 解析错误，当版本/kind 未注册或字段不安全时抛出。

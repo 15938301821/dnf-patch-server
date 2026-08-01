@@ -15,15 +15,11 @@
  * 状态或残留 lease 下失败关闭，防止任务仍执行时从用户视图消失。
  */
 import { Injectable } from "@nestjs/common";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { hasExactJobLease } from "../../common/contracts/index.js";
 import { DatabaseService } from "../../common/db/database.service.js";
-import { artifacts, jobs, runs } from "../../common/db/schema.js";
-import {
-  professions,
-  professionStyles,
-  styleSkillProductions,
-} from "../../common/db/studio-schema.js";
+import { jobs, runs } from "../../common/db/schema.js";
+import { styleSkillProductions } from "../../common/db/studio-schema.js";
 import { stylePackages } from "../../common/db/style-package-schema.js";
 import type {
   PatchTaskArtifactView,
@@ -38,10 +34,6 @@ import type {
   ReportPatchTaskPackageInput,
   ReportPatchTaskSkillProductionInput,
 } from "./patch-task.contracts.js";
-import {
-  mapPatchTaskProgress,
-  mapPatchTaskStatus,
-} from "./patch-task-status.js";
 import type { ProfessionSkillLeaseInput } from "./profession-execution.contracts.js";
 import type { ResolveProfessionExecutionContextResult } from "./profession-execution-context.js";
 import { databaseNow } from "./job-run-event.repository-support.js";
@@ -56,6 +48,7 @@ import type {
 import { findPatchTaskDetail } from "./patch-task-detail.repository-support.js";
 import { findPatchTaskReferenceImage } from "./patch-task-reference-image.repository-support.js";
 import { findPatchTaskSkillPreview } from "./patch-task-reference-image.repository-support.js";
+import { findPatchTasks } from "./patch-task-list.repository-support.js";
 
 /** 归档命令的稳定持久化结果；Service 据此映射 404、409 或幂等成功。 */
 export type PatchTaskArchiveResult = "archived" | "not-found" | "active";
@@ -109,6 +102,7 @@ export class PatchTaskRepository {
       await transaction.insert(styleSkillProductions).values(
         skills.map((skill) => ({
           id: crypto.randomUUID(),
+          productionContractVersion: skill.productionContractVersion,
           professionId: skill.professionId,
           styleId: skill.styleId,
           skillId: skill.skillId,
@@ -141,64 +135,7 @@ export class PatchTaskRepository {
   }
 
   async list(ownerUserId: string): Promise<PatchTaskView[]> {
-    const rows = await this.connection.database
-      .select({
-        id: runs.id,
-        professionName: professions.name,
-        styleName: professionStyles.name,
-        runStatus: runs.status,
-        packageStatus: stylePackages.status,
-        createdAt: runs.createdAt,
-        packageArtifactId: stylePackages.packageArtifactId,
-        artifactName: artifacts.logicalName,
-        totalSkills: sql<number>`count(${styleSkillProductions.id})`,
-        passedSkills: sql<number>`sum(case when ${styleSkillProductions.status} = 'passed' then 1 else 0 end)`,
-      })
-      .from(stylePackages)
-      .innerJoin(runs, eq(runs.id, stylePackages.runId))
-      .innerJoin(professions, eq(professions.id, stylePackages.professionId))
-      .innerJoin(
-        professionStyles,
-        eq(professionStyles.id, stylePackages.styleId),
-      )
-      .leftJoin(
-        artifacts,
-        and(
-          eq(artifacts.runId, stylePackages.runId),
-          eq(artifacts.id, stylePackages.packageArtifactId),
-        ),
-      )
-      .leftJoin(
-        styleSkillProductions,
-        eq(styleSkillProductions.runId, stylePackages.runId),
-      )
-      .where(and(eq(runs.ownerUserId, ownerUserId), isNull(runs.archivedAt)))
-      .groupBy(
-        runs.id,
-        professions.name,
-        professionStyles.name,
-        runs.status,
-        stylePackages.status,
-        runs.createdAt,
-        stylePackages.packageArtifactId,
-        artifacts.logicalName,
-      )
-      .orderBy(asc(runs.createdAt));
-    return rows.map((row) => ({
-      id: row.id,
-      professionName: row.professionName,
-      styleName: row.styleName,
-      status: mapPatchTaskStatus(row.runStatus, row.packageStatus),
-      progress: mapPatchTaskProgress(
-        row.totalSkills,
-        row.passedSkills,
-        row.runStatus,
-        row.packageStatus,
-      ),
-      createdAt: row.createdAt.toISOString(),
-      ...(row.artifactName ? { artifactName: row.artifactName } : {}),
-      artifactAvailable: row.packageArtifactId !== null,
-    }));
+    return findPatchTasks(this.connection, ownerUserId);
   }
 
   /**

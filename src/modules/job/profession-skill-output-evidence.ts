@@ -13,6 +13,12 @@
  */
 import { z } from "zod";
 import { sha256Schema } from "../../common/contracts/index.js";
+import {
+  targetProjectsProvenanceSchema,
+  targetResultPreviewProvenanceSchema,
+  targetSourcePreviewProvenanceSchema,
+  targetValidationProvenanceSchema,
+} from "./profession-v6-output-evidence.js";
 
 const uppercaseSha256Schema = sha256Schema.regex(/^[A-F0-9]{64}$/u);
 
@@ -255,6 +261,10 @@ const readableHistoricalV4CreativeResultPreviewProvenanceSchema = z
 /** 当前生产入口专用联合；调用方不能借历史读取联合放宽 V5 kind 与 Quality V5 的绑定。 */
 export const currentProfessionSkillOutputProvenanceSchema =
   z.discriminatedUnion("kind", [
+    targetProjectsProvenanceSchema,
+    targetValidationProvenanceSchema,
+    targetSourcePreviewProvenanceSchema,
+    targetResultPreviewProvenanceSchema,
     currentCreativeProjectsProvenanceSchema,
     currentCreativeValidationProvenanceSchema,
     currentCreativeSourcePreviewProvenanceSchema,
@@ -390,6 +400,10 @@ const legacyResultPreviewProvenanceSchema = z
 export const professionSkillOutputProvenanceSchema = z.discriminatedUnion(
   "kind",
   [
+    targetProjectsProvenanceSchema,
+    targetValidationProvenanceSchema,
+    targetSourcePreviewProvenanceSchema,
+    targetResultPreviewProvenanceSchema,
     currentCreativeProjectsProvenanceSchema,
     currentCreativeValidationProvenanceSchema,
     currentCreativeSourcePreviewProvenanceSchema,

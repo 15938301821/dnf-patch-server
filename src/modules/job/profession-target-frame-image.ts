@@ -9,7 +9,7 @@
  * 调用关系：逐帧模型 Service 从私有对象存储读取官方源 PNG，取得 OpenAiService 返回的模型 PNG
  * 与 ImageTargetGeometry 后调用本模块；输出字节随后进入 Artifact/ImageAttempt 原子持久化。
  * 副作用仅为内存图片解码、统一缩放和 PNG 编码。
- * 安全边界：Provider 内容矩形之外必须完全透明，矩形宽高比已由几何模块证明与官方帧一致；
+ * 安全边界：Provider 离散画布只消费与官方帧同宽高比的居中矩形，矩形外像素不会进入输出；
  * 最终 Alpha 逐字节取自官方源，透明像素 RGB 清零。任一尺寸、Alpha 摘要或可见内容不变量失败关闭。
  */
 import { createHash } from "node:crypto";
@@ -80,9 +80,8 @@ export async function normalizeProfessionTargetFrame(
     ) {
       throw new Error("TARGET_FRAME_IDENTITY_INVALID");
     }
-    assertTransparentOutsideContent(provider.data, provider.width, geometry);
-
-    // 几何模块已证明两个轴是同一比例；这里使用固定 Lanczos3 内核执行唯一一次 RGB 重采样。
+    // Provider 只能返回离散画布，可能不遵循透明留白 Prompt；矩形外区域被确定性丢弃，
+    // 矩形本身已由几何模块证明与官方帧同宽高比，因此不会发生非等比拉伸。
     const resized = await sharp(provider.data, {
       raw: { width: provider.width, height: provider.height, channels: 4 },
     })
@@ -181,29 +180,6 @@ async function decodeRgba(bytes: Uint8Array): Promise<{
     width: decoded.info.width,
     height: decoded.info.height,
   };
-}
-
-/** 拒绝内容矩形外任何可见像素，保证固定裁切不会静默截断模型内容。 */
-function assertTransparentOutsideContent(
-  data: Uint8Array,
-  width: number,
-  geometry: ImageTargetGeometry,
-): void {
-  const right = geometry.contentRect.left + geometry.contentRect.width;
-  const bottom = geometry.contentRect.top + geometry.contentRect.height;
-  for (let index = 0; index < data.byteLength / 4; index += 1) {
-    const x = index % width;
-    const y = Math.floor(index / width);
-    if (
-      (x < geometry.contentRect.left ||
-        x >= right ||
-        y < geometry.contentRect.top ||
-        y >= bottom) &&
-      data[index * 4 + 3] !== 0
-    ) {
-      throw new Error("TARGET_FRAME_CONTENT_CROPPED");
-    }
-  }
 }
 
 function alphaSha256(bytes: Uint8Array): string {
